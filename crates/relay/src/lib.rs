@@ -2,7 +2,7 @@
 //!
 //! Shared by the `bouncer-hook` relay (client side) and `bouncer-core`'s server.
 //! Windows: a named pipe whose name carries the user's SID. macOS: a Unix socket
-//! in a per-user `0700` folder. Both ends check that the peer is the same user.
+//! in a per-user `0700` folder under the home folder. Both ends check that the peer is the same user.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -35,11 +35,7 @@ fn endpoint_with(over: Option<OsString>) -> Option<PathBuf> {
     #[cfg(windows)]
     return Some(format!(r"\\.\pipe\bouncer-{}", win::current_user_sid()?).into());
     #[cfg(unix)]
-    return Some(
-        std::env::temp_dir()
-            .join(format!("bouncer-{}", unix::uid()))
-            .join("bouncer.sock"),
-    );
+    return unix::socket_path(std::env::var_os("HOME"));
 }
 
 #[cfg(test)]
