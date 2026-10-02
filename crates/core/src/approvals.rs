@@ -25,6 +25,9 @@ pub const WAIT: Duration =
 /// Allow is refused this soon after a request is queued.
 pub const ARM: Duration = Duration::from_millis(600);
 
+/// Status of a session whose request went to Claude Code's own prompt.
+const IN_TERMINAL: &str = "asks in terminal";
+
 struct Session {
     id: String,
     agent: &'static str,
@@ -67,6 +70,7 @@ impl State {
     }
 
     fn track(&mut self, event: &Event) {
+        let paused = self.paused;
         if event.kind == "SessionEnd" {
             self.sessions.retain(|s| s.id != event.session);
             return;
@@ -77,6 +81,7 @@ impl State {
             session.tool.clone_from(&event.tool);
         }
         session.status = match event.kind.as_str() {
+            "PermissionRequest" if paused => IN_TERMINAL,
             "PermissionRequest" => "needs you",
             "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => "working",
             "Stop" => "idle",
@@ -84,8 +89,8 @@ impl State {
         };
     }
 
-    /// Removes a request from the queue; its session goes back to "working".
-    fn take(&mut self, id: &str) -> Option<Pending> {
+    /// Removes a request from the queue and gives its session `status`.
+    fn take(&mut self, id: &str, status: &'static str) -> Option<Pending> {
         let i = self.queue.iter().position(|p| p.id == id)?;
         let pending = self.queue.remove(i)?;
         if let Some(s) = self
@@ -93,7 +98,7 @@ impl State {
             .iter_mut()
             .find(|s| s.id == pending.event.session)
         {
-            s.status = "working";
+            s.status = status;
         }
         Some(pending)
     }
@@ -148,7 +153,7 @@ impl Desk {
         self.publish();
         let id = id?;
         let answer = rx.recv_timeout(self.wait).ok();
-        if answer.is_none() && self.lock().take(&id).is_some() {
+        if answer.is_none() && self.lock().take(&id, IN_TERMINAL).is_some() {
             self.publish();
         }
         answer
@@ -171,7 +176,7 @@ impl Desk {
                 return Err("too soon to allow");
             }
             state
-                .take(id)
+                .take(id, "working")
                 .ok_or("unknown or already answered request")?
         };
         let _ = pending.answer.send(if allow {
@@ -192,7 +197,7 @@ impl Desk {
             if paused {
                 let ids: Vec<String> = state.queue.iter().map(|p| p.id.clone()).collect();
                 for id in ids {
-                    state.take(&id); // dropping the sender wakes the waiter with nothing
+                    state.take(&id, IN_TERMINAL); // dropping the sender wakes the waiter with nothing
                 }
             }
         }
@@ -364,7 +369,7 @@ mod tests {
         let a = ask(&desk, "a", "ls");
         assert_eq!(a.join().unwrap(), None);
         assert_eq!(queued(&desk, 0).len(), 0);
-        assert_eq!(desk.view()["sessions"][0]["status"], "working");
+        assert_eq!(desk.view()["sessions"][0]["status"], IN_TERMINAL);
     }
 
     #[test]
@@ -376,6 +381,14 @@ mod tests {
         assert_eq!((a.join().unwrap(), b.join().unwrap()), (None, None));
         assert!(desk.decide(&ids[0], false).is_err());
         assert_eq!(ask(&desk, "c", "ls").join().unwrap(), None);
+        let view = desk.view();
+        let statuses: Vec<_> = view["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| &s["status"])
+            .collect();
+        assert!(statuses.iter().all(|s| *s == IN_TERMINAL), "{statuses:?}");
         assert_eq!(desk.view()["paused"], true);
         desk.set_paused(false);
         let d = ask(&desk, "d", "ls");
