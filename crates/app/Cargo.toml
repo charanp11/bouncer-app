@@ -11,4 +11,5 @@ publish.workspace = true
 tauri-build = { version = "2.7.1", features = [] }
 
 [dependencies]
+bouncer-core = { path = "../core" }
 tauri = { version = "2.12.1", features = [] }

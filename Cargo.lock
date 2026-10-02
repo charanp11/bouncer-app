@@ -152,6 +152,7 @@ dependencies = [
 name = "bouncer-app"
 version = "0.0.0"
 dependencies = [
+ "bouncer-core",
  "tauri",
  "tauri-build",
 ]
@@ -160,7 +161,9 @@ dependencies = [
 name = "bouncer-core"
 version = "0.0.0"
 dependencies = [
+ "bouncer-relay",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
