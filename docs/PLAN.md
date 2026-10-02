@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 2 — Island window and manual approvals**
+**Current phase: Phase 3 — Rules engine**
 
 ## MVP scope
 
@@ -436,22 +436,24 @@ Phase 2 threats:
 
 Phase 2 is done when:
 
-- [ ] Island window: hidden / peek / open; top centre; on top; no taskbar
+- [x] Island window: hidden / peek / open; top centre; on top; no taskbar
       entry; never takes focus
-- [ ] Session list by session ID; three concurrent sessions shown
-- [ ] Approval card (agent, project, tool, full command in monospace, Allow once /
+- [x] Session list keyed by session ID (rows show folder + current step, per
+      Charan); three concurrent sessions shown
+- [x] Approval card (agent, project, tool, full command in monospace, Allow once /
       Deny), queue with count, nothing dropped
-- [ ] Decisions bound to single-use IDs (unit tests: unknown, replayed, early
+- [x] Decisions bound to single-use IDs (unit tests: unknown, replayed, early
       Allow, timeout, pause)
-- [ ] Tray: Pause/Resume (icon and tooltip show paused) and Quit
-- [ ] Hostile strings (`<script>`, ANSI, RTL override, zero-width) render as
+- [x] Tray: Pause/Resume (icon and tooltip show paused) and Quit
+- [x] Hostile strings (`<script>`, ANSI, RTL override, zero-width) render as
       inert visible text (core tests + manual check)
-- [ ] End-to-end test: real relay → server → queue → decide → relay prints the
+- [x] End-to-end test: real relay → server → queue → decide → relay prints the
       documented JSON
-- [ ] Manual: real request approved and denied from the island; unanswered →
+- [x] Manual: real request approved and denied from the island; unanswered →
       terminal prompt after the deadline; three playground sessions
-- [ ] CSP unchanged; capability = our four commands; idle CPU ~0%
-- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+- [x] CSP unchanged; capability = our five commands only; no plugins;
+      measured 0 ms CPU over 10 s at idle (app + 6 WebView processes); idle CPU ~0%
+- [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Manual checks:
 
@@ -487,6 +489,14 @@ Manual checks:
   dragged under the taskbar it couldn't be reached → pushed back inside on every
   move. The "C:workdrag-test" label was the test command losing backslashes
   (checked; `windows_paths_reach_the_island_intact` guards our side).
+- 2026-10-02, debug relay fed by a script, two monitors: Charan dragged the pill
+  between screens and back. Found: the taskbar guard stopped it crossing
+  monitors → it now acts only when the centre is out of reach
+  (`reachable_points_need_no_push`). Found: the guard fought the drag over the
+  taskbar (stutter) → it now runs after the island is still for 400 ms; a short
+  settle delay near the taskbar is expected. Taskbar recovery and tray Quit
+  confirmed. Stress: 60 concurrent relays (20 sessions) done in 1.7 s, app
+  responsive.
 
 Plan corrections found in this audit:
 
@@ -498,6 +508,14 @@ Plan corrections found in this audit:
    `tray-icon` feature is turned on; it adds no crates to `Cargo.lock`.
 5. Known limit: if a relay dies while its card is up (Claude Code killed), the
    card stays until the 100 s deadline; deciding it then does nothing.
+6. (Implement) Added `drag` and `fit` commands, sticky placement clamped to the
+   work area, and island sizes set only in `src/styles.css` (Charan: behavior
+   now, looks later from `design/prototype/`).
+7. (Implement) Sessions that never send `SessionEnd` (crashed, or test feeds)
+   stay listed until the app restarts. Expiring idle sessions is left for the
+   activity-log work (Phase 4).
+8. (Verify) Window work from relay threads could deadlock against `fit` on the
+   main thread; all window work now runs on the main thread.
 
 ## Phase 3 — Rules engine (~1.5 weeks)
 
@@ -795,3 +813,35 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Dependabot alert #1 (glib < 0.20, GHSA-wrw7-89jp-8q8g): reaches us only through
   Tauri's Linux GTK stack; not compiled for Windows or macOS. Dismissed as
   "vulnerable code is not used".
+
+### Phase 2 summary (2026-10-02)
+
+- Review follow-ups from PR #2 first: `BOUNCER_ENDPOINT` debug/test only (CI
+  checks release); backups keep the original's permissions; macOS socket in
+  `~/Library/Application Support/Bouncer/`; `CLAUDE_CONFIG_DIR` tested and an
+  empty value refused; fixtures relabelled by their real recording version
+  (nine were 2.1.143, not 2.1.287) with a test tying names to recordings; a
+  counting race in two relay tests fixed.
+- `bouncer-core::approvals`: the desk. FIFO queue across sessions; random
+  128-bit single-use request IDs (std only); 100 s wait under the relay's shared
+  110 s budget; Allow refused within 600 ms; pause releases everything to the
+  terminal; sessions with folder, current step and state; agent text made
+  visible-safe (controls, ANSI, bidi, zero-width, tag characters).
+- The island (Tauri): undecorated, always on top, no taskbar entry, never takes
+  focus (`focusable: false`); hidden / pill / open; sizes itself to its content;
+  draggable, remembers its spot, stays on screen, crosses monitors. Approval card
+  with full command, "1 of N", Deny / Allow once (arms after 600 ms). Five
+  commands only (`subscribe`, `decide`, `expand`, `drag`, `fit`); no plugins; CSP
+  unchanged. Tray: Pause / Resume (grey icon + tooltip) and Quit.
+- New dependency: `@tauri-apps/api` 2.12.1 (approved). Tauri `tray-icon` feature
+  on (no new crates).
+- Tests: 55 (relay 21, core 30, app 4), green locally and in CI on Windows and
+  macOS. Fixtures: 12 from Claude Code 2.1.143, 11 from 2.1.287.
+- Checked by hand (Charan, Windows, two monitors; Claude Code 2.1.287): real
+  allow, deny and timeout-to-terminal from the island; three sessions with a
+  queue; focus never left the app being typed in; hostile text inert; tray pause
+  / resume / quit; drag, corners, taskbar recovery, monitor crossing.
+- Not done by hand: macOS (no Mac this phase; CI builds and tests only); screen
+  reader / keyboard access (Phase 5).
+- Visual design is deliberately bare; the final design comes as an HTML
+  prototype in `design/prototype/`.
