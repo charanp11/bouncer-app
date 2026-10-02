@@ -11,7 +11,7 @@ use tauri::image::Image;
 use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow, WindowEvent};
 
 /// Shared app state: the approval desk plus what the island window needs.
 struct Island {
@@ -25,11 +25,26 @@ struct Island {
     anchor: Mutex<Option<PhysicalPosition<i32>>>,
     /// Where Bouncer last put the window; anywhere else means the user dragged it.
     placed: Mutex<Option<PhysicalPosition<i32>>>,
+    /// The size the page last asked for (it measures its own content).
+    size: Mutex<LogicalSize<f64>>,
 }
+
+/// Bounds on what the page may ask for, in logical pixels. The real sizes
+/// live in `src/styles.css`; these only stop a broken page from making the
+/// window vanish or cover the screen.
+const MIN_SIZE: (f64, f64) = (80.0, 24.0);
+const MAX_SIZE: (f64, f64) = (900.0, 900.0);
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![subscribe, decide, expand, drag])
+        .invoke_handler(tauri::generate_handler![
+            subscribe, decide, expand, drag, fit
+        ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::Moved(pos) = event {
+                keep_on_screen(window, *pos);
+            }
+        })
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -41,6 +56,7 @@ fn main() {
                 expanded: AtomicBool::new(false),
                 anchor: Mutex::new(None),
                 placed: Mutex::new(None),
+                size: Mutex::new(LogicalSize::new(320.0, 44.0)),
             });
             start_relay_server(desk.clone());
             tray(app, desk)?;
@@ -128,6 +144,18 @@ fn show(app: &AppHandle, mut view: Value) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    if hidden {
+        let _ = window.hide();
+        return;
+    }
+    lay_out(&window, &island);
+    // The window is not focusable, so showing it never takes the keyboard.
+    let _ = window.show();
+}
+
+/// Sizes the window to what the page asked for and places it: hanging from
+/// the user's spot (or the top centre at first), kept inside the work area.
+fn lay_out(window: &WebviewWindow, island: &Island) {
     let mut anchor = island.anchor.lock().unwrap();
     let mut placed = island.placed.lock().unwrap();
     // A visible window that isn't where we put it was dragged: that's the new spot.
@@ -137,12 +165,8 @@ fn show(app: &AppHandle, mut view: Value) {
     {
         *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
     }
-    if hidden {
-        let _ = window.hide();
-        return;
-    }
-    let (width, height) = if open { (440.0, 380.0) } else { (320.0, 44.0) };
-    let _ = window.set_size(LogicalSize::new(width, height));
+    let logical = *island.size.lock().unwrap();
+    let _ = window.set_size(logical);
     let top_centre = anchor.or_else(|| {
         // First show: top centre of the primary monitor's work area.
         let monitor = window.primary_monitor().ok()??;
@@ -152,33 +176,56 @@ fn show(app: &AppHandle, mut view: Value) {
             area.position.y + (8.0 * monitor.scale_factor()) as i32,
         ))
     });
-    if let Some(at) = top_centre {
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let size = ((width * scale) as i32, (height * scale) as i32);
-        let monitor = window
-            .monitor_from_point(f64::from(at.x), f64::from(at.y))
-            .ok()
-            .flatten()
-            .or_else(|| window.current_monitor().ok().flatten());
-        let pos = match monitor {
-            Some(m) => {
-                let area = m.work_area();
-                let area = (
-                    (area.position.x, area.position.y),
-                    (area.size.width as i32, area.size.height as i32),
-                );
-                place((at.x, at.y), size, area)
-            }
-            None => (at.x - size.0 / 2, at.y),
-        };
-        let pos = PhysicalPosition::new(pos.0, pos.1);
-        let _ = window.set_position(pos);
-        *placed = Some(pos);
-        // The anchor stays where the user put it; only this placement is clamped.
-        *anchor = Some(at);
+    let Some(at) = top_centre else { return };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let size = (
+        (logical.width * scale) as i32,
+        (logical.height * scale) as i32,
+    );
+    let pos = match work_area(&window.as_ref().window(), at) {
+        Some(area) => place((at.x, at.y), size, area),
+        None => (at.x - size.0 / 2, at.y),
+    };
+    let pos = PhysicalPosition::new(pos.0, pos.1);
+    let _ = window.set_position(pos);
+    *placed = Some(pos);
+    // The anchor stays where the user put it; only this placement is clamped.
+    *anchor = Some(at);
+}
+
+/// The work area (position, size; taskbar and menu bar excluded) of the
+/// monitor holding `point`, in physical pixels.
+fn work_area<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    point: PhysicalPosition<i32>,
+) -> Option<((i32, i32), (i32, i32))> {
+    let monitor = window
+        .monitor_from_point(f64::from(point.x), f64::from(point.y))
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten())?;
+    let area = monitor.work_area();
+    Some((
+        (area.position.x, area.position.y),
+        (area.size.width as i32, area.size.height as i32),
+    ))
+}
+
+/// A drag that takes the island under the taskbar or off the screen is pushed
+/// back inside the work area, so it can always be reached again.
+fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>, pos: PhysicalPosition<i32>) {
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let size = (size.width as i32, size.height as i32);
+    let centre = PhysicalPosition::new(pos.x + size.0 / 2, pos.y + size.1 / 2);
+    let Some(area) = work_area(window, centre) else {
+        return;
+    };
+    let inside = place((pos.x + size.0 / 2, pos.y), size, area);
+    if inside != (pos.x, pos.y) {
+        let _ = window.set_position(PhysicalPosition::new(inside.0, inside.1));
     }
-    // The window is not focusable, so showing it never takes the keyboard.
-    let _ = window.show();
 }
 
 /// Top-left corner for a window of `size` hanging from `top_centre`, kept
@@ -211,6 +258,23 @@ fn decide(island: State<'_, Island>, id: String, allow: bool) -> Result<(), Stri
 fn drag(app: AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.start_dragging();
+    }
+}
+
+/// The page reports the size of its content; the window follows it.
+#[tauri::command]
+fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
+    if !(width.is_finite() && height.is_finite()) {
+        return;
+    }
+    *island.size.lock().unwrap() = LogicalSize::new(
+        width.clamp(MIN_SIZE.0, MAX_SIZE.0),
+        height.clamp(MIN_SIZE.1, MAX_SIZE.1),
+    );
+    if let Some(window) = app.get_webview_window("main")
+        && window.is_visible().unwrap_or(false)
+    {
+        lay_out(&window, &island);
     }
 }
 
