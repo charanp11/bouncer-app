@@ -7,7 +7,7 @@ type Session = {
   id: string;
   agent: string;
   project: string;
-  tool: string | null;
+  step: string;
   status: string;
 };
 type Request = {
@@ -28,6 +28,11 @@ type View = {
 /** Allow stays disabled this long after a card reaches the front. */
 const ARM_MS = 600;
 const AGENTS: Record<string, string> = { "claude-code": "Claude Code" };
+/** Prefix for a session's step while it waits on the user. */
+const WAITING: Record<string, string> = {
+  "needs you": "Waiting for you · ",
+  "asks in terminal": "Asking in the terminal · ",
+};
 
 const root = document.getElementById("island")!;
 let front = { id: "", since: 0 };
@@ -126,12 +131,11 @@ function sessionList(view: View): HTMLElement {
   const list = el("ul", "sessions");
   for (const s of view.sessions) {
     const item = el("li", `session ${s.status.replaceAll(" ", "-")}`);
-    item.title = `${s.project}\n${s.id}`;
+    item.title = s.project;
     item.append(
       el("span", "dot"),
       el("span", "name", folder(s.project)),
-      el("span", "id", s.id.slice(0, 8)),
-      el("span", "state", s.tool ? `${s.status} · ${s.tool}` : s.status),
+      el("span", "state", (WAITING[s.status] ?? "") + s.step),
     );
     list.append(item);
   }

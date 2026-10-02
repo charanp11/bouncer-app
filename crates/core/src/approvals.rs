@@ -32,7 +32,8 @@ struct Session {
     id: String,
     agent: &'static str,
     project: String,
-    tool: Option<String>,
+    /// What it's doing right now, e.g. "Editing main.rs".
+    step: String,
     status: &'static str,
 }
 
@@ -60,7 +61,7 @@ impl State {
                     id: event.session.clone(),
                     agent: event.agent,
                     project: event.project.clone(),
-                    tool: None,
+                    step: "Idle".into(),
                     status: "idle",
                 });
                 self.sessions.len() - 1
@@ -77,8 +78,11 @@ impl State {
         }
         let session = self.session(event);
         session.project.clone_from(&event.project);
-        if event.tool.is_some() {
-            session.tool.clone_from(&event.tool);
+        match event.kind.as_str() {
+            "PreToolUse" | "PermissionRequest" => session.step = step(event),
+            "UserPromptSubmit" => session.step = "Thinking".into(),
+            "Stop" => session.step = "Idle".into(),
+            _ => {}
         }
         session.status = match event.kind.as_str() {
             "PermissionRequest" if paused => IN_TERMINAL,
@@ -219,7 +223,7 @@ impl Desk {
                     "id": visible(&s.id),
                     "agent": s.agent,
                     "project": visible(&s.project),
-                    "tool": s.tool.as_deref().map(visible),
+                    "step": visible(&s.step),
                     "status": s.status,
                 })
             })
@@ -247,6 +251,31 @@ impl Desk {
 fn request_id(counter: u64) -> String {
     let hash = |part: u8| RandomState::new().hash_one((counter, part));
     format!("{:016x}{:016x}", hash(0), hash(1))
+}
+
+/// A short, human description of a tool call for the session list (the
+/// approval card always shows the full input).
+fn step(event: &Event) -> String {
+    let input = event.input.as_ref();
+    let text = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    let file = |key: &str| {
+        let path = text(key).unwrap_or_default();
+        path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
+    };
+    match event.tool.as_deref() {
+        Some("Edit" | "MultiEdit" | "Write") => format!("Editing {}", file("file_path")),
+        Some("NotebookEdit") => format!("Editing {}", file("notebook_path")),
+        Some("Read") => format!("Reading {}", file("file_path")),
+        Some("Bash") => {
+            let command = text("command").unwrap_or_default();
+            format!("Running {}", command.lines().next().unwrap_or_default())
+        }
+        Some("Grep" | "Glob") => "Searching".into(),
+        Some("WebFetch" | "WebSearch") => "Browsing the web".into(),
+        Some("Task" | "Agent") => "Running a subagent".into(),
+        Some(tool) => format!("Using {tool}"),
+        None => "Working".into(),
+    }
 }
 
 /// The full thing being approved: a Bash command as is, any other tool's input
@@ -420,6 +449,26 @@ mod tests {
             ]
         );
         assert_eq!(view["queue"], json!([]));
+    }
+
+    #[test]
+    fn session_steps_describe_the_current_call() {
+        let desk = desk(WAIT);
+        let mut e = event("a", "PreToolUse", "cargo test\nsecond line");
+        desk.handle(e.clone());
+        assert_eq!(desk.view()["sessions"][0]["step"], "Running cargo test");
+        e.tool = Some("Edit".into());
+        e.input = Some(json!({ "file_path": r"C:\Users\chara\Desktop\Full Time\x\src\main.rs" }));
+        desk.handle(e.clone());
+        assert_eq!(desk.view()["sessions"][0]["step"], "Editing main.rs");
+        e.tool = Some("Read".into());
+        e.input = Some(json!({ "file_path": "/p/README.md" }));
+        desk.handle(e);
+        assert_eq!(desk.view()["sessions"][0]["step"], "Reading README.md");
+        desk.handle(event("a", "Stop", ""));
+        assert_eq!(desk.view()["sessions"][0]["step"], "Idle");
+        desk.handle(event("a", "UserPromptSubmit", ""));
+        assert_eq!(desk.view()["sessions"][0]["step"], "Thinking");
     }
 
     #[test]
