@@ -23,6 +23,8 @@ struct Island {
     /// Where the island sits: its top-centre point in physical pixels. Kept
     /// across resizes and hides, so a dragged island stays where it was put.
     anchor: Mutex<Option<PhysicalPosition<i32>>>,
+    /// Where Bouncer last put the window; anywhere else means the user dragged it.
+    placed: Mutex<Option<PhysicalPosition<i32>>>,
 }
 
 fn main() {
@@ -38,6 +40,7 @@ fn main() {
                 feed: Mutex::new(None),
                 expanded: AtomicBool::new(false),
                 anchor: Mutex::new(None),
+                placed: Mutex::new(None),
             });
             start_relay_server(desk.clone());
             tray(app, desk)?;
@@ -126,9 +129,11 @@ fn show(app: &AppHandle, mut view: Value) {
         return;
     };
     let mut anchor = island.anchor.lock().unwrap();
-    // While visible, the window itself is the truth (the user may have dragged it).
+    let mut placed = island.placed.lock().unwrap();
+    // A visible window that isn't where we put it was dragged: that's the new spot.
     if window.is_visible().unwrap_or(false)
         && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
+        && *placed != Some(pos)
     {
         *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
     }
@@ -149,12 +154,42 @@ fn show(app: &AppHandle, mut view: Value) {
     });
     if let Some(at) = top_centre {
         let scale = window.scale_factor().unwrap_or(1.0);
-        let x = at.x - (width * scale) as i32 / 2;
-        let _ = window.set_position(PhysicalPosition::new(x, at.y));
+        let size = ((width * scale) as i32, (height * scale) as i32);
+        let monitor = window
+            .monitor_from_point(f64::from(at.x), f64::from(at.y))
+            .ok()
+            .flatten()
+            .or_else(|| window.current_monitor().ok().flatten());
+        let pos = match monitor {
+            Some(m) => {
+                let area = m.work_area();
+                let area = (
+                    (area.position.x, area.position.y),
+                    (area.size.width as i32, area.size.height as i32),
+                );
+                place((at.x, at.y), size, area)
+            }
+            None => (at.x - size.0 / 2, at.y),
+        };
+        let pos = PhysicalPosition::new(pos.0, pos.1);
+        let _ = window.set_position(pos);
+        *placed = Some(pos);
+        // The anchor stays where the user put it; only this placement is clamped.
         *anchor = Some(at);
     }
     // The window is not focusable, so showing it never takes the keyboard.
     let _ = window.show();
+}
+
+/// Top-left corner for a window of `size` hanging from `top_centre`, kept
+/// inside the monitor's work `area` (position, size) so it never opens off-screen.
+fn place(top_centre: (i32, i32), size: (i32, i32), area: ((i32, i32), (i32, i32))) -> (i32, i32) {
+    let ((ax, ay), (aw, ah)) = area;
+    let clamp = |v: i32, lo: i32, len: i32, span: i32| v.min(lo + span - len).max(lo);
+    (
+        clamp(top_centre.0 - size.0 / 2, ax, size.0, aw),
+        clamp(top_centre.1, ay, size.1, ah),
+    )
 }
 
 /// The island page asks for the view; it gets it now and after every change.
@@ -189,6 +224,22 @@ fn expand(app: AppHandle, island: State<'_, Island>, open: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn island_stays_on_screen() {
+        let area = ((0, 0), (1920, 1040));
+        // Room to spare: centred under the anchor.
+        assert_eq!(place((960, 8), (440, 380), area), (740, 8));
+        // Dragged to the bottom-right corner: opens up and to the left.
+        assert_eq!(place((1900, 1000), (440, 380), area), (1480, 660));
+        // Dragged past the top-left: pulled back in.
+        assert_eq!(place((-50, -20), (440, 380), area), (0, 0));
+        // Second monitor to the left (negative coordinates).
+        assert_eq!(
+            place((-100, 500), (440, 380), ((-1920, 0), (1920, 1080))),
+            (-440, 500)
+        );
+    }
 
     #[test]
     fn greyed_icon_is_grey_and_fainter() {
