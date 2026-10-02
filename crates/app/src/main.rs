@@ -218,8 +218,9 @@ fn work_area<R: tauri::Runtime>(
     ))
 }
 
-/// A drag that takes the island under the taskbar or off the screen is pushed
-/// back inside the work area, so it can always be reached again.
+/// A drag that leaves the island's centre under the taskbar or off every
+/// screen pushes it back inside the work area, so it can always be reached.
+/// Straddling two monitors is fine, so it can be dragged across them.
 fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>, pos: PhysicalPosition<i32>) {
     let Ok(size) = window.outer_size() else {
         return;
@@ -229,10 +230,19 @@ fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>, pos: PhysicalPos
     let Some(area) = work_area(window, centre) else {
         return;
     };
+    if contains(area, (centre.x, centre.y)) {
+        return;
+    }
     let inside = place((pos.x + size.0 / 2, pos.y), size, area);
     if inside != (pos.x, pos.y) {
         let _ = window.set_position(PhysicalPosition::new(inside.0, inside.1));
     }
+}
+
+/// Whether `point` lies inside `area` (position, size).
+fn contains(area: ((i32, i32), (i32, i32)), point: (i32, i32)) -> bool {
+    let ((ax, ay), (aw, ah)) = area;
+    (ax..ax + aw).contains(&point.0) && (ay..ay + ah).contains(&point.1)
 }
 
 /// Top-left corner for a window of `size` hanging from `top_centre`, kept
@@ -313,6 +323,19 @@ mod tests {
             place((-100, 500), (440, 380), ((-1920, 0), (1920, 1080))),
             (-440, 500)
         );
+    }
+
+    #[test]
+    fn reachable_points_need_no_push() {
+        // 1920×1080 screen with a 40 px taskbar at the bottom.
+        let area = ((0, 0), (1920, 1040));
+        assert!(contains(area, (960, 500)));
+        assert!(contains(area, (0, 0)));
+        assert!(!contains(area, (960, 1060)), "under the taskbar");
+        assert!(!contains(area, (1920, 500)), "next monitor over");
+        assert!(!contains(area, (-1, 500)));
+        // Left monitor: its own area contains points with negative x.
+        assert!(contains(((-1920, 0), (1920, 1080)), (-5, 500)));
     }
 
     #[test]
