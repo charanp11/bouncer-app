@@ -27,7 +27,9 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visibleOnAllWorkspaces": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

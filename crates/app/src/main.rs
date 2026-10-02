@@ -21,6 +21,8 @@ struct Island {
     feed: Mutex<Option<Channel<Value>>>,
     /// The user clicked the pill open.
     expanded: AtomicBool,
+    /// Nothing to show: the island is only the wake strip at the screen's top.
+    hidden: AtomicBool,
     /// Where the island sits: its top-centre point in physical pixels. Kept
     /// across resizes and hides, so a dragged island stays where it was put.
     anchor: Mutex<Option<PhysicalPosition<i32>>>,
@@ -57,7 +59,12 @@ fn settle_after_moves(app: AppHandle) -> mpsc::Sender<()> {
 /// Bounds on what the page may ask for, in logical pixels. The real sizes
 /// live in `src/styles.css`; these only stop a broken page from making the
 /// window vanish or cover the screen.
-const MIN_SIZE: (f64, f64) = (80.0, 24.0);
+const MIN_SIZE: (f64, f64) = (80.0, 4.0);
+/// The window is transparent, so the page can draw rounded corners and a
+/// shadow. Tauri 2.12 supports this on Windows and macOS without the private
+/// API flag. Set to false for a platform where it fails: the page then draws
+/// square corners on a solid window.
+const ROUNDED: bool = cfg!(any(windows, target_os = "macos"));
 const MAX_SIZE: (f64, f64) = (900.0, 900.0);
 
 fn main() {
@@ -79,6 +86,7 @@ fn main() {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
                 expanded: AtomicBool::new(false),
+                hidden: AtomicBool::new(true),
                 anchor: Mutex::new(None),
                 placed: Mutex::new(None),
                 size: Mutex::new(LogicalSize::new(320.0, 44.0)),
@@ -162,8 +170,11 @@ fn show(app: &AppHandle, mut view: Value) {
     let island = app.state::<Island>();
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
     let open = has("queue") || (has("sessions") && island.expanded.load(Ordering::Relaxed));
-    let hidden = !has("queue") && !has("sessions");
+    let hidden = !has("queue") && !has("sessions") && view["paused"] != true;
+    island.hidden.store(hidden, Ordering::Relaxed);
     view["open"] = open.into();
+    view["hidden"] = hidden.into();
+    view["rounded"] = ROUNDED.into();
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
     }
@@ -175,10 +186,6 @@ fn show(app: &AppHandle, mut view: Value) {
         let Some(window) = handle.get_webview_window("main") else {
             return;
         };
-        if hidden {
-            let _ = window.hide();
-            return;
-        }
         lay_out(&window, &handle.state::<Island>());
         // The window is not focusable, so showing it never takes the keyboard.
         let _ = window.show();
@@ -187,12 +194,15 @@ fn show(app: &AppHandle, mut view: Value) {
 
 /// Sizes the window to what the page asked for and places it: hanging from
 /// the user's spot (or the top centre at first), kept inside the work area.
+/// While hidden it is the wake strip at the very top centre of the screen.
 /// Main thread only.
 fn lay_out(window: &WebviewWindow, island: &Island) {
     let mut anchor = island.anchor.lock().unwrap();
     let mut placed = island.placed.lock().unwrap();
+    let hidden = island.hidden.load(Ordering::Relaxed);
     // A visible window that isn't where we put it was dragged: that's the new spot.
-    if window.is_visible().unwrap_or(false)
+    if !hidden
+        && window.is_visible().unwrap_or(false)
         && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
         && *placed != Some(pos)
     {
@@ -200,15 +210,20 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     }
     let logical = *island.size.lock().unwrap();
     let _ = window.set_size(logical);
-    let top_centre = anchor.or_else(|| {
-        // First show: top centre of the primary monitor's work area.
+    let screen_top = |gap: f64| {
+        // Top centre of the primary monitor's work area.
         let monitor = window.primary_monitor().ok()??;
         let area = monitor.work_area();
         Some(PhysicalPosition::new(
             area.position.x + area.size.width as i32 / 2,
-            area.position.y + (8.0 * monitor.scale_factor()) as i32,
+            area.position.y + (gap * monitor.scale_factor()) as i32,
         ))
-    });
+    };
+    let top_centre = if hidden {
+        screen_top(0.0)
+    } else {
+        anchor.or_else(|| screen_top(8.0))
+    };
     let Some(at) = top_centre else { return };
     let scale = window.scale_factor().unwrap_or(1.0);
     let size = (
@@ -223,7 +238,9 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     let _ = window.set_position(pos);
     *placed = Some(pos);
     // The anchor stays where the user put it; only this placement is clamped.
-    *anchor = Some(at);
+    if !hidden {
+        *anchor = Some(at);
+    }
 }
 
 /// The work area (position, size; taskbar and menu bar excluded) of the
