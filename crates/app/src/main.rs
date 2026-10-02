@@ -7,7 +7,10 @@ use std::sync::{Arc, Mutex};
 use bouncer_core::approvals::{Desk, WAIT};
 use bouncer_core::ipc::{self, Handler, Server};
 use serde_json::Value;
+use tauri::image::Image;
 use tauri::ipc::Channel;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State};
 
 /// Shared app state: the approval desk plus what the island window needs.
@@ -32,7 +35,8 @@ fn main() {
                 feed: Mutex::new(None),
                 expanded: AtomicBool::new(false),
             });
-            start_relay_server(desk);
+            start_relay_server(desk.clone());
+            tray(app, desk)?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -50,6 +54,56 @@ fn start_relay_server(desk: Arc<Desk>) {
         }
         Err(e) => eprintln!("Bouncer: relay endpoint unavailable: {e}"),
     }
+}
+
+const TOOLTIP: &str = "Bouncer";
+const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal";
+
+/// Tray menu: Pause / Resume and Quit. While paused the icon is greyed and
+/// every request goes to the terminal.
+fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
+    let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Bouncer", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&pause, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .ok_or_else(|| tauri::Error::AssetNotFound("app icon".into()))?;
+    let (width, height) = (icon.width(), icon.height());
+    let active = Image::new_owned(icon.rgba().to_vec(), width, height);
+    let paused = Image::new_owned(greyed(icon.rgba()), width, height);
+    TrayIconBuilder::with_id("main")
+        .icon(active.clone())
+        .tooltip(TOOLTIP)
+        .menu(&menu)
+        .on_menu_event(move |app, event| match event.id().as_ref() {
+            "pause" => {
+                let now_paused = !desk.paused();
+                desk.set_paused(now_paused);
+                let _ = pause.set_text(if now_paused { "Resume" } else { "Pause" });
+                if let Some(tray) = app.tray_by_id("main") {
+                    let icon = if now_paused { &paused } else { &active };
+                    let _ = tray.set_icon(Some(icon.clone()));
+                    let _ =
+                        tray.set_tooltip(Some(if now_paused { TOOLTIP_PAUSED } else { TOOLTIP }));
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// The icon in grey at half opacity (RGBA in, RGBA out).
+fn greyed(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let luma = ((u32::from(p[0]) * 3 + u32::from(p[1]) * 6 + u32::from(p[2])) / 10) as u8;
+            [luma, luma, luma, p[3] / 2]
+        })
+        .collect()
 }
 
 /// Sends the view to the page and sizes the window to match: hidden with
@@ -102,4 +156,15 @@ fn decide(island: State<'_, Island>, id: String, allow: bool) -> Result<(), Stri
 fn expand(app: AppHandle, island: State<'_, Island>, open: bool) {
     island.expanded.store(open, Ordering::Relaxed);
     show(&app, island.desk.view());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greyed_icon_is_grey_and_fainter() {
+        let out = greyed(&[255, 0, 0, 255, 10, 200, 30, 128]);
+        assert_eq!(out, [76, 76, 76, 127, 126, 126, 126, 64]);
+    }
 }
