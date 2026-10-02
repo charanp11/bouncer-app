@@ -383,6 +383,7 @@ capability; no core permissions, no plugins):
 | `subscribe(channel)` | Backend pushes the island view (sessions, queue, paused) on every change | Read-only; Tauri's channel fetch is exempt from the ACL by design |
 | `decide(id, allow)` | Answers one queued request | Only a live, unused, backend-issued ID works; Allow refused < 600 ms after the card is issued |
 | `expand(open)` | Peek / open when the pill is clicked | Only toggles our own window size |
+| `drag()` | Moves the island while the mouse is held (added after Charan's playground test: the island covered a terminal's tab bar) | Only moves our own window; no `core:window` permission given to the page |
 
 The frontend gets no window, event, shell, fs or opener permissions; the
 backend resizes and shows the window itself. The frontend uses `@tauri-apps/api`
@@ -429,7 +430,7 @@ Phase 2 threats:
 | Window steals focus, keystrokes land in the island | `focusable: false` |
 | Island blocks Claude Code | 100 s wait < 110 s relay budget; pause and quit release everything |
 | Requests lost | Unbounded FIFO; timeout and pause fall back to the terminal, never "allow" |
-| Frontend reaches more than it needs | Three commands in the manifest; no core/plugin permissions; no remote URLs |
+| Frontend reaches more than it needs | Four commands in the manifest; no core/plugin permissions; no remote URLs |
 | Command truncated | Full input shown, scrolls |
 
 Phase 2 is done when:
@@ -448,7 +449,7 @@ Phase 2 is done when:
       documented JSON
 - [ ] Manual: real request approved and denied from the island; unanswered →
       terminal prompt after the deadline; three playground sessions
-- [ ] CSP unchanged; capability = our three commands; idle CPU ~0%
+- [ ] CSP unchanged; capability = our four commands; idle CPU ~0%
 - [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Manual checks:

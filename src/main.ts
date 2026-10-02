@@ -56,10 +56,37 @@ function summary(view: View): string {
   return waiting ? `${sessions} · ${waiting} need you` : sessions;
 }
 
+let dragged = false;
+
+/** A press that moves a few pixels drags the island (the backend moves the
+ * window); a press that doesn't is a normal click. */
+function draggable(node: HTMLElement) {
+  node.addEventListener("mousedown", (down) => {
+    if (down.button !== 0) return;
+    dragged = false;
+    const move = (e: MouseEvent) => {
+      if (Math.abs(e.screenX - down.screenX) + Math.abs(e.screenY - down.screenY) > 4) {
+        stop();
+        dragged = true;
+        invoke("drag");
+      }
+    };
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+  });
+}
+
 function pill(view: View): HTMLElement {
   const button = el("button", "pill");
   button.append(el("span", "dot"), el("span", "", `Bouncer · ${summary(view)}`));
-  button.addEventListener("click", () => invoke("expand", { open: true }));
+  button.addEventListener("click", () => {
+    if (!dragged) invoke("expand", { open: true });
+  });
+  draggable(button);
   return button;
 }
 
@@ -124,6 +151,7 @@ function render(view: View) {
     return;
   }
   const top = el("header", "top");
+  draggable(top);
   top.append(el("span", "", `Bouncer · ${summary(view)}`));
   if (!first) {
     const close = el("button", "close", "Close");

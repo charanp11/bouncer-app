@@ -181,3 +181,8 @@ button:disabled {
 .session.asks-in-terminal .dot {
   background: var(--wait);
 }
+
+.pill,
+.top {
+  cursor: grab;
+}
