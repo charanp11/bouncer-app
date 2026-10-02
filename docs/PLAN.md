@@ -63,12 +63,90 @@ Fails safe: app missing or slow → relay prints nothing → Claude Code asks in
 - **Implement:** cargo workspace (`relay`, `core`, `app`), Tauri 2 scaffold with
   plain TypeScript, MIT `LICENSE`, `SECURITY.md`, `CREDITS.md`, `.gitignore`, README stub.
 - **Test:** CI on Windows + macOS runs `cargo fmt --check`, `cargo clippy -D warnings`,
-  `cargo test`, `cargo deny check`, `cargo audit`, gitleaks.
+  `cargo test`, `cargo deny check`, `npm audit`, gitleaks; a weekly scheduled job
+  runs `cargo deny check advisories`.
 - **Verify:** Dependabot on; Actions pinned to commit SHAs; workflow
-  `permissions: contents: read`; branch protection on `main`; private vulnerability
-  reporting on.
+  `permissions: contents: read`; private vulnerability reporting on; branch
+  protection on `main` (set after CI first runs): PR required (0 approvals), every
+  CI job on both OSes a required check, branch up to date before merge, linear
+  history, no force pushes or deletion, applies to admins. Signed commits: later.
 - Commits: `chore: init workspace` → `chore: add tauri app shell` →
   `ci: add lint, test and audit workflow` → `docs: add license, security policy and readme stub`
+
+### Phase 0 audit (2026-10-01)
+
+Name: settled as `bouncer-app` (see Decisions). Versions today: `tauri` 2.12.1,
+`tauri-build` 2.7.1, `@tauri-apps/cli` and `@tauri-apps/api` 2.12.1, Vite 8.3,
+TypeScript 7.0, Rust 1.99.
+
+What Tauri 2's security guide means for us:
+
+- **Commands are open by default.** Every registered command can be called from
+  every window unless `build.rs` lists them with
+  `tauri_build::AppManifest::new().commands(&[...])` and a capability grants each
+  one. Phase 0 registers no commands; Phase 2 must use the manifest from its first
+  command.
+- **Capabilities:** every file in `src-tauri/capabilities/` is enabled automatically.
+  We keep exactly one file, bound to the `main` window, with no `remote` URLs.
+- **The template is not secure as shipped.** `create-tauri-app` gives `"csp": null`,
+  the `opener` plugin with `opener:default`, a sample `greet` command, a Vite dev
+  server that listens on `TAURI_DEV_HOST`, and mobile-only crate types. All of that
+  is removed.
+- **CSP** goes in `app.security.csp`; Tauri adds hashes/nonces for bundled assets at
+  build time. Ours: `default-src 'self'; script-src 'self'; style-src 'self';
+  img-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none';
+  base-uri 'none'; form-action 'none'; frame-ancestors 'none'`.
+- Also set: `freezePrototype: true`. Leave as default: `withGlobalTauri: false`,
+  `assetProtocol.enable: false`, no isolation pattern (we load no third-party
+  frontend code). Devtools stay out of release builds (no `devtools` feature).
+- Lifecycle: the dev server binds to localhost only; pin Actions to SHAs; audit both
+  Rust and npm dependencies.
+
+Phase 0 threats:
+
+| Threat | Fix |
+| --- | --- |
+| Insecure template defaults ship (no CSP, opener plugin, sample command) | Strip them; CSP set; one minimal capability; reviewed in Verify |
+| Any window can call any command | No commands in Phase 0; `AppManifest` allow-list from Phase 2 |
+| Dev server reachable from the LAN | Vite `host` fixed to `localhost`, `strictPort` |
+| Compromised or retagged GitHub Action | Every `uses:` pinned to a full commit SHA with a version comment; Dependabot updates them |
+| CI token abused | Workflow-level `permissions: contents: read`; no secrets used |
+| Vulnerable / unlicensed / non-crates.io dependency | `cargo deny check` (advisories, licenses, bans, sources: crates.io only); `npm audit`; lockfiles committed; `npm ci` in CI |
+| Secret committed | gitleaks in CI on full history; GitHub secret scanning and push protection (already on) |
+| Direct push or force push breaks `main` | Branch protection: PR + required checks, linear history, no force push/delete, admins included |
+| New advisory lands between pushes | Weekly scheduled `cargo deny check advisories` |
+| Vulnerability reported in public | `SECURITY.md` + private vulnerability reporting |
+| Line-ending drift between Windows and macOS (fmt check, diffs) | `.gitattributes` with `* text=auto eol=lf` (Git for Windows sets `core.autocrlf=true` system-wide) |
+
+Phase 0 is done when:
+
+- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
+      pass locally on Windows and in CI on `windows-latest` and `macos-latest`
+- [ ] Crates `bouncer-relay`, `bouncer-core`, `bouncer-app`; `relay` depends only on
+      std + `serde_json`
+- [ ] `npm run tauri dev` opens an empty Bouncer window on Windows
+- [ ] `tauri.conf.json` has the CSP above and `freezePrototype: true`; no plugins; no
+      commands; one capability file for `main` with the fewest core permissions that
+      work; no `remote`
+- [ ] `cargo deny check`, `npm audit` and gitleaks pass in CI; the weekly
+      advisories job exists
+- [ ] Every Action pinned to a SHA; workflow `permissions: contents: read`
+- [ ] Dependabot (cargo, npm, github-actions) and private vulnerability reporting
+      are on; branch protection on `main` as listed under Verify
+- [ ] `LICENSE` (MIT), `SECURITY.md`, `CREDITS.md`, `README.md`, `.gitignore`,
+      `.gitattributes` exist
+
+Plan corrections found in this audit:
+
+1. `cargo deny check` already checks the RustSec advisory database, which is what
+   `cargo audit` does. Decision: drop `cargo audit`; add a weekly scheduled
+   `cargo deny check advisories` job.
+2. The plan didn't cover npm dependencies. Added `npm audit` and npm in Dependabot.
+3. CI must build the frontend (`npm ci && npm run build`) before clippy and tests,
+   because `tauri::generate_context!` fails to compile when `frontendDist` is missing.
+4. Branch protection that requires status checks also blocks direct pushes to
+   `main`. Decision: once protection is on, every change goes through a PR.
+5. `.gitattributes` was missing from the file list.
 
 ## Phase 1 — Hook relay and local socket (~1 week)
 
@@ -198,7 +276,7 @@ Core rule: every failure means "ask in the terminal," never "allow."
 | Path escape | Resolve fully; outside project → ask | 3 |
 | Rules file tampering | Refuse files others can write; show changes | 3 |
 | Secrets in history | Redact, no outputs, local, owner-only, retention, wipe | 4 |
-| Supply chain | Few deps, lockfiles, cargo deny/audit, Dependabot, SHA-pinned Actions | 0 |
+| Supply chain | Few deps, lockfiles, cargo deny (+ weekly advisories), npm audit, Dependabot, SHA-pinned Actions | 0 |
 | Tampered download | CI-only builds, checksums, attestations | 6 |
 
 Out of scope: malware already running as the user (it can edit Claude Code's
