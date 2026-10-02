@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 bouncer-relay = { path = "../relay" }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
