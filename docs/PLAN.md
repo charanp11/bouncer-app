@@ -384,6 +384,7 @@ capability; no core permissions, no plugins):
 | `decide(id, allow)` | Answers one queued request | Only a live, unused, backend-issued ID works; Allow refused < 600 ms after the card is issued |
 | `expand(open)` | Peek / open when the pill is clicked | Only toggles our own window size |
 | `drag()` | Moves the island while the mouse is held (added after Charan's playground test: the island covered a terminal's tab bar) | Only moves our own window; no `core:window` permission given to the page |
+| `fit(width, height)` | The page reports its content size; the window follows (sizes live only in `src/styles.css`) | Clamped to 80×24 … 900×900 logical px; placement always inside the work area |
 
 The frontend gets no window, event, shell, fs or opener permissions; the
 backend resizes and shows the window itself. The frontend uses `@tauri-apps/api`
@@ -472,6 +473,20 @@ Manual checks:
   relay printed the documented allow JSON. Charan noticed "1 need you" left over
   from the request sent while paused; fixed (`asks in terminal`) and covered by
   `pause_releases_the_queue_and_queues_nothing`.
+- 2026-10-02, Claude Code 2.1.287, playground (sessions `35fc5f3e`, `34088e44`,
+  `a8abef54`, default mode): a real Write allowed from the island
+  (`island-allow.txt` created); a real Write denied ("Denied in Bouncer",
+  `island-deny.txt` absent); an unanswered request (13:16:43) fell back to
+  Claude Code's own prompt and was answered there (file written 13:18:34);
+  three sessions at once, two requests queued 12 s apart and both allowed.
+  Fixture: `claude-code-2.1.287-PostToolUse-Write.json`. Found: the island
+  covered the terminal's tab bar and couldn't be moved → `drag`.
+- 2026-10-02, debug relay fed by a script: Charan dragged the island, clicked
+  it open in place, closed it back to the same spot. Found: opened near a
+  corner it went off screen → clamped to the work area (`island_stays_on_screen`);
+  dragged under the taskbar it couldn't be reached → pushed back inside on every
+  move. The "C:workdrag-test" label was the test command losing backslashes
+  (checked; `windows_paths_reach_the_island_intact` guards our side).
 
 Plan corrections found in this audit:
 
