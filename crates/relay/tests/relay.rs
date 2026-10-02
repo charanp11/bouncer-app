@@ -250,3 +250,36 @@ fn two_sessions_stream_while_one_waits_for_a_decision() {
         );
     }
 }
+
+/// Claude Code version of each playground session that recorded fixtures, read
+/// from the `"version"` field of that session's transcript.
+const RECORDED_WITH: &[(&str, &str)] = &[
+    ("29111017-47d8-4697-97be-bc193fecf387", "2.1.143"),
+    ("c419a738-bd7a-40e9-bbe9-50b9845911c4", "2.1.143"),
+    ("4936ec29-90bc-4f48-93db-b957ead3a613", "2.1.287"),
+    ("c6c7d2ff-c166-4191-97cc-0f07a3b38f6c", "2.1.287"),
+];
+
+#[test]
+fn fixture_names_match_their_recording() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let file = entry.unwrap().path();
+        let name = file.file_name().unwrap().to_str().unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        let session = json["session_id"].as_str().unwrap();
+        let (_, version) = RECORDED_WITH
+            .iter()
+            .find(|(s, _)| *s == session)
+            .unwrap_or_else(|| panic!("{name}: unknown recording session {session}"));
+        let mut expected = format!(
+            "claude-code-{version}-{}",
+            json["hook_event_name"].as_str().unwrap()
+        );
+        if let Some(tool) = json["tool_name"].as_str() {
+            expected += &format!("-{tool}");
+        }
+        assert_eq!(name, format!("{expected}.json"));
+    }
+}
