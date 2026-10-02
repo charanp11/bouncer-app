@@ -451,7 +451,16 @@ Phase 2 is done when:
 
 Manual checks:
 
-- (none yet)
+- 2026-10-02, no Claude Code (debug relay fed by a script; three fake sessions):
+  peek pill at top centre, always on top, never foreground. A queued `Bash`
+  request with `<script>`, ANSI and U+202E showed as inert text with
+  `\u{001B}` / `\u{202E}` markers. An unanswered request timed out and the relay
+  printed nothing.
+- 2026-10-02, same setup, Charan clicked Deny (window temporarily focusable):
+  card cleared, island shrank to the pill, relay printed the documented deny JSON.
+- 2026-10-02, same setup, final `focusable: false`: Charan typed in another
+  app, clicked Deny once, kept typing. One click was enough, keyboard focus never
+  left the other app, and the relay printed deny.
 
 Plan corrections found in this audit:
 
