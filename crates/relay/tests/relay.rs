@@ -52,6 +52,16 @@ fn event(session: &str, kind: &str) -> Vec<u8> {
     format!(r#"{{"session_id":"{session}","cwd":"/p","hook_event_name":"{kind}","tool_name":"Bash","tool_input":{{"command":"ls"}}}}"#).into_bytes()
 }
 
+/// Fire-and-forget relays exit before the server's handler thread has run, so
+/// wait (briefly) until it has seen `count` events, then check it saw exactly that.
+fn wait_for<T>(seen: &Mutex<Vec<T>>, count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while seen.lock().unwrap().len() < count && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(seen.lock().unwrap().len(), count);
+}
+
 fn always(decision: Option<Decision>) -> Handler {
     Arc::new(move |_| decision)
 }
@@ -83,7 +93,7 @@ fn fixtures_parse_into_events_and_relay_silently() {
         count += 1;
     }
     assert!(count >= 3, "fixtures missing");
-    assert_eq!(seen.lock().unwrap().len(), count);
+    wait_for(&seen, count);
 }
 
 #[test]
@@ -229,8 +239,8 @@ fn two_sessions_stream_while_one_waits_for_a_decision() {
     }
     let answer = waiting.wait_with_output().unwrap();
     assert!(String::from_utf8_lossy(&answer.stdout).contains(r#""behavior":"allow""#));
+    wait_for(&seen, 11);
     let seen = seen.lock().unwrap();
-    assert_eq!(seen.len(), 11);
     for s in ["a", "b"] {
         assert_eq!(
             seen.iter()
