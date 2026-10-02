@@ -67,7 +67,23 @@ const MIN_SIZE: (f64, f64) = (80.0, 4.0);
 const ROUNDED: bool = cfg!(any(windows, target_os = "macos"));
 const MAX_SIZE: (f64, f64) = (900.0, 900.0);
 
+/// WebView2 takes extra browser flags from this variable, e.g. a remote
+/// debugging port that would let any local process read and drive the
+/// island. Fine for a dev run; release builds ignore it.
+const WEBVIEW2_ARGS: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+
+/// Removes `WEBVIEW2_ARGS` from this process when `release`. Must run before
+/// any thread starts (first thing in `main`).
+fn clear_webview_args(release: bool) {
+    if release {
+        // SAFETY: called at the top of `main`, before any other thread exists,
+        // so nothing can read the environment concurrently.
+        unsafe { std::env::remove_var(WEBVIEW2_ARGS) };
+    }
+}
+
 fn main() {
+    clear_webview_args(!cfg!(debug_assertions));
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             subscribe, decide, expand, drag, fit
@@ -379,6 +395,19 @@ mod tests {
         assert!(!contains(area, (-1, 500)));
         // Left monitor: its own area contains points with negative x.
         assert!(contains(((-1920, 0), (1920, 1080)), (-5, 500)));
+    }
+
+    #[test]
+    fn release_builds_drop_webview_browser_arguments() {
+        // SAFETY: no other test in this binary reads or writes the environment.
+        unsafe { std::env::set_var(WEBVIEW2_ARGS, "--remote-debugging-port=9222") };
+        clear_webview_args(false);
+        assert!(std::env::var_os(WEBVIEW2_ARGS).is_some(), "debug keeps it");
+        clear_webview_args(true);
+        assert!(
+            std::env::var_os(WEBVIEW2_ARGS).is_none(),
+            "release clears it"
+        );
     }
 
     #[test]
