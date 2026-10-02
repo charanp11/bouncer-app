@@ -283,3 +283,29 @@ fn fixture_names_match_their_recording() {
         assert_eq!(name, format!("{expected}.json"));
     }
 }
+
+#[test]
+fn decisions_from_the_desk_reach_claude_code() {
+    use bouncer_core::approvals::{ARM, Desk, WAIT};
+    let desk = Arc::new(Desk::new(WAIT, |_| {}));
+    let handler = desk.clone();
+    let path = serve("desk", Arc::new(move |e| handler.handle(e)));
+    for allow in [false, true] {
+        let child = spawn_relay(&path, &event("s", "PermissionRequest"));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let id = loop {
+            if let Some(id) = desk.view()["queue"][0]["id"].as_str() {
+                break id.to_owned();
+            }
+            assert!(Instant::now() < deadline, "request never queued");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(desk.view()["queue"][0]["text"], "ls");
+        std::thread::sleep(ARM);
+        desk.decide(&id, allow).unwrap();
+        let out = child.wait_with_output().unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let behavior = if allow { "allow" } else { "deny" };
+        assert_eq!(json["hookSpecificOutput"]["decision"]["behavior"], behavior);
+    }
+}
