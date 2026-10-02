@@ -19,6 +19,8 @@ struct Line {
 pub fn code_view(tool: Option<&str>, input: Option<&Value>) -> Option<Value> {
     let input = input?;
     let text = |key: &str| input.get(key).and_then(Value::as_str);
+    // An edit shows only the changed text, so its line numbers aren't the file's.
+    let excerpt = matches!(tool, Some("Edit" | "MultiEdit"));
     let (path, lines) = match tool? {
         "Edit" => (
             text("file_path")?,
@@ -51,7 +53,7 @@ pub fn code_view(tool: Option<&str>, input: Option<&Value>) -> Option<Value> {
                     text: l.into(),
                 })
                 .collect();
-            return Some(render("command", "", "SH", "shell", 0, lines));
+            return Some(render("command", "", "SH", "shell", 0, false, lines));
         }
         _ => return None,
     };
@@ -62,7 +64,7 @@ pub fn code_view(tool: Option<&str>, input: Option<&Value>) -> Option<Value> {
         .to_ascii_lowercase();
     let (badge, syntax) = language(&ext);
     let changes = hunks(&lines);
-    Some(render(file, path, &badge, syntax, changes, lines))
+    Some(render(file, path, &badge, syntax, changes, excerpt, lines))
 }
 
 fn render(
@@ -71,6 +73,7 @@ fn render(
     badge: &str,
     syntax: &str,
     changes: usize,
+    excerpt: bool,
     lines: Vec<Line>,
 ) -> Value {
     let lines: Vec<Value> = lines
@@ -83,6 +86,7 @@ fn render(
         "badge": badge,
         "syntax": syntax,
         "changes": changes,
+        "excerpt": excerpt,
         "lines": lines,
     })
 }
@@ -189,6 +193,7 @@ mod tests {
             (Some("RS"), Some("rust"))
         );
         assert_eq!(v["changes"], 2);
+        assert_eq!(v["excerpt"], true);
         let m = marks(&v);
         assert_eq!(
             m[2],
@@ -218,6 +223,10 @@ mod tests {
         assert_eq!(
             (w["badge"].as_str(), w["changes"].as_u64()),
             (Some("PY"), Some(1))
+        );
+        assert_eq!(
+            w["excerpt"], false,
+            "a written file is numbered as the file"
         );
 
         let m = code_view(

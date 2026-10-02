@@ -493,6 +493,12 @@ pre.cmd {
   text-overflow: ellipsis;
 }
 
+.steps li.earlier {
+  display: block;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
 .steps li.done {
   color: var(--muted);
 }
@@ -608,6 +614,16 @@ pre.cmd {
   height: 6px;
   border-radius: 50%;
   background: var(--sun);
+}
+
+.filebar .excerpt {
+  font: 600 10px var(--ui);
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .filebar .path {
