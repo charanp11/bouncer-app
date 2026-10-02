@@ -229,14 +229,16 @@ Transport:
   `FILE_FLAG_FIRST_PIPE_INSTANCE` (fails if someone squatted the name) and
   `PIPE_REJECT_REMOTE_CLIENTS`. Server checks the client process's SID, relay checks
   the server's. Win32 via `windows-sys` (decision below).
-- macOS: `$TMPDIR/bouncer-<uid>/bouncer.sock`; the app creates the folder `0700`
+- macOS: `~/Library/Application Support/Bouncer/bouncer.sock` (was
+  `$TMPDIR/bouncer-<uid>/`, changed after review: `$TMPDIR` can differ between
+  the GUI app and a terminal); the app creates the folder `0700`
   and refuses to use one that is a symlink, not ours, or open to others. Both ends
   compare `getpeereid` with `getuid` (two hand-declared libc functions).
 - Wire: the relay sends one JSON line; for `PermissionRequest` the app answers one
   line, exactly `allow` or `deny`. Anything else, EOF or timeout → nothing printed.
 - The server lives in `bouncer-core` (`ipc` module) so relay integration tests can
   run a real server; the app only starts it. `BOUNCER_ENDPOINT` overrides the
-  path for tests (peer checks still apply).
+  path in debug/test builds only (peer checks still apply).
 - `bouncer install-hooks` / `uninstall-hooks` is a small `bouncer` binary in
   `bouncer-core` (the app is a GUI-subsystem exe on Windows and can't prompt in a
   console). It targets `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`) unless
@@ -276,7 +278,8 @@ Phase 1 is done when:
 - [x] install + uninstall leaves a settings file byte-identical; backup written;
       no write without `y`; user hooks untouched
 - [x] Manual: real `PermissionRequest` allowed end to end, and unanswered → normal
-      terminal prompt (playground, Claude Code 2.1.287)
+      terminal prompt (playground, Claude Code 2.1.143 — first written down as
+      2.1.287, corrected after review)
 - [x] Manual: real `PermissionRequest` denied end to end (playground, default
       permission mode: Claude Code showed "Denied in Bouncer", file not created)
 - [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
@@ -291,6 +294,28 @@ Plan corrections found in this audit:
 4. "Drop large fields" means drop `tool_response` and refuse > 1 MB, not truncate.
 5. (Verify) The relay first read stdin outside the deadline; a stdin left open
    would have hung it until Claude Code's hook timeout. Fixed and tested.
+
+### Phase 1 review follow-ups (2026-10-02, on `phase-2`)
+
+From Charan's review of PR #2, each a separate commit with tests:
+
+1. `BOUNCER_ENDPOINT` is honored only in debug/test builds; CI also runs the
+   relay's unit tests in release to prove release ignores it.
+2. Settings backups (and the replacement file) get the original's permissions
+   before any byte is written.
+3. macOS socket moved to `~/Library/Application Support/Bouncer/` (fixed per
+   user). Socket paths are limited to 104 bytes; that leaves room for user names
+   up to ~48 characters, and a longer one makes `bind` fail safe.
+4. `CLAUDE_CONFIG_DIR` is respected (it already was) and now tested end to end;
+   an empty value no longer means `./settings.json`.
+5. The 2.1.143 fixture names were right. The nine "2.1.287" fixtures were
+   recorded by a session still running 2.1.143 (transcript `"version"` field);
+   renamed, and ten real 2.1.287 recordings added. A test ties each fixture name
+   to its recording session's version. The allow-path manual test also ran on
+   2.1.143; the deny-path one ran on 2.1.287.
+
+Also fixed: a race in two relay tests that counted events before the server's
+handler thread had run.
 
 ## Phase 2 — Island window and manual approvals (~1.5 weeks)
 
@@ -473,8 +498,9 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   diff, `y` required, dated backup, atomic rename, key order kept.
 - Lowest supported Claude Code: 2.1.139.
 - Tests: 35 (relay 17, core 18), green locally and in CI on Windows and macOS.
-  Fixtures: 3 events from Claude Code 2.1.143, 9 (incl. two real
-  `PermissionRequest`s) from 2.1.287.
+  Fixtures: 12 events from Claude Code 2.1.143 (incl. two real
+  `PermissionRequest`s; nine were first mislabeled 2.1.287, fixed after review)
+  and 10 from 2.1.287 (incl. one `PermissionRequest`), added after review.
 - Checked by hand: playground session allowed a Write through Bouncer; unanswered
   requests fell back to the terminal prompt; `git status` (already allowed by
   Claude Code) fired only `PreToolUse`; the live pipe's DACL read back user-only.
