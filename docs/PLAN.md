@@ -4,7 +4,7 @@ Bouncer is a free, open-source desktop companion for Claude Code. It shows every
 session live, auto-approves safe actions under rules you control, flags risky ones
 with a plain reason, and never blocks the agent. Seven phases, about eight weeks, $0.
 
-**Current phase: Phase 1 — Hook relay and local socket**
+**Current phase: Phase 2 — Island window and manual approvals**
 
 ## MVP scope
 
@@ -277,8 +277,8 @@ Phase 1 is done when:
       no write without `y`; user hooks untouched
 - [x] Manual: real `PermissionRequest` allowed end to end, and unanswered → normal
       terminal prompt (playground, Claude Code 2.1.287)
-- [ ] Manual: real `PermissionRequest` denied end to end (not exercised in the
-      playground run; covered only by the automated relay test)
+- [x] Manual: real `PermissionRequest` denied end to end (playground, default
+      permission mode: Claude Code showed "Denied in Bouncer", file not created)
 - [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Plan corrections found in this audit:
@@ -478,8 +478,14 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Checked by hand: playground session allowed a Write through Bouncer; unanswered
   requests fell back to the terminal prompt; `git status` (already allowed by
   Claude Code) fired only `PreToolUse`; the live pipe's DACL read back user-only.
-- Not done by hand: a real deny; a second Windows/macOS account trying to connect
-  (no second account; DACL and peer checks reviewed instead); the macOS socket
-  was exercised only by CI.
+- Denied by hand: a real Write denied through Bouncer showed "Denied in Bouncer /
+  Denied by PermissionRequest hook" and the file wasn't created.
+- Not done by hand: a second Windows/macOS account trying to connect (no second
+  account; DACL and peer checks reviewed instead); the macOS socket was exercised
+  only by CI.
+- Note for Phase 3: in Claude Code's `auto` permission mode, Claude Code approves
+  many actions itself and no `PermissionRequest` fires; Bouncer only sees them
+  through `PreToolUse`.
 - Dependabot alert #1 (glib < 0.20, GHSA-wrw7-89jp-8q8g): reaches us only through
-  Tauri's Linux GTK stack; not compiled for Windows or macOS. No action.
+  Tauri's Linux GTK stack; not compiled for Windows or macOS. Dismissed as
+  "vulnerable code is not used".
