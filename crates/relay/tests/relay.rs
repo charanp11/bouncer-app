@@ -165,6 +165,30 @@ fn hung_app_fire_and_forget_gives_up_at_two_seconds() {
 }
 
 #[test]
+fn stdin_left_open_gives_up_at_two_seconds() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer-hook"))
+        .env(bouncer_relay::ENDPOINT_ENV, endpoint("stdin-open"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(&event("s", "PermissionRequest")).unwrap();
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(4);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let took = start.elapsed();
+    let _ = child.kill();
+    let out = child.wait_with_output().unwrap();
+    drop(stdin);
+    assert!(out.status.success(), "{out:?} after {took:?}");
+    assert!(out.stdout.is_empty());
+    assert!(took < Duration::from_secs(3), "{took:?}");
+}
+
+#[test]
 fn hung_app_permission_request_keeps_waiting_past_two_seconds() {
     // The full 110 s budget is too slow for a test; check it outlives the
     // fire-and-forget budget and still prints nothing when killed.

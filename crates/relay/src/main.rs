@@ -34,33 +34,41 @@ fn main() {
 
 /// What the worker tells the main thread.
 enum Step {
-    /// The request reached the app; wait up to the decision budget.
+    /// A permission request reached the app; wait up to the decision budget.
     Waiting,
-    /// Finished, with the app's answer line if there was one.
+    /// Finished, with the JSON to print if any.
     Done(Option<String>),
 }
 
-/// Returns the JSON to print, or `None` to print nothing.
+/// Returns the JSON to print, or `None` to print nothing. Everything blocking,
+/// reading stdin included, happens on the worker under the deadline.
 fn run() -> Option<String> {
     let start = Instant::now();
-    let (line, event) = read_event(std::io::stdin().lock())?;
-    let asks = event == "PermissionRequest";
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let answer = talk(&line, asks, || {
+        let _ = tx.send(Step::Done(work(|| {
             let _ = tx.send(Step::Waiting);
-        });
-        let _ = tx.send(Step::Done(answer));
+        })));
     });
     let mut deadline = start + FIRE_AND_FORGET;
     loop {
         match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(Step::Waiting) if asks => deadline = start + DECISION,
-            Ok(Step::Waiting) => {}
-            Ok(Step::Done(answer)) if asks => return decision_json(answer.as_deref()?),
-            Ok(Step::Done(_)) | Err(_) => return None,
+            Ok(Step::Waiting) => deadline = start + DECISION,
+            Ok(Step::Done(json)) => return json,
+            Err(_) => return None,
         }
     }
+}
+
+/// Reads the event, forwards it, and for a permission request turns the app's
+/// answer into output. `waiting` is called only for permission requests.
+fn work(waiting: impl FnOnce()) -> Option<String> {
+    let (line, event) = read_event(std::io::stdin().lock())?;
+    if event != "PermissionRequest" {
+        talk(&line, false, || {});
+        return None;
+    }
+    decision_json(&talk(&line, true, waiting)?)
 }
 
 /// The documented `PermissionRequest` output for an exact `allow` / `deny`;
