@@ -2,7 +2,8 @@
 
 Bouncer is a free, open-source desktop companion for Claude Code. It shows every
 session live, auto-approves safe actions under rules you control, flags risky ones
-with a plain reason, and never blocks the agent. Seven phases, about eight weeks, $0.
+with a plain reason, and never blocks the agent. A security guard for coding
+agents, with personality. Ten phases (0–9), $0.
 
 **Current phase: Phase 2 — Island window and manual approvals**
 
@@ -14,7 +15,8 @@ with a plain reason, and never blocks the agent. Seven phases, about eight weeks
 | Approve or deny permission requests from the island | Approving from your phone |
 | Rules engine: auto-allow safe actions, flag risky ones with a reason | Auto-update |
 | Local activity log and a "while you were away" summary | Sitting exactly inside the MacBook notch |
-| Bouncing-ball character and sounds, made in code | Chat, file drop, other integrations |
+| Bouncing-ball character and sounds, made in code (Phase 5) | Music on macOS |
+| Chat through the local Claude Code, file drop, music on Windows (Phases 6–8) | Other integrations |
 
 Events are normalized into one internal `Event` format from Phase 1, so a second
 agent later is a new adapter, not a rewrite. The adapter abstraction is added only
@@ -461,6 +463,14 @@ Manual checks:
 - 2026-10-02, same setup, final `focusable: false`: Charan typed in another
   app, clicked Deny once, kept typing. One click was enough, keyboard focus never
   left the other app, and the relay printed deny.
+- 2026-10-02, same setup, tray: Pause turned the icon grey and the tooltip to
+  "Bouncer (paused): Claude Code asks in the terminal"; a request while paused
+  showed no card and the relay exited empty in 316 ms; the pill read "Paused".
+  Resume restored the colour icon, the "Bouncer" tooltip and cards.
+- 2026-10-02, same setup, Charan clicked Allow once: one click, card cleared,
+  relay printed the documented allow JSON. Charan noticed "1 need you" left over
+  from the request sent while paused; fixed (`asks in terminal`) and covered by
+  `pause_releases_the_queue_and_queues_nothing`.
 
 Plan corrections found in this audit:
 
@@ -509,20 +519,130 @@ auto-denied in the MVP; anything not fully understood goes to the user.
 - Commits: `feat(log): local event store` → `feat(log): secret redaction` →
   `feat(log): retention and wipe` → `feat(ui): away summary card` → `test(log): redaction and summary fixtures`
 
-## Phase 5 — Character, sound and polish (~1 week)
+> **Scope change (Charan, 2026-10-02):** after the security core (Phases 2–4),
+> Phases 5–8 add the character, chat, file drop and music; packaging moves to
+> Phase 9. The pitch stays "a security guard for coding agents, with
+> personality". **None of Phases 5–9 starts until Phase 4 is merged.** Each
+> phase's threats and "done when" below are a first draft; its Audit refines
+> them before any code.
 
-- **Audit:** sketch five states (idle, working, needs you, risky, done); motion and
-  sound budget.
-- **Implement:** bouncing-ball character on a 2D canvas, no image files (bounces while
-  working, blocks the door when risky, hops when done); Web Audio generated sounds;
-  settings screen (sound, observe/auto-allow, rules file, hooks install/uninstall,
-  wipe history); pause when hidden; honor OS reduced motion.
-- **Test:** five states render; mute works; keyboard-only settings; screen reader order.
-- **Verify:** contrast ≥ 4.5:1; idle CPU ~0%; `CREDITS.md` complete.
-- Commits: `feat(ui): character renderer` → `feat(ui): character states` →
-  `feat(ui): generated sounds` → `feat(ui): settings screen` → `feat(ui): reduced motion and accessibility`
+## Phase 5 — Character (~2 weeks)
 
-## Phase 6 — Packaging and release (~1 week)
+- **Audit:** sketch a pose per state (idle, working, needs you, risky, done,
+  paused, away); motion, CPU and sound budget; how eye tracking gets the cursor
+  (inside the island only, or a backend cursor feed, and what that costs at
+  idle); carry over the old Phase 5 items: settings screen, reduced motion,
+  accessibility, keyboard access to the island (Phase 2 made it non-focusable).
+- **Implement:** bouncing ball on a 2D canvas, no image files: real physics bounce
+  (gravity, squash and stretch); eyes that follow the cursor; blinking; squish on
+  click; dizzy after repeated clicks; a pose per state (blocks the door when risky,
+  hops when done); a launch greeting; Web Audio generated sounds; settings screen
+  (sound, observe/auto-allow, rules file, hooks install/uninstall, wipe history);
+  pause when hidden; honour OS reduced motion.
+- **Test:** each pose renders; physics stays stable at any frame rate; mute works;
+  reduced motion stops bounce and tracking; keyboard-only settings; screen reader order.
+- **Verify:** contrast ≥ 4.5:1; idle CPU ~0% (no animation frames while nothing
+  moves); animations never cover or delay the approval card; `CREDITS.md`
+  complete; nothing copied from Coucou.
+
+| Threat | Fix |
+| --- | --- |
+| Animation hides or delays an approval | Card renders above the character; arm delay counts from the card, not the animation |
+| Clicks on the character land on Allow | Character and approval buttons never overlap; squish/dizzy clicks go to the canvas only |
+| Idle CPU / battery drain | Animation loop stops when idle or hidden; cursor feed throttled or window-local |
+| Motion sickness | OS reduced motion honoured; setting to turn motion off |
+
+Phase 5 is done when:
+
+- [ ] Every state has a pose; bounce, eyes, blink, squish, dizzy, greeting work
+- [ ] Generated sounds with mute; reduced motion honoured
+- [ ] Settings screen, keyboard access and screen reader order checked by hand
+- [ ] Idle CPU ~0%; approval card never covered
+- [ ] fmt, clippy, tests green locally and in CI
+
+## Phase 6 — Chat in the island (~1.5 weeks)
+
+- **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
+  session reuse, permission modes, how it authenticates (the user's own login, no
+  API key, $0); which hooks fire in a headless session (Bouncer's own hooks will
+  see it); how to cancel and time out a run.
+- **Implement:** a chat panel in the island; each message runs the user's local
+  `claude -p` as a child process (exec form, no shell, prompt on stdin, never in
+  argv); streamed answer shown with `textContent`; locked-down tool permissions
+  for chat runs; cancel button; clear "this runs your Claude Code" note.
+- **Test:** prompt with shell metacharacters stays literal; hostile model output
+  renders inert; cancel and timeout kill the child; `claude` missing → clear message.
+- **Verify:** Bouncer itself makes no network calls; no API key read or stored;
+  chat history kept only if the user opts in, redacted like the activity log.
+
+| Threat | Fix |
+| --- | --- |
+| Command / argument injection through the prompt | Exec form, prompt on stdin, fixed argv |
+| Chat run takes actions on the machine | Locked-down permission mode / tool allow-list for chat runs; its requests still go through Bouncer |
+| Model output injects markup | `textContent` only, same as agent text |
+| Hung or runaway child | Timeout, cancel, killed on quit |
+| Secrets in chat history | Off by default; redacted, owner-only, wipe |
+| Wrong binary named `claude` on PATH | Resolve once, show the path, user confirms |
+
+Phase 6 is done when:
+
+- [ ] Chat round-trip through `claude -p` with no API key
+- [ ] Injection, hostile-output, cancel and timeout tests pass
+- [ ] Chat runs can't act without approval
+- [ ] fmt, clippy, tests green locally and in CI
+
+## Phase 7 — File drop (~1 week)
+
+- **Audit:** Tauri drag-and-drop events (Phase 2 turned `dragDropEnabled` off);
+  what a drop exposes (paths only, not contents); size and type limits; how a
+  file is attached to a running session or asked about in chat.
+- **Implement:** drop target on the island with a catch animation; choice: "Ask
+  Claude about it" (Phase 6 chat) or "Attach to session"; size/type limits;
+  preview of exactly what will be sent; nothing sent until the user confirms.
+- **Test:** oversized, wrong-type, symlinked, directory and unreadable drops are
+  refused with a reason; cancel sends nothing; file names render inert.
+- **Verify:** file contents never stored (rule 7); no read before confirm beyond
+  size/type checks.
+
+| Threat | Fix |
+| --- | --- |
+| Sensitive file sent by accident | Preview + explicit confirm; nothing sent before it |
+| Symlink / path tricks | Canonicalise; refuse symlinks and folders |
+| Huge or binary file | Size and type limits checked before reading |
+| Hostile file name | `textContent`; hidden characters made visible |
+| Contents persisted | Never stored; only sent where the user chose |
+
+Phase 7 is done when:
+
+- [ ] Drop → catch animation → ask or attach → confirm → sent
+- [ ] Every refusal case tested; cancel sends nothing
+- [ ] fmt, clippy, tests green locally and in CI
+
+## Phase 8 — Music (~1 week)
+
+- **Audit:** Windows media controls (`GlobalSystemMediaTransportControlsSessionManager`
+  via WinRT): what it needs (likely the `windows` crate, a new dependency to ask
+  about), idle cost of listening; macOS later.
+- **Implement (Windows):** now playing (title, artist, app) in the island;
+  play/pause/skip for any player; the ball dances while music plays.
+- **Test:** no player, several players, player closing mid-track; hostile track
+  titles render inert.
+- **Verify:** no network calls (no album-art fetching); idle CPU ~0%; feature can
+  be turned off.
+
+| Threat | Fix |
+| --- | --- |
+| Track metadata injects markup | `textContent`; hidden characters made visible |
+| Listening costs CPU | Event-driven, no polling; off switch |
+| New native dependency | Asked first; cargo deny; Windows-only target |
+
+Phase 8 is done when:
+
+- [ ] Now playing + play/pause/skip work with at least two players on Windows
+- [ ] Ball dances while playing; reduced motion respected
+- [ ] fmt, clippy, tests green locally and in CI
+
+## Phase 9 — Packaging and release (~1 week)
 
 - **Audit:** document unsigned-app warnings per OS; Defender false-positive process;
   check eligibility for free SignPath Foundation signing.
@@ -556,7 +676,10 @@ Core rule: every failure means "ask in the terminal," never "allow."
 | Rules file tampering | Refuse files others can write; show changes | 3 |
 | Secrets in history | Redact, no outputs, local, owner-only, retention, wipe | 4 |
 | Supply chain | Few deps, lockfiles, cargo deny (+ weekly advisories), npm audit, Dependabot, SHA-pinned Actions | 0 |
-| Tampered download | CI-only builds, checksums, attestations | 6 |
+| Chat run acts or is injected | Exec form, prompt on stdin, locked-down chat permissions | 6 |
+| File sent by accident | Preview + confirm; limits; symlinks refused; contents never stored | 7 |
+| Untrusted media / file / model text | `textContent`, hidden characters made visible | 5–8 |
+| Tampered download | CI-only builds, checksums, attestations | 9 |
 
 Out of scope: malware already running as the user (it can edit Claude Code's
 settings directly). The README says so.
@@ -580,6 +703,9 @@ public repos. No paid APIs.
 - Test machines: Charan's Windows PC; a friend's Mac (CI builds) for manual tests.
 - Risky actions are flagged, never auto-denied, in the MVP.
 - Lowest supported Claude Code version: **2.1.139** (Phase 1 audit).
+- Scope (2026-10-02): Phases 5–8 (character, chat via local `claude -p`, file
+  drop, music) added after the security core; packaging is Phase 9. None starts
+  before Phase 4 is merged.
 
 ## Phase summaries
 
