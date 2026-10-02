@@ -165,19 +165,17 @@ button:disabled {
 
 .session {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   column-gap: 8px;
   align-items: center;
 }
 
 .session .state {
-  grid-column: 2 / 4;
+  grid-column: 2;
   color: var(--muted);
-}
-
-.session .id {
-  color: var(--muted);
-  font-family: ui-monospace, Consolas, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session.idle .dot {
