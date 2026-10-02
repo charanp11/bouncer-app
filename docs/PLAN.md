@@ -4,7 +4,7 @@ Bouncer is a free, open-source desktop companion for Claude Code. It shows every
 session live, auto-approves safe actions under rules you control, flags risky ones
 with a plain reason, and never blocks the agent. Seven phases, about eight weeks, $0.
 
-**Current phase: Phase 0 — Repo and guardrails**
+**Current phase: Phase 1 — Hook relay and local socket**
 
 ## MVP scope
 
@@ -54,6 +54,8 @@ Fails safe: app missing or slow → relay prints nothing → Claude Code asks in
 - [x] `rustup default stable` and `rustup component add clippy rustfmt`
 - [x] WebView2 present (it ships with Windows 10/11)
 - [x] Git identity set in the repo: `git config user.name` / `git config user.email`
+- [x] Smart App Control off (Windows Security → App & browser control). In enforce
+  mode it blocks freshly compiled Rust build scripts, so Tauri can't build.
 
 ## Phase 0 — Repo and guardrails (~2 days)
 
@@ -120,20 +122,20 @@ Phase 0 threats:
 
 Phase 0 is done when:
 
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
       pass locally on Windows and in CI on `windows-latest` and `macos-latest`
-- [ ] Crates `bouncer-relay`, `bouncer-core`, `bouncer-app`; `relay` depends only on
+- [x] Crates `bouncer-relay`, `bouncer-core`, `bouncer-app`; `relay` depends only on
       std + `serde_json`
-- [ ] `npm run tauri dev` opens an empty Bouncer window on Windows
-- [ ] `tauri.conf.json` has the CSP above and `freezePrototype: true`; no plugins; no
+- [x] `npm run tauri dev` opens an empty Bouncer window on Windows
+- [x] `tauri.conf.json` has the CSP above and `freezePrototype: true`; no plugins; no
       commands; one capability file for `main` with the fewest core permissions that
       work; no `remote`
-- [ ] `cargo deny check`, `npm audit` and gitleaks pass in CI; the weekly
+- [x] `cargo deny check`, `npm audit` and gitleaks pass in CI; the weekly
       advisories job exists
-- [ ] Every Action pinned to a SHA; workflow `permissions: contents: read`
-- [ ] Dependabot (cargo, npm, github-actions) and private vulnerability reporting
+- [x] Every Action pinned to a SHA; workflow `permissions: contents: read`
+- [x] Dependabot (cargo, npm, github-actions) and private vulnerability reporting
       are on; branch protection on `main` as listed under Verify
-- [ ] `LICENSE` (MIT), `SECURITY.md`, `CREDITS.md`, `README.md`, `.gitignore`,
+- [x] `LICENSE` (MIT), `SECURITY.md`, `CREDITS.md`, `README.md`, `.gitignore`,
       `.gitattributes` exist
 
 Plan corrections found in this audit:
@@ -312,3 +314,28 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 (stable-x86_64-pc-windows-msvc) with clippy and rustfmt, winget 1.29, WebView2
 154.0. Nothing needed installing. `git init -b main`; repo-local identity
 `Charan <177669994+charanp11@users.noreply.github.com>`.
+
+### Phase 0 summary (2026-10-01)
+
+- Repo: github.com/charanp11/bouncer-app, public. Crates `bouncer-relay` (binary
+  `bouncer-hook`, no dependencies yet), `bouncer-core` (empty), `bouncer-app` (Tauri
+  2.12 shell). Frontend: Vite 8 + TypeScript 7, no UI framework.
+- The Tauri shell has the CSP from the audit, a looser `devCsp` for dev only (Vite
+  injects styles and uses an HMR websocket), `freezePrototype`, no plugins, no
+  commands, an empty command allow-list in `build.rs`, and one capability for
+  `main` with no permissions. Vite listens on `127.0.0.1:1420` only.
+- CI (`ci.yml`): fmt, clippy `-D warnings` and tests on Windows and macOS (the
+  frontend is built first); `cargo deny check`, `npm audit` and gitleaks on Linux.
+  `advisories.yml` runs `cargo deny check advisories` every Monday. Actions pinned to
+  SHAs; `permissions: contents: read`; checkout without persisted credentials.
+- GitHub: private vulnerability reporting, Dependabot alerts and security fixes,
+  read-only default Actions token, Actions can't approve PRs, rebase-merge only,
+  branches deleted after merge. `main` protection: PR required (0 approvals), the
+  five CI checks required (bound to GitHub Actions) and up to date, linear history,
+  no force push or deletion, admins included.
+- Tests: 1 (the relay prints nothing and exits 0), passing locally and in CI on
+  both OSes.
+- Notes: the repo was recreated once to drop a line from early history. Dependabot
+  version updates and the weekly advisories job only start once their files are on
+  `main`; run `advisories.yml` once by hand after the merge. cargo-deny warns about
+  duplicate crate versions from Tauri's tree (allowed as warnings).
