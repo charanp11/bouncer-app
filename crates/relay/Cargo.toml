@@ -1,0 +1,15 @@
+[package]
+name = "bouncer-relay"
+description = "Hook relay between Claude Code and the Bouncer app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# std + serde_json only (serde_json arrives in Phase 1).
+[dependencies]
+
+[[bin]]
+name = "bouncer-hook"
+path = "src/main.rs"
