@@ -284,6 +284,21 @@ Phase 1 is done when:
       permission mode: Claude Code showed "Denied in Bouncer", file not created)
 - [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
+Manual checks (playground `../bouncer-playground`; version read from each
+session transcript's `"version"` field):
+
+- 2026-10-02, Claude Code 2.1.143 (session `c419a738`): a real Write
+  `PermissionRequest` allowed through Bouncer; unanswered requests fell back to
+  the terminal prompt; `git status` (allowed by Claude Code) fired only
+  `PreToolUse`. Fixtures: `claude-code-2.1.143-*` (12).
+- 2026-10-02, Claude Code 2.1.287 (session `4936ec29`, `auto` mode): Bash tool
+  events only; no `PermissionRequest` fired. Fixtures: `claude-code-2.1.287-*`.
+- 2026-10-02, Claude Code 2.1.287 (session `c6c7d2ff`, `default` mode): a real
+  Write of `deny-test.txt` denied through Bouncer; Claude Code showed "Denied in
+  Bouncer" and the file wasn't created. Fixture:
+  `claude-code-2.1.287-PermissionRequest-Write.json` (+ its `PreToolUse`,
+  `Notification`). Automated equivalent: `permission_answers_print_the_documented_json`.
+
 Plan corrections found in this audit:
 
 1. Relay dependencies: std + `serde_json` + `windows-sys` (Windows only).
