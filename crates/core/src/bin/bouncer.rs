@@ -4,6 +4,7 @@
 //! replaces the file atomically. Refuses files that aren't valid JSON, and
 //! gives up if the file changes while the user is deciding.
 
+use std::ffi::OsString;
 use std::fs::{self, File, Permissions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -47,7 +48,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
     }
     let path = match settings {
         Some(p) => p,
-        None => default_settings()?,
+        None => default_settings(
+            std::env::var_os("CLAUDE_CONFIG_DIR"),
+            std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }),
+        )?,
     };
 
     let before = match fs::read_to_string(&path) {
@@ -120,11 +124,18 @@ fn done(message: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn default_settings() -> Result<PathBuf, String> {
-    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+/// `$CLAUDE_CONFIG_DIR/settings.json` (as Claude Code reads it), else
+/// `~/.claude/settings.json`. Empty values count as unset, so an empty variable
+/// never means "the current folder".
+fn default_settings(
+    config_dir: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = config_dir.filter(|d| !d.is_empty()) {
         return Ok(PathBuf::from(dir).join("settings.json"));
     }
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+    let home = home
+        .filter(|h| !h.is_empty())
         .ok_or("can't find your home folder; pass --settings")?;
     Ok(PathBuf::from(home).join(".claude").join("settings.json"))
 }
@@ -235,6 +246,22 @@ mod tests {
         assert_eq!(at(0), "19700101-000000Z");
         assert_eq!(at(951_782_400), "20000229-000000Z");
         assert_eq!(at(1_790_812_799), "20260930-235959Z");
+    }
+
+    #[test]
+    fn settings_path_follows_claude_config_dir() {
+        let path = |dir: Option<&str>, home: Option<&str>| {
+            default_settings(dir.map(Into::into), home.map(Into::into))
+        };
+        let home = Path::new("h").join(".claude").join("settings.json");
+        assert_eq!(
+            path(Some("cfg"), Some("h")),
+            Ok(Path::new("cfg").join("settings.json"))
+        );
+        assert_eq!(path(None, Some("h")), Ok(home.clone()));
+        assert_eq!(path(Some(""), Some("h")), Ok(home));
+        assert!(path(None, None).is_err());
+        assert!(path(Some(""), Some("")).is_err());
     }
 
     #[test]

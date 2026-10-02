@@ -185,3 +185,28 @@ fn backup_and_new_file_keep_the_original_permissions() {
     assert_eq!(backup.len(), 1);
     assert_eq!(mode(&backup[0]), 0o600);
 }
+
+#[test]
+fn claude_config_dir_is_the_default_target() {
+    let dir = temp_dir("config-dir");
+    let config = dir.join("config");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(config.join("settings.json"), ORIGINAL).unwrap();
+    let relay = dir.join("bouncer-hook.exe");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer"))
+        .args(["install-hooks", "--relay", relay.to_str().unwrap()])
+        .env("CLAUDE_CONFIG_DIR", &config)
+        // If CLAUDE_CONFIG_DIR were ignored, this keeps the real home safe.
+        .env("HOME", &dir)
+        .env("USERPROFILE", &dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"y\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let written = fs::read_to_string(config.join("settings.json")).unwrap();
+    assert!(written.contains("bouncer-hook.exe"));
+    assert!(!dir.join(".claude").exists());
+}
