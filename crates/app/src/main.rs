@@ -141,20 +141,27 @@ fn show(app: &AppHandle, mut view: Value) {
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
     }
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-    if hidden {
-        let _ = window.hide();
-        return;
-    }
-    lay_out(&window, &island);
-    // The window is not focusable, so showing it never takes the keyboard.
-    let _ = window.show();
+    // Window work happens on the main thread only: this runs on relay
+    // connection threads too, and window calls from them wait for the main
+    // thread, which could be waiting on our locks (deadlock).
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = handle.get_webview_window("main") else {
+            return;
+        };
+        if hidden {
+            let _ = window.hide();
+            return;
+        }
+        lay_out(&window, &handle.state::<Island>());
+        // The window is not focusable, so showing it never takes the keyboard.
+        let _ = window.show();
+    });
 }
 
 /// Sizes the window to what the page asked for and places it: hanging from
 /// the user's spot (or the top centre at first), kept inside the work area.
+/// Main thread only.
 fn lay_out(window: &WebviewWindow, island: &Island) {
     let mut anchor = island.anchor.lock().unwrap();
     let mut placed = island.placed.lock().unwrap();
@@ -271,11 +278,14 @@ fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
         width.clamp(MIN_SIZE.0, MAX_SIZE.0),
         height.clamp(MIN_SIZE.1, MAX_SIZE.1),
     );
-    if let Some(window) = app.get_webview_window("main")
-        && window.is_visible().unwrap_or(false)
-    {
-        lay_out(&window, &island);
-    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main")
+            && window.is_visible().unwrap_or(false)
+        {
+            lay_out(&window, &handle.state::<Island>());
+        }
+    });
 }
 
 /// Opens or closes the island when the user clicks it.
