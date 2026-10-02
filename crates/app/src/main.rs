@@ -20,11 +20,14 @@ struct Island {
     feed: Mutex<Option<Channel<Value>>>,
     /// The user clicked the pill open.
     expanded: AtomicBool,
+    /// Where the island sits: its top-centre point in physical pixels. Kept
+    /// across resizes and hides, so a dragged island stays where it was put.
+    anchor: Mutex<Option<PhysicalPosition<i32>>>,
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![subscribe, decide, expand])
+        .invoke_handler(tauri::generate_handler![subscribe, decide, expand, drag])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -34,6 +37,7 @@ fn main() {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
                 expanded: AtomicBool::new(false),
+                anchor: Mutex::new(None),
             });
             start_relay_server(desk.clone());
             tray(app, desk)?;
@@ -121,18 +125,33 @@ fn show(app: &AppHandle, mut view: Value) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    let mut anchor = island.anchor.lock().unwrap();
+    // While visible, the window itself is the truth (the user may have dragged it).
+    if window.is_visible().unwrap_or(false)
+        && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
+    {
+        *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
+    }
     if hidden {
         let _ = window.hide();
         return;
     }
     let (width, height) = if open { (440.0, 380.0) } else { (320.0, 44.0) };
     let _ = window.set_size(LogicalSize::new(width, height));
-    if let Ok(Some(monitor)) = window.primary_monitor() {
+    let top_centre = anchor.or_else(|| {
+        // First show: top centre of the primary monitor's work area.
+        let monitor = window.primary_monitor().ok()??;
         let area = monitor.work_area();
-        let scale = monitor.scale_factor();
-        let x = area.position.x + (area.size.width as i32 - (width * scale) as i32) / 2;
-        let y = area.position.y + (8.0 * scale) as i32;
-        let _ = window.set_position(PhysicalPosition::new(x, y));
+        Some(PhysicalPosition::new(
+            area.position.x + area.size.width as i32 / 2,
+            area.position.y + (8.0 * monitor.scale_factor()) as i32,
+        ))
+    });
+    if let Some(at) = top_centre {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let x = at.x - (width * scale) as i32 / 2;
+        let _ = window.set_position(PhysicalPosition::new(x, at.y));
+        *anchor = Some(at);
     }
     // The window is not focusable, so showing it never takes the keyboard.
     let _ = window.show();
@@ -149,6 +168,15 @@ fn subscribe(app: AppHandle, island: State<'_, Island>, feed: Channel<Value>) {
 #[tauri::command]
 fn decide(island: State<'_, Island>, id: String, allow: bool) -> Result<(), String> {
     island.desk.decide(&id, allow).map_err(str::to_owned)
+}
+
+/// Moves the island with the mouse while the button is held (the page calls
+/// this when a press on the pill or header starts moving).
+#[tauri::command]
+fn drag(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.start_dragging();
+    }
 }
 
 /// Opens or closes the island when the user clicks it.

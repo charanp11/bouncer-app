@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The island window: our three commands, nothing else.",
+  "description": "The island window: our four commands, nothing else.",
   "windows": ["main"],
-  "permissions": ["allow-subscribe", "allow-decide", "allow-expand"]
+  "permissions": ["allow-subscribe", "allow-decide", "allow-expand", "allow-drag"]
 }
