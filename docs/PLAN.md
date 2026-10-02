@@ -517,6 +517,52 @@ Plan corrections found in this audit:
 8. (Verify) Window work from relay threads could deadlock against `fit` on the
    main thread; all window work now runs on the main thread.
 
+### Island restyle to the prototype (2026-10-02, branch `design-island`)
+
+`design/prototype/bouncer-island.html` is the visual source of truth (Charan).
+The Phase 2 island was rebuilt to it without changing queue or decision logic.
+States built: Hidden (180×5 wake strip, hover 300 ms peeks the pill), Idle pill,
+Working pill (rotates every 4 s with several busy sessions), Sessions, Approval,
+Approval · queue, Paused, Session detail, Approve an edit. Later states (Risky,
+Auto-allowed, Away summary, Chat, File drop, Music) wait for their phases.
+
+Decisions:
+
+- Syntax colors: a small built-in tokenizer (`src/tokenize.ts`: Rust, TS/JS,
+  Python, Go, JSON, shell), returning text pieces, never HTML; tested with
+  Node's built-in runner (`npm test`, also in CI). No dependency (Charan).
+- Session detail's tab bar is hidden until its tabs work; only a close button
+  for now. Chat comes in Phase 6, Sound and Settings in Phase 5 (Charan).
+- Transparent, rounded window. Charan asked for `macOSPrivateApi` on macOS only.
+  In Tauri 2.12.1 that flag is a no-op at runtime (transparency is always
+  available) and only drives a build-time feature check that reads one shared
+  `Cargo.toml`, so a macOS-only flag would fail the Windows build. It is left
+  off. `ROUNDED` in `crates/app/src/main.rs` switches a platform to square
+  corners on a solid window if transparency fails. **Mac test:** check rounded
+  corners, the shadow, and that nothing opaque shows around the island.
+- Diffs come from the hook's own `old_string` / `new_string` / `content`
+  (`bouncer-core::code`), never by reading files; line numbers count within the
+  change. Paths inside the project show relative to it.
+- The window keeps 20 px each side and 32 px below the island for its shadow.
+  That band is transparent but still takes clicks (WebView2 has no per-pixel
+  hit testing); kept small on purpose.
+- Bouncer is built element by element (`src/ball.ts`); the prototype's static
+  SVG markup string isn't used, so no HTML string ever reaches the page.
+- The approval head has no close button (the prototype shows one, but closing
+  can't dismiss a pending request, so it would be a dead button).
+- The detail rail shows real past steps and how each got through (Claude Code,
+  you allowed / denied, waiting for you, asked in terminal); the prototype's
+  future steps ("cargo test", "Done") can't be known and aren't shown.
+
+Manual checks:
+
+- 2026-10-02, debug relay fed by a script, Windows: every built state captured
+  from the real window next to the prototype (in the PR). Fixed on the way: a
+  long path widened the diff pane and pushed Deny / Allow edit out of view;
+  Write cards now show path, blank line, content as the prototype.
+- Dev only: two quick hot reloads can leave the old page's `subscribe` last, so
+  updates go to a dead page until the next reload. Not reachable outside dev.
+
 ## Phase 3 — Rules engine (~1.5 weeks)
 
 Outcomes: auto-allow (logged), ask with a risk reason, or ask plainly. Nothing is

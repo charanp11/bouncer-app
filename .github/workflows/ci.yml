@@ -34,6 +34,7 @@ jobs:
       - run: npm ci
       # tauri::generate_context! needs the built frontend to compile.
       - run: npm run build
+      - run: npm test
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
