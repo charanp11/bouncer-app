@@ -2,7 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use bouncer_core::approvals::{Desk, WAIT};
 use bouncer_core::ipc::{self, Handler, Server};
@@ -27,6 +28,30 @@ struct Island {
     placed: Mutex<Option<PhysicalPosition<i32>>>,
     /// The size the page last asked for (it measures its own content).
     size: Mutex<LogicalSize<f64>>,
+    /// Told about every window move; see `settle_after_moves`.
+    moved: Mutex<mpsc::Sender<()>>,
+}
+
+/// How long the island must stay still before it's checked for being out of
+/// reach: long enough that a drag in progress is never fought.
+const SETTLE: Duration = Duration::from_millis(400);
+
+/// Once the island stops moving (the user let go), brings it back if it
+/// ended up out of reach. Checking during the drag made it stutter.
+fn settle_after_moves(app: AppHandle) -> mpsc::Sender<()> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while rx.recv().is_ok() {
+            while rx.recv_timeout(SETTLE).is_ok() {}
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(window) = handle.get_webview_window("main") {
+                    keep_on_screen(&window.as_ref().window());
+                }
+            });
+        }
+    });
+    tx
 }
 
 /// Bounds on what the page may ask for, in logical pixels. The real sizes
@@ -41,8 +66,8 @@ fn main() {
             subscribe, decide, expand, drag, fit
         ])
         .on_window_event(|window, event| {
-            if let WindowEvent::Moved(pos) = event {
-                keep_on_screen(window, *pos);
+            if let (WindowEvent::Moved(_), Some(island)) = (event, window.try_state::<Island>()) {
+                let _ = island.moved.lock().unwrap().send(());
             }
         })
         .setup(|app| {
@@ -57,6 +82,7 @@ fn main() {
                 anchor: Mutex::new(None),
                 placed: Mutex::new(None),
                 size: Mutex::new(LogicalSize::new(320.0, 44.0)),
+                moved: Mutex::new(settle_after_moves(app.handle().clone())),
             });
             start_relay_server(desk.clone());
             tray(app, desk)?;
@@ -221,8 +247,8 @@ fn work_area<R: tauri::Runtime>(
 /// A drag that leaves the island's centre under the taskbar or off every
 /// screen pushes it back inside the work area, so it can always be reached.
 /// Straddling two monitors is fine, so it can be dragged across them.
-fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>, pos: PhysicalPosition<i32>) {
-    let Ok(size) = window.outer_size() else {
+fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>) {
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
         return;
     };
     let size = (size.width as i32, size.height as i32);
