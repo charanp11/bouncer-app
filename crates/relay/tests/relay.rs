@@ -310,3 +310,25 @@ fn decisions_from_the_desk_reach_claude_code() {
         assert_eq!(json["hookSpecificOutput"]["decision"]["behavior"], behavior);
     }
 }
+
+#[test]
+fn windows_paths_reach_the_island_intact() {
+    use bouncer_core::approvals::{Desk, WAIT};
+    let desk = Arc::new(Desk::new(WAIT, |_| {}));
+    let handler = desk.clone();
+    let path = serve("paths", Arc::new(move |e| handler.handle(e)));
+    let project = r"C:\Users\chara\Desktop\Full Time\x";
+    let input = serde_json::json!({
+        "session_id": "s",
+        "cwd": project,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": { "file_path": format!(r"{project}\src\main.rs") },
+    });
+    assert_silent(&relay(&path, input.to_string().as_bytes()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while desk.view()["sessions"][0].is_null() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(desk.view()["sessions"][0]["project"], project);
+}
