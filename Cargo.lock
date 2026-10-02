@@ -153,6 +153,7 @@ name = "bouncer-app"
 version = "0.0.0"
 dependencies = [
  "bouncer-core",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]
