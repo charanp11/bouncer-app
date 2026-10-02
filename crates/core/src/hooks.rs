@@ -90,33 +90,7 @@ pub fn uninstall(settings: &mut Value) {
 
 /// Line diff of `old` → `new`: changed lines with two lines of context.
 pub fn diff(old: &str, new: &str) -> String {
-    let a: Vec<&str> = old.lines().collect();
-    let b: Vec<&str> = new.lines().collect();
-    // ponytail: O(n·m) LCS table; fine for settings files of a few thousand lines.
-    let mut lcs = vec![vec![0u32; b.len() + 1]; a.len() + 1];
-    for i in (0..a.len()).rev() {
-        for j in (0..b.len()).rev() {
-            lcs[i][j] = if a[i] == b[j] {
-                lcs[i + 1][j + 1] + 1
-            } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
-            };
-        }
-    }
-    let mut ops = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() || j < b.len() {
-        if i < a.len() && j < b.len() && a[i] == b[j] {
-            ops.push((' ', a[i]));
-            (i, j) = (i + 1, j + 1);
-        } else if i < a.len() && (j == b.len() || lcs[i + 1][j] >= lcs[i][j + 1]) {
-            ops.push(('-', a[i]));
-            i += 1;
-        } else {
-            ops.push(('+', b[j]));
-            j += 1;
-        }
-    }
+    let ops = crate::diff::line_ops(old, new);
     let changed_near = |k: usize| {
         ops[k.saturating_sub(2)..(k + 3).min(ops.len())]
             .iter()
