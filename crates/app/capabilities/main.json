@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window. Grants nothing until a phase needs it.",
+  "description": "The island window: our three commands, nothing else.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["allow-subscribe", "allow-decide", "allow-expand"]
 }

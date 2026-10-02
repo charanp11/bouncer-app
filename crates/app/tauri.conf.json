@@ -13,8 +13,21 @@
       {
         "label": "main",
         "title": "Bouncer",
-        "width": 420,
-        "height": 320
+        "width": 320,
+        "height": 44,
+        "visible": false,
+        "focus": false,
+        "focusable": false,
+        "acceptFirstMouse": true,
+        "decorations": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
