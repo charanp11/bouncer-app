@@ -163,6 +163,10 @@ version = "0.0.0"
 [[package]]
 name = "bouncer-relay"
 version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "brotli"
