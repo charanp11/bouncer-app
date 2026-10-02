@@ -163,6 +163,12 @@ function render(view: View) {
   root.append(sessionList(view));
 }
 
+// The window is sized to the island's content.
+new ResizeObserver(() => {
+  const { width, height } = root.getBoundingClientRect();
+  invoke("fit", { width: Math.ceil(width), height: Math.ceil(height) });
+}).observe(root);
+
 const feed = new Channel<View>();
 feed.onmessage = render;
 invoke("subscribe", { feed });
