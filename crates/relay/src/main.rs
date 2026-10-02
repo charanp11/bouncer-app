@@ -18,8 +18,6 @@ const MAX_INPUT: u64 = 1024 * 1024;
 const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path"];
 /// Whole-run budget for an event nobody waits on.
 const FIRE_AND_FORGET: Duration = Duration::from_secs(2);
-/// Whole-run budget for a permission request (under the hook's 120 s timeout).
-const DECISION: Duration = Duration::from_secs(110);
 /// Longest answer line read from the app.
 const MAX_ANSWER: u64 = 64;
 
@@ -53,7 +51,7 @@ fn run() -> Option<String> {
     let mut deadline = start + FIRE_AND_FORGET;
     loop {
         match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(Step::Waiting) => deadline = start + DECISION,
+            Ok(Step::Waiting) => deadline = start + bouncer_relay::DECISION_BUDGET,
             Ok(Step::Done(json)) => return json,
             Err(_) => return None,
         }

@@ -6,6 +6,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[cfg(unix)]
 pub mod unix;
@@ -16,6 +17,10 @@ pub mod win;
 pub use unix::{Stream, connect};
 #[cfg(windows)]
 pub use win::{Stream, connect};
+
+/// The relay's whole-run budget for a permission request (under the hook's
+/// 120 s timeout). The app must answer well before it.
+pub const DECISION_BUDGET: Duration = Duration::from_secs(110);
 
 /// Overrides the endpoint path in debug and test builds only; release builds
 /// ignore it, so the environment can't point the relay elsewhere. Peer checks
