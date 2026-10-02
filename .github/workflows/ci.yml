@@ -37,6 +37,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      # Release builds must ignore BOUNCER_ENDPOINT.
+      - run: cargo test --locked --release -p bouncer-relay --lib
 
   deny:
     runs-on: ubuntu-latest
