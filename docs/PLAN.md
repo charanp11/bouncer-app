@@ -261,19 +261,25 @@ Phase 1 threats:
 
 Phase 1 is done when:
 
-- [ ] Relay: stdin > 1 MB, malformed JSON, missing fields, app closed → empty
-      stdout, exit 0; app closed exits fast (measured)
-- [ ] Hung app: fire-and-forget gives up at 2 s; decision budget is 110 s
-- [ ] Real recorded payloads (playground) are fixtures and parse into `Event`
-- [ ] `allow`/`deny` from the app print the documented JSON; anything else prints
+- [x] Relay: stdin > 1 MB, malformed JSON, missing fields, app closed → empty
+      stdout, exit 0; app closed exits fast (measured: ~25 ms median on Windows,
+      including process start)
+- [x] Hung app: fire-and-forget gives up at 2 s; decision budget is 110 s (tested:
+      still waiting after 3 s; the 110 s value itself is a constant, not run)
+- [x] Real recorded payloads (playground) are fixtures and parse into `Event`
+- [x] `allow`/`deny` from the app print the documented JSON; anything else prints
       nothing; non-`PermissionRequest` events never print
-- [ ] Two sessions stream concurrently to one server
-- [ ] Pipe DACL / socket folder mode set; peer check on both ends (code + test of
-      the own-user path; another-user path reviewed by hand)
-- [ ] install + uninstall leaves a settings file byte-identical; backup written;
+- [x] Two sessions stream concurrently to one server
+- [x] Pipe DACL / socket folder mode set; peer check on both ends (code + test of
+      the own-user path; another-user path reviewed by hand). Live pipe read back
+      as `D:P(A;;FA;;;<own SID>)`, protected, one entry
+- [x] install + uninstall leaves a settings file byte-identical; backup written;
       no write without `y`; user hooks untouched
-- [ ] Manual: real `PermissionRequest` approved/denied end to end in the playground
-- [ ] fmt, clippy, tests green locally and in CI
+- [x] Manual: real `PermissionRequest` allowed end to end, and unanswered → normal
+      terminal prompt (playground, Claude Code 2.1.287)
+- [ ] Manual: real `PermissionRequest` denied end to end (not exercised in the
+      playground run; covered only by the automated relay test)
+- [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Plan corrections found in this audit:
 
@@ -283,6 +289,8 @@ Plan corrections found in this audit:
    CLI is a `bouncer` binary in `bouncer-core`.
 3. Hook timeouts must be set explicitly; exec form needs Claude Code ≥ 2.1.139.
 4. "Drop large fields" means drop `tool_response` and refuse > 1 MB, not truncate.
+5. (Verify) The relay first read stdin outside the deadline; a stdin left open
+   would have hung it until Claude Code's hook timeout. Fixed and tested.
 
 ## Phase 2 — Island window and manual approvals (~1.5 weeks)
 
@@ -445,3 +453,33 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   version updates and the weekly advisories job only start once their files are on
   `main`; run `advisories.yml` once by hand after the merge. cargo-deny warns about
   duplicate crate versions from Tauri's tree (allowed as warnings).
+
+### Phase 1 summary (2026-10-02)
+
+- `bouncer-hook` (relay): reads one hook event (≤ 1 MB, else dropped whole),
+  drops `tool_response` / `transcript_path`, forwards it as one JSON line. All
+  blocking work, stdin included, runs on a worker under a 2 s budget, extended to
+  110 s only for `PermissionRequest`. Prints only for an exact `allow` / `deny`
+  from a same-user app. Dependencies: `serde_json`, plus `windows-sys` on Windows.
+- Transport: Windows named pipe `\.\pipe\bouncer-<SID>` with a protected
+  user-only DACL, `FIRST_PIPE_INSTANCE`, remote clients rejected, SID checked on
+  both ends. macOS: socket in `$TMPDIR/bouncer-<uid>/` (`0700`, owner and mode
+  checked), `getpeereid` on both ends.
+- `bouncer-core`: `Event` (agent, session, project, kind, tool, input, time); the
+  `ipc` server; `hooks` install/uninstall logic and the `bouncer` CLI. The app
+  starts the server and answers nothing yet (every request falls back to the
+  terminal). `examples/answer.rs` is a console stand-in used for manual checks.
+- `bouncer install-hooks` / `uninstall-hooks`: exec-form hooks for eight events,
+  diff, `y` required, dated backup, atomic rename, key order kept.
+- Lowest supported Claude Code: 2.1.139.
+- Tests: 35 (relay 17, core 18), green locally and in CI on Windows and macOS.
+  Fixtures: 3 events from Claude Code 2.1.143, 9 (incl. two real
+  `PermissionRequest`s) from 2.1.287.
+- Checked by hand: playground session allowed a Write through Bouncer; unanswered
+  requests fell back to the terminal prompt; `git status` (already allowed by
+  Claude Code) fired only `PreToolUse`; the live pipe's DACL read back user-only.
+- Not done by hand: a real deny; a second Windows/macOS account trying to connect
+  (no second account; DACL and peer checks reviewed instead); the macOS socket
+  was exercised only by CI.
+- Dependabot alert #1 (glib < 0.20, GHSA-wrw7-89jp-8q8g): reaches us only through
+  Tauri's Linux GTK stack; not compiled for Windows or macOS. No action.
