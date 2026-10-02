@@ -28,8 +28,9 @@ pub const ARM: Duration = Duration::from_millis(600);
 
 /// Status of a session whose request went to Claude Code's own prompt.
 const IN_TERMINAL: &str = "asks in terminal";
-/// Steps kept per session for the detail view.
-const HISTORY: usize = 8;
+/// Steps kept per session for the detail view (it groups repeats and shows
+/// the latest few).
+const HISTORY: usize = 40;
 
 struct Session {
     id: String,
@@ -542,7 +543,7 @@ mod tests {
         desk.decide(&id, false).unwrap();
         ask.join().unwrap();
         assert_eq!(history(&desk)[1]["how"], "you denied");
-        for i in 0..20 {
+        for i in 0..HISTORY + 5 {
             desk.handle(event("a", "PreToolUse", &format!("echo {i}")));
         }
         assert_eq!(history(&desk).as_array().unwrap().len(), HISTORY);

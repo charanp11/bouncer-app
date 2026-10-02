@@ -6,6 +6,7 @@
 // focused (the window can't take focus at all), and Enter can't reach it.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
+import { group, latest, title, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
 
@@ -16,9 +17,10 @@ type Code = {
   badge: string;
   syntax: string;
   changes: number;
+  /** Only the changed text: its line numbers aren't the file's. */
+  excerpt: boolean;
   lines: Line[];
 };
-type Step = { label: string; how: string };
 type Session = {
   id: string;
   agent: string;
@@ -359,6 +361,11 @@ function codePane(code: Code | null, project: string, caret: boolean): HTMLEleme
   }
   bar.append(el("span", "lang", code.badge), el("span", "fname", code.file));
   if (code.changes) bar.append(el("span", "mod"));
+  if (code.excerpt) {
+    const excerpt = el("span", "excerpt", "Excerpt");
+    excerpt.title = "Only the changed part; line numbers count within it, not the file.";
+    bar.append(excerpt);
+  }
   const path = el("span", "path", relative(code.path, project));
   path.title = code.path;
   bar.append(path);
@@ -383,12 +390,13 @@ function rail(session: Session | undefined, project: string, agent: string, stat
   proj.title = project;
   const age = session ? ` · ${minutes(session.started_ms)}` : "";
   const steps = el("ul", "steps");
-  const history = session?.history ?? [];
-  history.forEach((step, i) => {
-    const now = i === history.length - 1 && session?.status !== "idle";
+  const { shown, earlier } = latest(group(session?.history ?? []));
+  if (earlier) steps.append(el("li", "earlier", `+${earlier} earlier`));
+  shown.forEach((step, i) => {
+    const now = i === shown.length - 1 && session?.status !== "idle";
     const icon = !now ? "ok" : step.how === "waiting for you" ? "wait" : "spin";
     const li = el("li", now ? "now" : "done");
-    li.append(el("span", `ic ${icon}`), el("span", "", step.label));
+    li.append(el("span", `ic ${icon}`), el("span", "", title(step)));
     if (step.how) li.append(el("span", `tag ${TAG[step.how] ?? ""}`, step.how));
     steps.append(li);
   });
