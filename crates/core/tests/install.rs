@@ -164,3 +164,24 @@ fn bad_arguments_fail() {
         assert!(!out.status.success(), "{args:?}");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn backup_and_new_file_keep_the_original_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    let dir = temp_dir("perms");
+    let settings = dir.join("settings.json");
+    fs::write(&settings, ORIGINAL).unwrap();
+    fs::set_permissions(&settings, fs::Permissions::from_mode(0o600)).unwrap();
+
+    assert!(install(&dir, "y\n").status.success());
+    assert_eq!(mode(&settings), 0o600);
+    let backup: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains(".bouncer-backup-"))
+        .collect();
+    assert_eq!(backup.len(), 1);
+    assert_eq!(mode(&backup[0]), 0o600);
+}

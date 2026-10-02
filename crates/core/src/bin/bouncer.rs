@@ -4,7 +4,7 @@
 //! replaces the file atomically. Refuses files that aren't valid JSON, and
 //! gives up if the file changes while the user is deciding.
 
-use std::fs::{self, File};
+use std::fs::{self, File, Permissions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -135,8 +135,10 @@ fn file_name(path: &Path) -> Result<&str, String> {
         .ok_or_else(|| format!("bad settings path {}", path.display()))
 }
 
-/// Saves `text` as `<file>.bouncer-backup-<UTC time>[-n]`, never overwriting.
+/// Saves `text` as `<file>.bouncer-backup-<UTC time>[-n]`, never overwriting,
+/// with the same permissions as `path`.
 fn backup(path: &Path, text: &str) -> Result<PathBuf, String> {
+    let perms = perms_of(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let base = format!(
         "{}.bouncer-backup-{}",
         file_name(path)?,
@@ -149,7 +151,7 @@ fn backup(path: &Path, text: &str) -> Result<PathBuf, String> {
             format!("{base}-{n}")
         };
         let backup = path.with_file_name(name);
-        match write_new(&backup, text) {
+        match write_new(&backup, text, perms.clone()) {
             Ok(()) => return Ok(backup),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("backup {}: {e}", backup.display())),
@@ -158,11 +160,28 @@ fn backup(path: &Path, text: &str) -> Result<PathBuf, String> {
     Err("too many backups this second".into())
 }
 
-/// Creates `path`, failing if it exists, and syncs it to disk.
-fn write_new(path: &Path, text: &str) -> io::Result<()> {
+/// The permissions of `path`, or `None` if it doesn't exist.
+fn perms_of(path: &Path) -> io::Result<Option<Permissions>> {
+    match fs::metadata(path) {
+        Ok(meta) => Ok(Some(meta.permissions())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Creates `path` (failing if it exists) with `perms` set before any byte is
+/// written, then syncs it to disk. Removes it again on error.
+fn write_new(path: &Path, text: &str, perms: Option<Permissions>) -> io::Result<()> {
     let mut file = File::create_new(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
+    let result = perms
+        .map_or(Ok(()), |p| file.set_permissions(p))
+        .and_then(|()| file.write_all(text.as_bytes()))
+        .and_then(|()| file.sync_all());
+    if result.is_err() {
+        drop(file);
+        let _ = fs::remove_file(path);
+    }
+    result
 }
 
 /// Writes a temp file next to `path` (same permissions), then renames it over.
@@ -175,13 +194,8 @@ fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         fs::create_dir_all(dir)?;
     }
-    let result = write_new(&tmp, text)
-        .and_then(|()| match fs::metadata(path) {
-            Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        })
-        .and_then(|()| fs::rename(&tmp, path));
+    write_new(&tmp, text, perms_of(path)?)?;
+    let result = fs::rename(&tmp, path);
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -221,5 +235,24 @@ mod tests {
         assert_eq!(at(0), "19700101-000000Z");
         assert_eq!(at(951_782_400), "20000229-000000Z");
         assert_eq!(at(1_790_812_799), "20260930-235959Z");
+    }
+
+    #[test]
+    fn write_new_applies_permissions_and_still_writes() {
+        let dir = std::env::temp_dir().join(format!("bouncer-perms-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("original"), "").unwrap();
+        let mut readonly = fs::metadata(dir.join("original")).unwrap().permissions();
+        readonly.set_readonly(true);
+        let file = dir.join("copy");
+        write_new(&file, "text", Some(readonly)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "text");
+        let mut perms = fs::metadata(&file).unwrap().permissions();
+        assert!(perms.readonly());
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(&file, perms).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
