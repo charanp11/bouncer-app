@@ -11,10 +11,11 @@ use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::code::code_view;
 use crate::event::Event;
 use crate::ipc::Decision;
 
@@ -27,6 +28,8 @@ pub const ARM: Duration = Duration::from_millis(600);
 
 /// Status of a session whose request went to Claude Code's own prompt.
 const IN_TERMINAL: &str = "asks in terminal";
+/// Steps kept per session for the detail view.
+const HISTORY: usize = 8;
 
 struct Session {
     id: String,
@@ -35,6 +38,13 @@ struct Session {
     /// What it's doing right now, e.g. "Editing main.rs".
     step: String,
     status: &'static str,
+    started: SystemTime,
+    last: SystemTime,
+    /// Recent steps, oldest first, each with who let it through ("" = Claude
+    /// Code's own rules).
+    history: VecDeque<(String, &'static str)>,
+    /// The code pane for the current tool call, if it has one.
+    code: Option<Value>,
 }
 
 struct Pending {
@@ -63,6 +73,10 @@ impl State {
                     project: event.project.clone(),
                     step: "Idle".into(),
                     status: "idle",
+                    started: SystemTime::now(),
+                    last: SystemTime::now(),
+                    history: VecDeque::new(),
+                    code: None,
                 });
                 self.sessions.len() - 1
             }
@@ -78,8 +92,27 @@ impl State {
         }
         let session = self.session(event);
         session.project.clone_from(&event.project);
+        session.last = SystemTime::now();
         match event.kind.as_str() {
-            "PreToolUse" | "PermissionRequest" => session.step = step(event),
+            "PreToolUse" | "PermissionRequest" => {
+                session.step = step(event);
+                session.code = code_view(event.tool.as_deref(), event.input.as_ref());
+                let how = match event.kind.as_str() {
+                    "PreToolUse" => "",
+                    _ if paused => "asked in terminal",
+                    _ => "waiting for you",
+                };
+                // A request follows the PreToolUse of the same call: mark it, don't repeat it.
+                match session.history.back_mut() {
+                    Some(last) if !how.is_empty() && last.0 == session.step => last.1 = how,
+                    _ => {
+                        session.history.push_back((session.step.clone(), how));
+                        if session.history.len() > HISTORY {
+                            session.history.pop_front();
+                        }
+                    }
+                }
+            }
             "UserPromptSubmit" => session.step = "Thinking".into(),
             "Stop" => session.step = "Idle".into(),
             _ => {}
@@ -93,8 +126,9 @@ impl State {
         };
     }
 
-    /// Removes a request from the queue and gives its session `status`.
-    fn take(&mut self, id: &str, status: &'static str) -> Option<Pending> {
+    /// Removes a request from the queue, gives its session `status`, and notes
+    /// `how` it ended on the session's latest step.
+    fn take(&mut self, id: &str, status: &'static str, how: &'static str) -> Option<Pending> {
         let i = self.queue.iter().position(|p| p.id == id)?;
         let pending = self.queue.remove(i)?;
         if let Some(s) = self
@@ -103,6 +137,9 @@ impl State {
             .find(|s| s.id == pending.event.session)
         {
             s.status = status;
+            if let Some(last) = s.history.back_mut() {
+                last.1 = how;
+            }
         }
         Some(pending)
     }
@@ -157,7 +194,12 @@ impl Desk {
         self.publish();
         let id = id?;
         let answer = rx.recv_timeout(self.wait).ok();
-        if answer.is_none() && self.lock().take(&id, IN_TERMINAL).is_some() {
+        if answer.is_none()
+            && self
+                .lock()
+                .take(&id, IN_TERMINAL, "asked in terminal")
+                .is_some()
+        {
             self.publish();
         }
         answer
@@ -179,8 +221,9 @@ impl Desk {
             if allow && early {
                 return Err("too soon to allow");
             }
+            let how = if allow { "you allowed" } else { "you denied" };
             state
-                .take(id, "working")
+                .take(id, "working", how)
                 .ok_or("unknown or already answered request")?
         };
         let _ = pending.answer.send(if allow {
@@ -201,7 +244,7 @@ impl Desk {
             if paused {
                 let ids: Vec<String> = state.queue.iter().map(|p| p.id.clone()).collect();
                 for id in ids {
-                    state.take(&id, IN_TERMINAL); // dropping the sender wakes the waiter with nothing
+                    state.take(&id, IN_TERMINAL, "asked in terminal"); // dropping the sender wakes the waiter with nothing
                 }
             }
         }
@@ -225,6 +268,10 @@ impl Desk {
                     "project": visible(&s.project),
                     "step": visible(&s.step),
                     "status": s.status,
+                    "started_ms": epoch_ms(s.started),
+                    "last_ms": epoch_ms(s.last),
+                    "history": s.history.iter().map(|(label, how)| json!({ "label": visible(label), "how": how })).collect::<Vec<_>>(),
+                    "code": s.code,
                 })
             })
             .collect();
@@ -239,11 +286,17 @@ impl Desk {
                     "project": visible(&p.event.project),
                     "tool": p.event.tool.as_deref().map(visible),
                     "text": visible(&request_text(&p.event)),
+                    "code": code_view(p.event.tool.as_deref(), p.event.input.as_ref()),
                 })
             })
             .collect();
         json!({ "paused": state.paused, "sessions": sessions, "queue": queue })
     }
+}
+
+fn epoch_ms(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// 128 random-looking bits: two hashes of the counter under OS-seeded SipHash
@@ -469,6 +522,34 @@ mod tests {
         assert_eq!(desk.view()["sessions"][0]["step"], "Idle");
         desk.handle(event("a", "UserPromptSubmit", ""));
         assert_eq!(desk.view()["sessions"][0]["step"], "Thinking");
+    }
+
+    #[test]
+    fn history_records_who_let_each_step_through() {
+        let desk = desk(WAIT);
+        desk.handle(event("a", "PreToolUse", "ls"));
+        desk.handle(event("a", "PreToolUse", "cargo test"));
+        let ask = ask(&desk, "a", "cargo test");
+        let id = queued(&desk, 1).remove(0);
+        let history = |d: &Desk| d.view()["sessions"][0]["history"].clone();
+        assert_eq!(
+            history(&desk),
+            json!([
+                { "label": "Running ls", "how": "" },
+                { "label": "Running cargo test", "how": "waiting for you" }
+            ])
+        );
+        desk.decide(&id, false).unwrap();
+        ask.join().unwrap();
+        assert_eq!(history(&desk)[1]["how"], "you denied");
+        for i in 0..20 {
+            desk.handle(event("a", "PreToolUse", &format!("echo {i}")));
+        }
+        assert_eq!(history(&desk).as_array().unwrap().len(), HISTORY);
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["code"]["file"], "command");
+        assert!(s["last_ms"].as_u64() >= s["started_ms"].as_u64());
     }
 
     #[test]
