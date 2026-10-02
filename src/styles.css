@@ -575,6 +575,8 @@ pre.cmd {
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* A long path or line scrolls/ellipsizes; it never widens the pane. */
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
