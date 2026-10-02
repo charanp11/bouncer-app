@@ -170,6 +170,7 @@ dependencies = [
 name = "bouncer-relay"
 version = "0.0.0"
 dependencies = [
+ "bouncer-core",
  "serde_json",
  "windows-sys 0.61.2",
 ]
