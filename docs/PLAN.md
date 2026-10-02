@@ -178,6 +178,112 @@ Plan corrections found in this audit:
   `feat(app): local socket server with peer check` → `feat(relay): wait for permission decisions with deadline` →
   `feat(cli): safe hook install and uninstall` → `test(relay): fixtures, timeouts and malformed input`
 
+### Phase 1 audit (2026-10-01)
+
+Sources: code.claude.com/docs/en/hooks, the Claude Code `CHANGELOG.md`, Coucou's
+`windows/hook/src/{main,win}.rs`, and payloads recorded in `../bouncer-playground`
+(its own `.claude/settings.local.json`; user settings untouched).
+
+What Claude Code sends and accepts:
+
+- Every hook gets JSON on stdin with `session_id`, `transcript_path`, `cwd`,
+  `hook_event_name`, usually `permission_mode`, plus per-event fields.
+  `PreToolUse` / `PermissionRequest` add `tool_name`, `tool_input`, `tool_use_id`
+  (`PermissionRequest` may add `permission_suggestions`); `PostToolUse` adds
+  `tool_response` (can be a whole file); `UserPromptSubmit` adds `prompt`.
+- Exit 0 + empty stdout = "no decision", Claude Code carries on normally. Exit 2
+  blocks on `PreToolUse` (we never use it); other non-zero codes are logged errors.
+- `PermissionRequest` allow:
+  `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
+  deny: same with `{"behavior":"deny","message":"..."}`. We send no `updatedInput`
+  and no permission updates.
+- `PreToolUse` fires before every tool call, including ones Claude Code's own rules
+  already allow; `PermissionRequest` fires only when Claude Code would show a
+  dialog. So: Bouncer observes everything via `PreToolUse` (prints nothing) and
+  answers only `PermissionRequest`.
+- Hooks for one event run in parallel; the default command timeout is 600 s
+  (since 2.1.3). We set `timeout` explicitly anyway: 120 s for
+  `PermissionRequest` (above our 110 s wait), 5 s for the rest.
+- Exec form (`"command": <path>, "args": []`, since 2.1.139) spawns the relay
+  without a shell, so paths with spaces ("Full Time") and shell differences
+  (Git Bash vs PowerShell on Windows) don't matter.
+- Hooked events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`,
+  `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`.
+
+Lowest supported Claude Code version: **2.1.139** — `PermissionRequest` exists
+since 2.0.45, the fix stopping hook "allow" from bypassing `deny` rules landed in
+2.1.77, and exec-form `args` arrived in 2.1.139.
+
+From Coucou (studied, not copied): 300 ms connect / 2 s fire-and-forget / 110 s
+decision budgets enforced by the main thread with `recv_timeout` (a worker does the
+blocking I/O and is abandoned on overrun); SID in the pipe name; relay checks the
+pipe server's SID via `GetNamedPipeServerProcessId`; only exact, known answers
+print anything. Differences: Coucou truncates long strings, which could show a
+user a cut-off command to approve — Bouncer forwards inputs whole and drops the
+event instead if stdin exceeds 1 MB; Bouncer also restricts the pipe's DACL and
+checks the client on the server side.
+
+Transport:
+
+- Windows: `\\.\pipe\bouncer-<SID>`, created with DACL `D:P(A;;GA;;;<SID>)`,
+  `FILE_FLAG_FIRST_PIPE_INSTANCE` (fails if someone squatted the name) and
+  `PIPE_REJECT_REMOTE_CLIENTS`. Server checks the client process's SID, relay checks
+  the server's. Win32 via `windows-sys` (decision below).
+- macOS: `$TMPDIR/bouncer-<uid>/bouncer.sock`; the app creates the folder `0700`
+  and refuses to use one that is a symlink, not ours, or open to others. Both ends
+  compare `getpeereid` with `getuid` (two hand-declared libc functions).
+- Wire: the relay sends one JSON line; for `PermissionRequest` the app answers one
+  line, exactly `allow` or `deny`. Anything else, EOF or timeout → nothing printed.
+- The server lives in `bouncer-core` (`ipc` module) so relay integration tests can
+  run a real server; the app only starts it. `BOUNCER_ENDPOINT` overrides the
+  path for tests (peer checks still apply).
+- `bouncer install-hooks` / `uninstall-hooks` is a small `bouncer` binary in
+  `bouncer-core` (the app is a GUI-subsystem exe on Windows and can't prompt in a
+  console). It targets `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`) unless
+  `--settings <file>` is given. Our entries = hook commands whose file name is
+  `bouncer-hook[.exe]`.
+
+Phase 1 threats:
+
+| Threat | Fix |
+| --- | --- |
+| Relay prints "allow" by mistake | Only an exact `allow` line from a verified app, only for `PermissionRequest`; every other path prints nothing; tests assert empty stdout |
+| App missing / slow / hung blocks Claude Code | 300 ms connect, 2 s fire-and-forget, 110 s decision; main thread never blocks on I/O; exit 0 always |
+| Another user answers or reads events | User-only DACL / `0700` folder; SID / uid check on both ends |
+| Pipe-name squatting (Windows) | SID in name, `FIRST_PIPE_INSTANCE`, relay checks server SID |
+| Socket folder swapped for a symlink (macOS) | `symlink_metadata`, owner and mode checked before bind |
+| Huge or malformed stdin | 1 MB cap → drop event; parse failure → exit 0; `tool_response` dropped |
+| User approves a truncated command | No per-field truncation; whole event or nothing |
+| Settings file damaged or clobbered | Dated backup, merge only our entries, diff shown, `y` required, atomic rename; key order kept (`serde_json` `preserve_order`) |
+| Uninstall removes user hooks | Only entries pointing at `bouncer-hook` removed; containers removed only if we emptied them |
+| Shell injection via install path | Exec form, no shell |
+| Hooks fire inside the Claude Code session building Bouncer | Recording and manual tests only in `../bouncer-playground` |
+
+Phase 1 is done when:
+
+- [ ] Relay: stdin > 1 MB, malformed JSON, missing fields, app closed → empty
+      stdout, exit 0; app closed exits fast (measured)
+- [ ] Hung app: fire-and-forget gives up at 2 s; decision budget is 110 s
+- [ ] Real recorded payloads (playground) are fixtures and parse into `Event`
+- [ ] `allow`/`deny` from the app print the documented JSON; anything else prints
+      nothing; non-`PermissionRequest` events never print
+- [ ] Two sessions stream concurrently to one server
+- [ ] Pipe DACL / socket folder mode set; peer check on both ends (code + test of
+      the own-user path; another-user path reviewed by hand)
+- [ ] install + uninstall leaves a settings file byte-identical; backup written;
+      no write without `y`; user hooks untouched
+- [ ] Manual: real `PermissionRequest` approved/denied end to end in the playground
+- [ ] fmt, clippy, tests green locally and in CI
+
+Plan corrections found in this audit:
+
+1. Relay dependencies: std + `serde_json` + `windows-sys` (Windows only).
+   Decision (Charan): `windows-sys` 0.61 — already in `Cargo.lock` via Tauri.
+2. The socket server goes in `bouncer-core`, not `bouncer-app` (testability); the
+   CLI is a `bouncer` binary in `bouncer-core`.
+3. Hook timeouts must be set explicitly; exec form needs Claude Code ≥ 2.1.139.
+4. "Drop large fields" means drop `tool_response` and refuse > 1 MB, not truncate.
+
 ## Phase 2 — Island window and manual approvals (~1.5 weeks)
 
 - **Audit:** Tauri window options (transparent, always on top, no taskbar icon, no
@@ -302,7 +408,7 @@ public repos. No paid APIs.
   name stays Bouncer.
 - Test machines: Charan's Windows PC; a friend's Mac (CI builds) for manual tests.
 - Risky actions are flagged, never auto-denied, in the MVP.
-- Lowest supported Claude Code version: decided in Phase 1 audit.
+- Lowest supported Claude Code version: **2.1.139** (Phase 1 audit).
 
 ## Phase summaries
 
