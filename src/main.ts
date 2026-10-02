@@ -340,7 +340,14 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   return c;
 }
 
-function codePane(code: Code | null, caret: boolean): HTMLElement {
+/** `path` relative to `project` when it's inside it, as the prototype shows. */
+function relative(path: string, project: string): string {
+  const root = project.replace(/[\\/]+$/, "");
+  const inside = path.length > root.length && path.startsWith(root) && "\\/".includes(path[root.length]);
+  return inside ? path.slice(root.length + 1) : path;
+}
+
+function codePane(code: Code | null, project: string, caret: boolean): HTMLElement {
   const pane = el("div", "code");
   const bar = el("div", "filebar");
   const lines = el("div", "lines");
@@ -352,7 +359,7 @@ function codePane(code: Code | null, caret: boolean): HTMLElement {
   }
   bar.append(el("span", "lang", code.badge), el("span", "fname", code.file));
   if (code.changes) bar.append(el("span", "mod"));
-  const path = el("span", "path", code.path);
+  const path = el("span", "path", relative(code.path, project));
   path.title = code.path;
   bar.append(path);
   const lastAdd = caret ? code.lines.map((l) => l.mark).lastIndexOf("+") : -1;
@@ -418,7 +425,7 @@ function renderApproval(view: View, request: Request, done?: boolean) {
     const bar = el("div", "bar");
     draggable(bar);
     const d = el("div", "detail");
-    const pane = codePane(request.code, false);
+    const pane = codePane(request.code, request.project, false);
     const ask = el("div", "askbar");
     if (done !== undefined) {
       ask.append(
@@ -485,7 +492,7 @@ function render(view: View) {
     const state: BallState =
       session.status === "needs you" ? "needs" : session.status === "working" ? "working" : "idle";
     const d = el("div", "detail");
-    d.append(rail(session, session.project, session.agent, state), codePane(session.code, session.status === "working"));
+    d.append(rail(session, session.project, session.agent, state), codePane(session.code, session.project, session.status === "working"));
     island.replaceChildren(bar, d);
     later(CLOCK_MS);
     return;
