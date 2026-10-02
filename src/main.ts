@@ -98,7 +98,7 @@ function card(request: Request, count: number): HTMLElement {
 function sessionList(view: View): HTMLElement {
   const list = el("ul", "sessions");
   for (const s of view.sessions) {
-    const item = el("li", `session ${s.status.replace(" ", "-")}`);
+    const item = el("li", `session ${s.status.replaceAll(" ", "-")}`);
     item.title = `${s.project}\n${s.id}`;
     item.append(
       el("span", "dot"),

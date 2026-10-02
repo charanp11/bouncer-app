@@ -177,3 +177,7 @@ button:disabled {
 .session.needs-you .dot {
   background: var(--wait);
 }
+
+.session.asks-in-terminal .dot {
+  background: var(--wait);
+}
