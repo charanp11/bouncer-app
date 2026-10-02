@@ -350,6 +350,120 @@ handler thread had run.
   `feat(ui): approval card and queue` → `feat(app): request-bound decisions` →
   `feat(app): tray menu` → `test(ui): hostile command rendering`
 
+### Phase 2 audit (2026-10-02)
+
+Sources: Tauri 2.12 config schema and source (`tauri`, `tao` 0.37), Phase 0/1 notes.
+
+Window (`main`, the island):
+
+- `visible: false` at start, `decorations: false`, `resizable: false`,
+  `alwaysOnTop: true`, `skipTaskbar: true`, `visibleOnAllWorkspaces: true`,
+  `dragDropEnabled: false`, no maximize/minimize/close buttons.
+- **No focus stealing:** `focus: false` covers only the first show. On Windows
+  tao clears its "don't focus" marker after creation, so every later `show()`
+  uses `SW_SHOW` and activates the window; on macOS `show()` is
+  `makeKeyAndOrderFront`. So the window is `focusable: false`: it never takes
+  keyboard focus, and clicks still work (`acceptFirstMouse` on macOS).
+  Keystrokes stay in the terminal, so Enter can never approve. Trade-off: the
+  island has no keyboard access; Phase 5 (accessibility) revisits it.
+- macOS: activation policy `Accessory` (no Dock icon).
+- **No transparency:** `transparent` needs `macOSPrivateApi` on macOS. The
+  island is an opaque undecorated window instead.
+- Placement: top centre of the primary monitor's work area, re-centred on
+  every resize. Sizes: hidden (no sessions), peek (a pill), open (a panel that
+  scrolls inside).
+
+IPC (every command listed in `build.rs`'s `AppManifest` and granted in the one
+capability; no core permissions, no plugins):
+
+| Command | What | Why it's safe |
+| --- | --- | --- |
+| `subscribe(channel)` | Backend pushes the island view (sessions, queue, paused) on every change | Read-only; Tauri's channel fetch is exempt from the ACL by design |
+| `decide(id, allow)` | Answers one queued request | Only a live, unused, backend-issued ID works; Allow refused < 600 ms after the card is issued |
+| `expand(open)` | Peek / open when the pill is clicked | Only toggles our own window size |
+
+The frontend gets no window, event, shell, fs or opener permissions; the
+backend resizes and shows the window itself. The frontend uses `@tauri-apps/api`
+(approved by Charan, 2026-10-02) for `invoke` and `Channel` only.
+
+Decisions and queue (`bouncer-core`, `approvals` module, testable without Tauri):
+
+- Each permission request gets a 128-bit ID: two `RandomState` (OS-seeded
+  SipHash) hashes of a counter. std only; IDs never leave the process. Single
+  use: removed on decide, timeout or pause.
+- The connection thread waits on its own channel up to **100 s**, below the
+  relay's 110 s budget (`bouncer_relay::DECISION_BUDGET`, now shared). On
+  timeout the card is removed and nothing is answered, so the terminal asks.
+- FIFO queue across sessions, unbounded, nothing dropped; the card shows "1 of N".
+- Pause (tray): every queued request is released unanswered and new ones aren't
+  queued, so all go to the terminal. The tray tooltip says "paused" and the
+  tray icon becomes a greyed copy made in code. Sessions keep updating.
+- Sessions keyed by session ID: project, last tool, state (working / needs
+  you / idle); removed on `SessionEnd`.
+
+Rendering (security rule 4):
+
+- Every agent string is set with `textContent`. On top of that, the backend
+  makes invisible characters visible before display: C0/C1 controls (ANSI
+  escapes), bidi controls (U+202A–202E, U+2066–2069, U+200E/200F, U+061C) and
+  zero-width characters become `\u{XXXX}`, so a command can't hide or reorder
+  text. The command block is `direction: ltr; unicode-bidi: isolate`.
+- Bash shows `tool_input.command`; other tools show `tool_input` as pretty
+  JSON, in full (scrolls; never cut).
+- A test fails if `src/` uses `innerHTML`, `outerHTML`, `insertAdjacentHTML` or
+  `document.write`.
+- Allow is disabled for 600 ms each time a new card reaches the front and is
+  never focused; the window can't take keys at all.
+
+Phase 2 threats:
+
+| Threat | Fix |
+| --- | --- |
+| Script / markup injection from a command or path | `textContent` only; CSP `script-src 'self'`; test bans HTML sinks |
+| ANSI / bidi / zero-width tricks hide what's approved | Escaped to visible `\u{XXXX}` before display; LTR isolate |
+| Forged or replayed decision | Random single-use IDs from the backend; unknown or used ID → error, nothing answered |
+| Click lands on the wrong card (queue shifts) | Decision names the ID shown; 600 ms re-arm when the front card changes |
+| Accidental approval | 600 ms arm (UI and backend), no focus, no Enter |
+| Window steals focus, keystrokes land in the island | `focusable: false` |
+| Island blocks Claude Code | 100 s wait < 110 s relay budget; pause and quit release everything |
+| Requests lost | Unbounded FIFO; timeout and pause fall back to the terminal, never "allow" |
+| Frontend reaches more than it needs | Three commands in the manifest; no core/plugin permissions; no remote URLs |
+| Command truncated | Full input shown, scrolls |
+
+Phase 2 is done when:
+
+- [ ] Island window: hidden / peek / open; top centre; on top; no taskbar
+      entry; never takes focus
+- [ ] Session list by session ID; three concurrent sessions shown
+- [ ] Approval card (agent, project, tool, full command in monospace, Allow once /
+      Deny), queue with count, nothing dropped
+- [ ] Decisions bound to single-use IDs (unit tests: unknown, replayed, early
+      Allow, timeout, pause)
+- [ ] Tray: Pause/Resume (icon and tooltip show paused) and Quit
+- [ ] Hostile strings (`<script>`, ANSI, RTL override, zero-width) render as
+      inert visible text (core tests + manual check)
+- [ ] End-to-end test: real relay → server → queue → decide → relay prints the
+      documented JSON
+- [ ] Manual: real request approved and denied from the island; unanswered →
+      terminal prompt after the deadline; three playground sessions
+- [ ] CSP unchanged; capability = our three commands; idle CPU ~0%
+- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+
+Manual checks:
+
+- (none yet)
+
+Plan corrections found in this audit:
+
+1. Tray "Settings" moves to Phase 5 with the settings screen (Charan).
+2. Transparent window dropped (needs the macOS private API).
+3. "Enter does not approve" is guaranteed by `focusable: false`; keyboard access
+   to the island becomes a Phase 5 accessibility item.
+4. New dependency: `@tauri-apps/api` 2.12.1 (Charan approved). Tauri's
+   `tray-icon` feature is turned on; it adds no crates to `Cargo.lock`.
+5. Known limit: if a relay dies while its card is up (Claude Code killed), the
+   card stays until the 100 s deadline; deciding it then does nothing.
+
 ## Phase 3 — Rules engine (~1.5 weeks)
 
 Outcomes: auto-allow (logged), ask with a risk reason, or ask plainly. Nothing is
