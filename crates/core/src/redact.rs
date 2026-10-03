@@ -51,6 +51,7 @@ pub fn redact(text: &str) -> String {
     let text = private_keys(text);
     let mut out = String::with_capacity(text.len());
     let mut next_is_secret = false;
+    let mut next_is_login = false;
     let mut rest = text.as_str();
     while !rest.is_empty() {
         let space = rest.len() - rest.trim_start().len();
@@ -63,7 +64,9 @@ pub fn redact(text: &str) -> String {
             continue;
         }
         let whole = next_is_secret;
-        // `--password x`, `Authorization: x`, `Bearer x`: the next word is the secret.
+        let login = next_is_login;
+        // `-u user:password` / `--user user:password` (curl, wget, …): the next word is a login.
+        next_is_login = word == "-u" || word == "--user";
         let name = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
         next_is_secret = (secret_name(name)
             && !word.contains('=')
@@ -72,6 +75,8 @@ pub fn redact(text: &str) -> String {
             || name.eq_ignore_ascii_case("basic");
         if whole {
             out += MARK;
+        } else if login {
+            out += &redact_word(&login_password(word));
         } else {
             out += &redact_word(word);
         }
@@ -113,9 +118,23 @@ fn private_keys(text: &str) -> String {
     out + rest
 }
 
-/// One word: a secret-named assignment, a password in a URL, known token
+/// One word: a password glued to `-p` or a login glued to `-u` / `--user=`,
+/// a secret-named assignment or JSON value, a password in a URL, known token
 /// prefixes and long random-looking runs.
 fn redact_word(word: &str) -> String {
+    // `mysql -pSECRET`: anything glued onto `-p` (also hides `-pthread`-like
+    // option clusters; over-redacting is fine).
+    if word.strip_prefix("-p").is_some_and(|rest| !rest.is_empty()) {
+        return format!("-p{MARK}");
+    }
+    if let Some(login) = word.strip_prefix("--user=") {
+        return format!("--user={}", login_password(login));
+    }
+    if let Some(login) = word.strip_prefix("-u").filter(|l| l.contains(':')) {
+        return format!("-u{}", login_password(login));
+    }
+    let word = json_values(word);
+    let word = word.as_str();
     if let Some((key, _)) = word.split_once('=') {
         let name = key.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
         if secret_name(name) {
@@ -129,6 +148,40 @@ fn redact_word(word: &str) -> String {
             .any(|p| run.starts_with(p) && run.len() >= p.len() + MIN_AFTER)
     });
     runs(&word, is_long_char, looks_random)
+}
+
+/// `user:password` → `user:[redacted]`; a login without `:` is left as is.
+fn login_password(login: &str) -> String {
+    match login.split_once(':') {
+        Some((user, _)) => format!("{user}:{MARK}"),
+        None => login.to_owned(),
+    }
+}
+
+/// JSON written as one word, `{"token":"x"}` / `{"api_key":1}`: the value of
+/// a secret-named key becomes `MARK` (quotes kept), the rest is left alone.
+fn json_values(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    let mut rest = word;
+    while let Some(i) = rest.find("\":") {
+        let key = &rest[rest[..i].rfind('"').map_or(0, |q| q + 1)..i];
+        out += &rest[..i + 2];
+        rest = &rest[i + 2..];
+        if !secret_name(key) {
+            continue;
+        }
+        let end = match rest.strip_prefix('"') {
+            Some(quoted) => quoted.find('"').map_or(rest.len(), |j| j + 2),
+            None => rest.find([',', '}']).unwrap_or(rest.len()),
+        };
+        let quoted = rest.starts_with('"');
+        let closed = quoted && end >= 2 && rest[..end].ends_with('"');
+        out += if quoted { "\"" } else { "" };
+        out += MARK;
+        out += if closed { "\"" } else { "" };
+        rest = &rest[end..];
+    }
+    out + rest
 }
 
 /// `scheme://user:password@host` → `scheme://user:[redacted]@host`.
@@ -215,6 +268,20 @@ pub(crate) mod tests {
         let r = |s: &str, n: usize| s.repeat(n);
         let mut cases = Vec::new();
         let mut add = |secret: String, text: String| cases.push((secret, text));
+        // Logins come first, before any line naming that HTTP tool: gitleaks
+        // reads the tool's name followed within five lines by a login as a
+        // real credential.
+        let login = format!("loginpass{}", r("7", 4));
+        add(login.clone(), format!("xh -u admin:{login} https://x"));
+        add(
+            login.clone(),
+            format!("wget --user 'admin:{login}' https://x"),
+        );
+        add(
+            login.clone(),
+            format!("wget --user=admin:{login} https://x"),
+        );
+        add(login.clone(), format!("xh -uadmin:{login} https://x"));
         let anthropic = format!("sk-ant-api03-{}", r("Ab3dEf9h", 8));
         add(anthropic.clone(), format!("export ANTHROPIC={anthropic}"));
         let openai = format!("sk-proj-{}", r("Zx81", 10));
@@ -273,6 +340,16 @@ pub(crate) mod tests {
             basic.clone(),
             format!("curl -H 'Authorization: Basic {basic}'"),
         );
+        let mysql = format!("MyS3cret{}", r("Pw", 2));
+        add(mysql.clone(), format!("mysql -u root -p{mysql} app"));
+        let token = format!("tok3n{}", r("val", 2));
+        add(token.clone(), format!("{{\"token\":\"{token}\"}}"));
+        let api = format!("k3y{}", r("val", 3));
+        add(
+            api.clone(),
+            format!("curl -d {{\"user\":\"bob\",\"api_key\":\"{api}\"}} x"),
+        );
+        add(api.clone(), format!("echo {{\"apiKey\":{api},\"n\":1}}"));
         let hex = r("9f3a", 10);
         add(hex.clone(), format!("deploy --x {hex}"));
         let key_body = r("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", 2);
@@ -316,6 +393,10 @@ pub(crate) mod tests {
             "ssh://git@github.com/o/r.git",
             "-----BEGIN CERTIFICATE-----",
             "ask-for-help sk-short",
+            "mkdir -p src/bin",
+            "git push -u origin main",
+            "xh -u admin https://x",
+            "{\"user\":\"bob\",\"n\":1}",
         ] {
             assert_eq!(redact(text), text);
         }
@@ -341,5 +422,17 @@ pub(crate) mod tests {
             "a\n[redacted]\nb"
         );
         assert_eq!(redact("  two  spaces "), "  two  spaces ");
+        assert_eq!(redact("xh -u admin:pw u"), "xh -u admin:[redacted] u");
+        assert_eq!(redact("xh -uadmin:pw u"), "xh -uadmin:[redacted] u");
+        assert_eq!(
+            redact("mysql -u root -ppw db"),
+            "mysql -u root -p[redacted] db"
+        );
+        assert_eq!(redact("{\"token\":\"x\"}"), "{\"token\":\"[redacted]\"}");
+        assert_eq!(
+            redact("{\"api_key\":\"x\",\"user\":\"bob\"}"),
+            "{\"api_key\":\"[redacted]\",\"user\":\"bob\"}"
+        );
+        assert_eq!(redact("{\"token\":42}"), "{\"token\":[redacted]}");
     }
 }
