@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-always"
+description = "Enables the always command without any pre-configured scope."
+commands.allow = ["always"]
+
+[[permission]]
+identifier = "deny-always"
+description = "Denies the always command without any pre-configured scope."
+commands.deny = ["always"]

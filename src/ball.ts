@@ -2,7 +2,7 @@
 // built element by element (never parsed from a string). Its state is a
 // class on the wrapper; the animations live in styles.css.
 
-export type BallState = "idle" | "working" | "needs" | "paused";
+export type BallState = "idle" | "working" | "needs" | "risky" | "paused";
 
 const NS = "http://www.w3.org/2000/svg";
 
