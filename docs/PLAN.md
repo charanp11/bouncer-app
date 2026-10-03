@@ -816,6 +816,10 @@ Plan corrections after the playground check:
     rules file was refused. `LA` now counts as the user when the user's SID
     ends in `-500`. PowerShell table rows with drive paths run on Windows
     only.
+15. (CI) Windows short (8.3) paths like `C:\Users\RUNNER~1\…` contain `~`,
+    so a PowerShell command naming one always asks (fail safe; Claude Code
+    normally sends long paths). A test covers it. Also fixed: a test that sent
+    two requests at once and assumed their order (raced on CI).
 
 ## Phase 4 — Activity log and away summary (~1 week)
 
