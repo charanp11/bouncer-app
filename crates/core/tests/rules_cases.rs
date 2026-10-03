@@ -2,7 +2,7 @@
 //! the Phase 3 audit included), plus a fuzz test: random input never
 //! panics and never auto-allows a shell metacharacter.
 
-use std::path::{Path, PathBuf};
+use std::path::{MAIN_SEPARATOR as MAIN_SEP, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bouncer_core::check::{self, *};
@@ -633,16 +633,25 @@ fn powershell_case_table() {
         }
         expect(&s, "PowerShell", json!({ "command": command }), want);
     }
-    // An absolute path inside the project is fine.
-    let inside = s.project.join("src").join("main.rs");
-    let inside = inside.to_string_lossy();
-    if !inside.contains(' ') {
+    // An absolute path inside the project is fine. Use the folder's full
+    // long name: a temp path can come as a short name (`RUNNER~1`), and `~`
+    // isn't plain, so that one rightly asks.
+    let long = std::fs::canonicalize(&s.project).unwrap();
+    let long = long.to_string_lossy();
+    let long = long.strip_prefix(r"\\?\").unwrap_or(&long);
+    let inside = format!("{long}{}src{}main.rs", MAIN_SEP, MAIN_SEP);
+    let plain = |c: char| c.is_ascii_alphanumeric() || " .\\/:-_".contains(c);
+    if !inside.contains(' ') && inside.chars().all(plain) {
         expect(
             &s,
             "PowerShell",
             json!({ "command": format!("cat {inside}") }),
             &Allow("cat"),
         );
+    }
+    if cfg!(windows) {
+        let short = format!("cat {}\\RUNNER~1\\src\\main.rs", s.project.display());
+        expect(&s, "PowerShell", json!({ "command": short }), &Ask);
     }
     // A plain command no rule covers is offered, unless it's on the never list.
     let offered = |c: &str| verdict(&s, "PowerShell", json!({ "command": c })).offer;
