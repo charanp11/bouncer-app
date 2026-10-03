@@ -270,9 +270,21 @@ impl Parser {
                 '"' => {
                     self.word.get_or_insert_with(String::new);
                     self.at += 1;
+                    let mut closed = true;
                     loop {
                         match self.peek(0) {
                             Some('"') => break,
+                            // A substitution: read on as if unquoted, so the
+                            // commands it runs are seen too. (The issue
+                            // already rules out auto-allow.)
+                            Some('`') => {
+                                closed = false;
+                                break;
+                            }
+                            Some('$') if self.peek(1) == Some('(') => {
+                                closed = false;
+                                break;
+                            }
                             Some('\\') => match self.peek(1) {
                                 Some('\n') => self.at += 1,
                                 Some(c @ ('$' | '`' | '"' | '\\')) => {
@@ -285,10 +297,6 @@ impl Parser {
                                 self.dollar();
                                 continue;
                             }
-                            Some('`') => {
-                                self.issue(Issue::Substitution);
-                                self.push('`');
-                            }
                             Some(c) => self.push(c),
                             None => {
                                 self.issue(Issue::Unterminated);
@@ -297,7 +305,9 @@ impl Parser {
                         }
                         self.at += 1;
                     }
-                    self.at += 1;
+                    if closed {
+                        self.at += 1;
+                    }
                 }
                 c => {
                     self.push(c);
@@ -428,6 +438,14 @@ mod tests {
             .map(|c| c.words[0].as_str())
             .collect();
         assert_eq!(firsts, ["echo", "curl", "sh"]);
+        for quoted in ["python3 -c \"$(curl x)\"", "echo \"`curl x`\""] {
+            let parsed = parse(quoted);
+            assert!(parsed.issues.contains(&Issue::Substitution), "{quoted}");
+            assert!(
+                parsed.commands.iter().any(|c| c.words[0] == "curl"),
+                "{quoted}: {parsed:?}"
+            );
+        }
     }
 
     #[test]
