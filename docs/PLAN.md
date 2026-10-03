@@ -1093,6 +1093,124 @@ Phase 5 is done when:
 - [ ] Idle CPU ~0%; approval card never covered
 - [ ] fmt, clippy, tests green locally and in CI
 
+Split (Charan, 2026-10-03): **5a** the character (physics, eyes, blink, poses,
+greeting, reduced motion, idle CPU ~0%), plus a `redact.rs` fix; **5b** sounds,
+the settings screen, the observe/auto switch, keyboard access and screen
+reader order. Each is its own PR with all four stages; 5b starts after 5a is
+merged. Rule for both (Charan): animations never cover, move or delay an
+approval card, and never take focus from it.
+
+### Phase 5a audit (2026-10-03)
+
+Sources: `design/prototype/bouncer-island.html` ("Meet Bouncer", the ball
+CSS, Build spec "Motion" and rule 10), `src/ball.ts`, `src/main.ts`,
+`src/styles.css`, `crates/app/src/main.rs`, `crates/core/src/redact.rs`,
+tauri 2.12.1 / tao 0.37.1 sources (cursor position).
+
+What exists today:
+
+- `ball.ts` builds the prototype's SVG element by element (no image, no
+  `innerHTML`); five of the seven moods (idle, working, needs, risky,
+  paused) are CSS keyframes copied from the prototype. **done** and
+  **dance** are missing.
+- Every view push rebuilds the island (`replaceChildren`), so each ball is
+  a new node and its CSS animation restarts on every update (a visible
+  hiccup today). 5a keeps the character's state (position, velocity, look,
+  mood) in its own module; a rebuilt node picks it up where it was.
+- Reduced motion: one CSS rule turns every animation off. JS motion has to
+  check `matchMedia("(prefers-reduced-motion: reduce)")` itself and follow
+  its `change` event.
+
+Plan corrections (to confirm):
+
+1. **SVG, not a 2D canvas.** The prototype is SVG; keeping it gives the same
+   shapes and colors exactly, stays crisp at 26 and 72 px, and needs no
+   image. JS drives only `transform` on the SVG's own groups.
+2. **Bouncer wears shades: no visible eyes.** "Eyes follow the cursor" and
+   "blink" need a reading that keeps the prototype look. Proposed: the face
+   (shades, glint, mouth) shifts up to 1.5 units (of 32) toward the cursor,
+   the glint a little further; a blink is the shades dipping
+   (`scaleY` 1 → 0.2 → 1 over 140 ms) every 3–7 s.
+3. **Idle breathing vs idle CPU.** The prototype breathes forever (3.2 s
+   loop); the plan wants no frames while nothing moves. In Chromium /
+   WebView2 a CSS transform on an SVG child is not compositor-only: every
+   frame restyles and repaints on the main thread. Proposed: idle breathes
+   for 3 cycles (~10 s) after anything changes, then holds still; blinks
+   come from one timer and draw ~9 frames each. Working / needs / risky /
+   done animate continuously (something is happening then).
+4. **Done and dance.** Done: a session going working → idle (its `Stop`)
+   cheers twice (2.4 s), then idle. Dance is drawn now (sheet parity) but
+   nothing triggers it until Phase 8.
+5. **Keyboard access and screen reader order move to 5b**: making the
+   island focusable touches "Allow is never the default focus, Enter never
+   approves"; it goes in with the settings screen that needs it.
+
+How eye tracking gets the cursor:
+
+| | Window-only (`mousemove`) | Backend feed (proposed) |
+| --- | --- | --- |
+| Source | the page's own events | tauri's `AppHandle::cursor_position()` (in tauri 2.12.1; `GetCursorPos` on Windows, `NSEvent.mouseLocation` on macOS, no Accessibility permission) |
+| Feel | looks only while the cursor is over the 288 × 36 pill | looks toward the cursor anywhere on screen |
+| New dependency | none | none |
+| Cost, hidden strip / paused / reduced motion | 0 | 0: the poll thread waits on a channel |
+| Cost, idle pill, cursor still | 0 | 15 polls/s; each is a message to the main event loop (microseconds). Nothing sent to the page, no frames |
+| Cost, cursor moving | rAF ease per move | ≤ 15 messages/s (sent only when it moved ≥ 2 px), a short rAF ease, then stop |
+
+The feed is started by a new `look` command when a ball is on screen and
+stopped when none is (or motion is reduced); it holds none of the island's
+locks while polling (see the deadlock note in `show`); positions are made
+window-relative in logical px and never logged.
+
+Motion design:
+
+- `physics.ts`, no DOM: fixed 1/240 s steps with an accumulator, frame time
+  clamped to 50 ms. Gravity and launch speed come from the spec (9-unit
+  apex, 900 ms jump); squash 1.14 on landing, stretch 1.12 on take-off,
+  spring back. Tests: same apex (± 0.2) at 30 / 60 / 144 / 240 Hz and with
+  jittered frame times; energy never grows; it comes to rest.
+- One `requestAnimationFrame` loop for all live balls; it runs only while
+  something moves and stops when everything settles, when the island is the
+  hidden strip, or when `document.hidden`.
+- Poses (from the sheet): idle breathes, working jumps (physics), needs you
+  hops with the orange "!", risky turns red, flat mouth, puffs up ("blocks
+  the door"), done cheers, paused greys out and sleeps (static, "z"), music
+  dances.
+- Squish on click: a click on the ball squashes it (1.25, spring back) and
+  goes no further (doesn't open the island). Four clicks within 2 s: dizzy
+  (1.5 s wobble, shades tilted). Pointer handlers sit on the ball's SVG only.
+- Greeting at launch: the ball drops in and bounces three times (~1.6 s) in
+  the pill ("Bouncer · at the door"), then the normal state (the hidden strip
+  if there are no sessions), riding the same path as the wake-strip peek.
+  Reduced motion: the words only.
+
+Threats (5a):
+
+| Threat | Fix |
+| --- | --- |
+| Animation covers, moves or delays a card | Card rendering never waits on the character; motion is `transform` on SVG groups only (no layout change), upward / sideways by at most 16% of the ball; a card cancels the greeting, done and dizzy at once |
+| Arm delay shortened or reset by animation | Arm counts from the card's arrival (`front.since`), unchanged; a test pins it |
+| Character steals focus from a card | The window stays non-focusable; the ball has no `tabindex`, isn't a button; nothing calls `focus()` |
+| Click on the character lands on Allow | Ball and buttons never overlap; ball clicks stop at the SVG |
+| Idle CPU / battery | Loop only while moving; breathe settles; feed only while a ball is shown and motion allowed; measured |
+| Cursor feed blocks the main thread or deadlocks | Own thread, no island locks held, stops when not needed |
+| Motion sickness | OS reduced motion: no bounce, tracking, blink or greeting drop; the feed is off |
+| Secret fragment kept in the log (`redact.rs`) | `json_values` ends a quoted value at the first `"` that isn't escaped (`\"`); fake-secret test built at run time |
+
+`redact.rs` fix: `json_values` finds the closing quote with `find('"')`,
+so in `"password":"ab\"cd"` it stops at the escaped quote and `cd` survives.
+It must skip quotes preceded by an odd number of backslashes.
+
+Phase 5a is done when:
+
+- [ ] All seven moods match "Meet Bouncer" (side-by-side screenshots at 84 px)
+- [ ] Physics bounce stable at any frame rate (tests); squash / stretch to spec
+- [ ] Eyes look toward the cursor, blink, squish, dizzy, greeting, done cheer
+- [ ] Reduced motion: no bounce, tracking, blink or drop; cursor feed off
+- [ ] Idle CPU ~0% measured over 60 s (hidden strip, idle pill)
+- [ ] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
+- [ ] `json_values` skips escaped quotes, with a run-time fake-secret test
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push
+
 ## Phase 6 — Chat in the island (~1.5 weeks)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
