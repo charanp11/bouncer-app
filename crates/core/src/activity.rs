@@ -2,7 +2,7 @@
 //!
 //! One JSON line per event, one file per UTC day (`activity-YYYY-MM-DD.jsonl`)
 //! in a private folder next to `rules.toml`. Only the fields of [`Entry`] are
-//! written: never tool outputs, file contents or prompts. A file or folder
+//! written, redacted: never tool outputs, file contents or prompts. A file or folder
 //! another account can write is refused, a day file stops at `MAX_DAY`, and a
 //! line that doesn't parse (a crash mid-write) is skipped when reading.
 
@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use crate::approvals::step;
 use crate::event::Event;
+use crate::redact::redact;
 use crate::rules::{create_private_dir, trust};
 
 /// Largest day file; once full, nothing more is logged that day.
@@ -63,7 +64,7 @@ impl Entry {
             kind: event.kind.clone(),
             tool: event.tool.clone(),
             label: if event.tool.is_some() {
-                step(event)
+                step(&whole_command_redacted(event))
             } else {
                 String::new()
             },
@@ -83,13 +84,14 @@ impl Entry {
         }
     }
 
-    /// The line as written: the label and file cut to their limits.
+    /// The line as written: text redacted, then the label and file cut to
+    /// their limits.
     fn line(&self) -> String {
-        let cut = |s: &str, max: usize| s.chars().take(max).collect::<String>();
+        let cut = |s: &str, max: usize| redact(s).chars().take(max).collect::<String>();
         let mut line = json!({
             "t": self.t,
             "session": self.session,
-            "project": self.project,
+            "project": redact(&self.project),
             "kind": self.kind,
             "tool": self.tool,
             "label": cut(&self.label, MAX_LABEL),
@@ -115,6 +117,16 @@ impl Entry {
             how: text("how"),
         })
     }
+}
+
+/// The event with its whole command redacted, so the step's first line can't
+/// keep part of a secret that spans lines.
+fn whole_command_redacted(event: &Event) -> Event {
+    let mut event = event.clone();
+    if let Some(Value::String(command)) = event.input.as_mut().and_then(|i| i.get_mut("command")) {
+        *command = redact(command);
+    }
+    event
 }
 
 /// Milliseconds since 1970.
@@ -358,6 +370,38 @@ pub(crate) mod tests {
         log.write(&next);
         assert!(dir.join(name(20_730)).exists());
         assert_eq!(read(&dir, day, day + DAY_MS).len(), 4);
+    }
+
+    #[test]
+    fn no_fake_secret_reaches_the_file() {
+        let dir = temp_dir("secrets").join("history");
+        let mut log = Log::new(dir.clone());
+        let fakes = crate::redact::tests::fakes();
+        for (i, (_, text)) in fakes.iter().enumerate() {
+            let t = 20_729 * DAY_MS + i as u64;
+            for (tool, input) in [
+                ("Bash", json!({ "command": text })),
+                ("PowerShell", json!({ "command": text })),
+                (
+                    "Write",
+                    json!({ "file_path": format!("/p/{text}"), "content": text }),
+                ),
+            ] {
+                let mut e = event("PreToolUse", Some(tool), input, t);
+                e.project = format!("/p/{text}");
+                log.write(&Entry::of(&e));
+                log.write(&Entry::answer(&e, "you allowed", t));
+            }
+        }
+        assert_eq!(log.note(), None);
+        let written = fs::read_to_string(dir.join(name(20_729))).unwrap();
+        assert!(written.lines().count() >= fakes.len() * 6);
+        for (secret, _) in &fakes {
+            // The file holds JSON, so compare with the secret as JSON escapes it.
+            let escaped = serde_json::to_string(secret).unwrap();
+            let escaped = escaped.trim_matches('"');
+            assert!(!written.contains(escaped), "{secret} on disk");
+        }
     }
 
     #[test]
