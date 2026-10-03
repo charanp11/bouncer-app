@@ -48,6 +48,15 @@ type Request = {
   /** The exact TOML "Always allow" appends (built by the backend). */
   offer: string | null;
 };
+/** "While you were away", from the activity log (the backend drops it when the island closes). */
+type Away = {
+  minutes: number;
+  files: number;
+  commands: number;
+  auto: number;
+  asked: number;
+  stuck: { minutes: number; project: string; what: string } | null;
+};
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
 type View = {
   open: boolean;
@@ -58,6 +67,9 @@ type View = {
   queue: Request[];
   rules: { mode: string; error: string | null; notice: { n: number; text: string } | null };
   flash: Flash | null;
+  away: Away | null;
+  /** Why the activity log is off today, if it is. */
+  history: { note: string | null };
 };
 
 /** Allow stays disabled this long after a card reaches the front. */
@@ -592,7 +604,39 @@ function rulesNotes(view: View): HTMLElement[] {
     );
     notes.push(row);
   }
+  if (view.history.note) notes.push(el("div", "after", view.history.note));
   return notes;
+}
+
+/** The prototype's "Away summary": numbers, where it got stuck, then the sessions. */
+function renderAway(view: View, away: Away) {
+  setShape("open");
+  const stats = el("div", "stats");
+  const counts: [number, string, string][] = [
+    [away.files, "file changed", "files changed"],
+    [away.commands, "command", "commands"],
+    [away.auto, "auto-allowed", "auto-allowed"],
+    [away.asked, "asked you", "asked you"],
+  ];
+  for (const [n, one, many] of counts) {
+    const s = el("div", "stat");
+    s.append(el("b", "", String(n)), el("span", "", n === 1 ? one : many));
+    stats.append(s);
+  }
+  const body = el("div", "body");
+  body.append(stats);
+  if (away.stuck) {
+    const stuck = el("div", "stuck");
+    stuck.append(el("b", "", `Stuck ${away.stuck.minutes} min `), "in ");
+    agentText(stuck, away.stuck.project);
+    stuck.append(", waiting on ");
+    agentText(stuck, away.stuck.what);
+    body.append(stuck);
+  }
+  if (view.sessions.length) body.append(sessionRows(view.sessions));
+  const close = () => invoke("expand", { open: false });
+  island.replaceChildren(head("idle", "While you were away", `· ${away.minutes} min`, close), body);
+  later(CLOCK_MS);
 }
 
 /** A red "rules" badge on the pill while the rules file is refused. */
@@ -646,6 +690,11 @@ function render(view: View) {
     d.append(rail(session, session.project, session.agent, state), codePane(session.code, session.project, session.status === "working"));
     island.replaceChildren(bar, d);
     later(CLOCK_MS);
+    return;
+  }
+
+  if (view.open && view.away) {
+    renderAway(view, view.away);
     return;
   }
 
