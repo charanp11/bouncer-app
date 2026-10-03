@@ -773,7 +773,17 @@ Manual checks:
   a Risky card, "Touches Bouncer's own rules": with the rules file inside the
   playground, every word resolving into that folder was flagged. Fixed
   (correction 11, test `a_project_next_to_the_rules_file`).
-- Not yet: clicking through the "Always allow" preview in the real window.
+- 2026-10-03, same setup (session `c0e09c3c`): `cargo run` (PowerShell)
+  showed a normal card with "Always allow…"; Charan clicked it and "Add rule
+  and allow"; the rule was appended (01:09:27) and the request allowed in the
+  same second. This ran before rules became exact and project-scoped
+  (correction 12); the new format was checked in tests and in a browser
+  harness of the island page (preview, 600 ms arm, toast). Found: Claude
+  Code's `AskUserQuestion` sends a `PermissionRequest`, so Bouncer showed
+  Allow/Deny for a question (correction 13).
+- Not seen in a real session yet: a request auto-allowed by a rule (the
+  auto-allow path ran end to end with the debug relay; the playground's
+  commands were PowerShell before correction 10).
 
 Plan corrections after the playground check:
 
@@ -789,6 +799,23 @@ Plan corrections after the playground check:
     Case table (91 rows incl. each character and alias) and fuzz.
 11. "Touches Bouncer's own rules" means the rules file itself or its whole
     folder (delete, replace), not other files that sit beside it.
+12. "Always allow" is exactly this command (or this one file) in this
+    project (Charan, matching prototype v0.4: "Only this exact command in
+    this project"). New optional keys: `exact = true`, `path` (tool rules,
+    one file), `project`; both paths stored and compared fully resolved
+    (symlinks, `..`), ignoring case on Windows. Hand-written prefix rules and
+    the defaults are unchanged. The card follows prototype v0.4: a dashed
+    full-width "Always allow…" button, a preview of the exact TOML, Cancel /
+    "Add rule and allow" (arms after 600 ms), never on risky cards. The wide
+    "Approve an edit" view has none, as in the prototype.
+13. `AskUserQuestion` and `ExitPlanMode` (Charan): never a card, never an
+    answer; Claude Code asks in the terminal. The session shows "Needs you ·
+    question in the terminal" (row and pill) until the tool runs.
+14. (CI) Windows writes the built-in Administrator account's SID as `LA` in
+    a security descriptor; the GitHub runner is that account, so its own
+    rules file was refused. `LA` now counts as the user when the user's SID
+    ends in `-500`. PowerShell table rows with drive paths run on Windows
+    only.
 
 ## Phase 4 — Activity log and away summary (~1 week)
 
@@ -1109,43 +1136,52 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Visual design is deliberately bare; the final design comes as an HTML
   prototype in `design/prototype/`.
 
-### Phase 3 summary (2026-10-02, pending the playground check)
+### Phase 3 summary (2026-10-03)
 
 - `bouncer-core::shell`: a POSIX shell parser for Bash tool commands (words,
   quotes, escapes, comments, compound operators, redirections). Anything it
   can't be sure about is an issue that blocks auto-allow: substitutions,
   variables, grouping, heredocs, `NAME=value`, unterminated or dangling input.
+- PowerShell (Claude Code's tool on Windows): only plain commands (ASCII
+  letters, digits, space, `. \ / : - _`) can be auto-allowed; the program
+  matches ignoring case, only against existing rules; every risk check runs.
 - `bouncer-core::rules`: `rules.toml` (`toml` 1.1.6, parse only) in
   `%APPDATA%\Bouncer` / `~/Library/Application Support/Bouncer`, written with
   defaults in observe mode. Strict: 64 KB cap, unknown keys, wrong types,
   unknown tools and non-plain commands refused with the line number; refused
   too if anyone else can write the file or its folder (owner + mode on macOS,
   owner + DACL on Windows) or it's a link. Any refusal falls back to the
-  built-in rules in observe mode and shows in the island. "Always allow"
-  appends one `[[allow]]` table after checking it reads back exactly.
-- `bouncer-core::check`: every Bash part must match a `command` rule, every
-  path (arguments, `--opt=value`, redirections, tool paths, globs) must
-  resolve inside the session's project (symlinks followed, `..` applied like
-  the OS); root or home as the project never auto-allows. Twelve risk reasons
-  (downloads and runs, built at run time, command in a string, deletes
-  outside, secrets, force-push, administrator, shell startup file, Claude
-  Code settings, Bouncer's rules, git config/hooks, look-alike letters, hidden
-  characters), joined into one sentence; risky requests are never
-  auto-allowed or offered.
+  built-in rules in observe mode and shows in the island. Rules can be scoped
+  (`exact`, `path`, `project`, compared fully resolved).
+- `bouncer-core::check`: every command part must match a rule, every path
+  (arguments, `--opt=value`, `-Opt:value`, redirections, tool paths, globs)
+  must resolve inside the session's project (symlinks followed, `..` applied
+  like the OS); root or home as the project never auto-allows. Twelve risk
+  reasons joined into one sentence; risky requests are never auto-allowed or
+  offered.
 - Desk: auto mode answers what a rule allows (pill flash, rail tag
   "auto-allowed by rule"); observe mode adds "Would auto-allow" to the card;
-  `always(id)` (sixth command) adds the backend's own offered rule then
-  allows; the rules file is checked every 2 s and changes or errors reach the
-  island. Paused answers nothing, rules included.
-- Island: Risky request and Auto-allowed states built to the prototype;
-  observe note, "Always allow…" preview (arms after 600 ms), rules notice and
-  red "rules" badge reuse its card, badge and box styles.
-- Request IDs: 128 bits from `getrandom` 0.4 (already in the tree); no ID →
-  no card (terminal asks).
+  `always(id)` (sixth command) adds the backend's own exact, project-scoped
+  rule, then allows; the rules file is checked every 2 s and changes or errors
+  reach the island; `AskUserQuestion` / `ExitPlanMode` are never answered and
+  the session shows "Needs you · question in the terminal". Paused answers
+  nothing, rules included.
+- Island: Risky request, Auto-allowed and Always allow built to the prototype
+  (v0.4 for Always allow, committed in this PR); observe note, rules notice
+  and red "rules" badge reuse its card, badge and box styles.
+- Request IDs: 128 bits from `getrandom` 0.4; no ID → no card (terminal asks).
 - New dependencies: `toml` 1.1.6 (approved), `getrandom` 0.4.3 (requested);
   both were already in `Cargo.lock`.
-- Tests: 92 Rust (relay 21, core 66, app 5) + 7 frontend. The case table has
-  210 Bash rows and 32 tool rows; the fuzzer runs 5,000 generated commands
-  plus 5,000 random strings.
-- Still to do by hand before closing: the playground session in auto mode
-  and the "Always allow" click-through (steps in the PR).
+- Tests: 101 Rust (relay 22, core 74, app 5) + 7 frontend. Case tables: 214
+  Bash rows, 91 PowerShell rows, 32 tool rows, scoped-rule and recorded-request
+  tests; fuzzing: 5,000 generated Bash commands, 5,000 random strings and
+  5,000 generated PowerShell commands.
+- Checked by hand (Charan, Claude Code 2.1.288, Windows playground): a real
+  `curl | sh` flagged Risky and denied; the rules-file error badge and line
+  number; "Always allow" end to end. Found and fixed through those runs:
+  PowerShell commands, the over-broad "Bouncer's own rules" flag, questions
+  shown as Allow/Deny cards.
+- Not done by hand: a request auto-allowed by a rule in a real Claude Code
+  session (done with the debug relay only); macOS (CI only).
+- Plan additions (Charan): an observe/auto switch in the island (Phase 5) and
+  a model picker for chat (Phase 6).
