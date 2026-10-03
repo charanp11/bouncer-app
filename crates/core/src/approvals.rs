@@ -200,6 +200,17 @@ impl State {
 
     /// A rule answered this request: tag the step and flash the pill.
     fn auto_allowed(&mut self, event: &Event) {
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
+            s.status = "working";
+            if let Some(last) = s.history.back_mut() {
+                last.1 = BY_RULE;
+            }
+        }
+        self.flash_allowed(event);
+    }
+
+    /// The pill's "Auto-allowed · cargo test in bouncer-app".
+    fn flash_allowed(&mut self, event: &Event) {
         let what = match (event.tool.as_deref(), event.input.as_ref()) {
             (Some("Bash" | "PowerShell"), Some(input)) => input
                 .get("command")
@@ -212,12 +223,6 @@ impl State {
         let folder = Path::new(&event.project)
             .file_name()
             .map_or(event.project.clone(), |f| f.to_string_lossy().into_owned());
-        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
-            s.status = "working";
-            if let Some(last) = s.history.back_mut() {
-                last.1 = BY_RULE;
-            }
-        }
         self.flash(
             "Auto-allowed",
             format!(" · {what} in {folder}"),
@@ -456,7 +461,7 @@ impl Desk {
     /// file, then allows the request. The rule comes from the backend's own
     /// check of the queued request; nothing from the page is written.
     pub fn always(&self, id: &str) -> Result<(), &'static str> {
-        let (rule, path) = {
+        let (rule, path, event) = {
             let state = self.lock();
             let pending = state
                 .queue
@@ -471,14 +476,23 @@ impl Desk {
                 .clone()
                 .ok_or("no rule to add for this request")?;
             let path = state.rules.path.clone().ok_or("no rules file")?;
-            (rule, path)
+            (rule, path, pending.event.clone())
         };
         if let Err(e) = rules::add(&path, &rule) {
             eprintln!("Bouncer: {e}");
             return Err("couldn't add the rule");
         }
         self.lock().reload(true);
-        self.decide(id, true)
+        self.decide(id, true)?;
+        // In auto mode the rule now answers this command: the pill says so,
+        // as the prototype shows. In observe mode nothing will be auto-allowed.
+        let mut state = self.lock();
+        if state.rules.loaded.rules.mode == Mode::Auto {
+            state.flash_allowed(&event);
+            drop(state);
+            self.publish();
+        }
+        Ok(())
     }
 
     /// Checks the rules file for changes; the island hears about any.
@@ -973,6 +987,19 @@ mod tests {
             "Rules changed: added cargo run --release in p"
         );
         assert_eq!(view["sessions"][0]["history"][0]["how"], "you allowed");
+        // Auto mode: the pill then says the rule allows it (as the prototype).
+        assert_eq!(
+            (
+                &view["flash"]["strong"],
+                &view["flash"]["rest"],
+                &view["flash"]["badge"]
+            ),
+            (
+                &json!("Auto-allowed"),
+                &json!(" · cargo run --release in p"),
+                &json!("rule")
+            )
+        );
         // Next time the rule answers: the same command in the same project.
         assert_eq!(
             desk.handle(event("a", "PermissionRequest", "cargo run --release")),
@@ -1004,6 +1031,23 @@ mod tests {
         assert_eq!(desk.always(&id), Err("no rule to add for this request"));
         desk.decide(&id, false).unwrap();
         b.join().unwrap();
+    }
+
+    #[test]
+    fn always_allow_in_observe_mode_flashes_no_auto_allow() {
+        let (desk, path) = desk_with_rules("always-observe", "mode = \"observe\"\n");
+        let a = ask(&desk, "a", "cargo run --release");
+        let id = queued(&desk, 1).remove(0);
+        std::thread::sleep(ARM);
+        desk.always(&id).unwrap();
+        assert_eq!(a.join().unwrap(), Some(Decision::Allow));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("cargo run --release")
+        );
+        // The rule change is shown; "Auto-allowed" isn't: nothing is in observe mode.
+        assert_eq!(desk.view()["flash"]["strong"], "Rules changed");
     }
 
     #[test]

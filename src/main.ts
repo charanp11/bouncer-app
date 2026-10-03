@@ -6,6 +6,7 @@
 // focused (the window can't take focus at all), and Enter can't reach it.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
+import { flashLeft, type Seen } from "./flash.ts";
 import { group, latest, title, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -64,8 +65,6 @@ const ARM_MS = 600;
 const TOAST_MS = 1400;
 /** "Rule added." stays a little longer (as the prototype). */
 const RULE_TOAST_MS = 1600;
-/** How long the pill shows "Auto-allowed" or "Rules changed". */
-const FLASH_MS = 2500;
 const ROTATE_MS = 4000;
 const PEEK_MS = 300;
 const CLOCK_MS = 30_000;
@@ -109,6 +108,8 @@ let detail: string | null = null;
 let always = { id: "", since: 0 };
 /** The rules notice the user closed. */
 let dismissed = 0;
+/** The flash the pill last showed, and since when. */
+let flashSeen: Seen = { n: 0, from: 0 };
 /** The wake strip is being hovered: show the idle pill. */
 let peek = false;
 let dragged = false;
@@ -566,9 +567,10 @@ function renderApproval(view: View, request: Request, done?: boolean) {
 function freshFlash(view: View): Flash | null {
   const f = view.flash;
   if (!f) return null;
-  const left = f.at_ms + FLASH_MS - Date.now();
-  if (left <= 0) return null;
-  later(left);
+  const shown = flashLeft(f.n, f.at_ms, Date.now(), flashSeen);
+  flashSeen = shown.seen;
+  if (shown.left <= 0) return null;
+  later(shown.left);
   return f;
 }
 
