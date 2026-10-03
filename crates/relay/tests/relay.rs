@@ -288,7 +288,7 @@ fn fixture_names_match_their_recording() {
 #[test]
 fn decisions_from_the_desk_reach_claude_code() {
     use bouncer_core::approvals::{ARM, Desk, WAIT};
-    let desk = Arc::new(Desk::new(WAIT, |_| {}));
+    let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
     let path = serve("desk", Arc::new(move |e| handler.handle(e)));
     for allow in [false, true] {
@@ -314,7 +314,7 @@ fn decisions_from_the_desk_reach_claude_code() {
 #[test]
 fn windows_paths_reach_the_island_intact() {
     use bouncer_core::approvals::{Desk, WAIT};
-    let desk = Arc::new(Desk::new(WAIT, |_| {}));
+    let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
     let path = serve("paths", Arc::new(move |e| handler.handle(e)));
     let project = r"C:\Users\chara\Desktop\Full Time\x";
