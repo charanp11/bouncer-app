@@ -895,7 +895,11 @@ mod tests {
         assert_eq!(view["queue"][0]["risk"], json!(null));
         assert_eq!(view["queue"][1]["risk"], "Runs as administrator.");
         assert_eq!(view["queue"][1]["offer"], json!(null));
-        assert_eq!(view["queue"][0]["offer"], "[[allow]]\ncommand = \"pwd\"\n");
+        let offer = view["queue"][0]["offer"].as_str().unwrap();
+        assert!(
+            offer.starts_with("[[allow]]\ncommand = \"pwd\"\nexact = true\nproject = \""),
+            "{offer}"
+        );
         for id in &ids {
             desk.decide(id, false).unwrap();
         }
@@ -929,23 +933,45 @@ mod tests {
         std::thread::sleep(ARM);
         desk.always(&id).unwrap();
         assert_eq!(a.join().unwrap(), Some(Decision::Allow));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let added = &text[text.rfind("[[allow]]").unwrap()..];
         assert!(
-            std::fs::read_to_string(&path)
-                .unwrap()
-                .ends_with("[[allow]]\ncommand = \"cargo run\"\n")
+            added.starts_with(
+                "[[allow]]\ncommand = \"cargo run --release\"\nexact = true\nproject = \""
+            ),
+            "{added}"
         );
         assert_eq!(desk.always(&id), Err("unknown or already answered request"));
         let view = desk.view();
         assert_eq!(
             view["rules"]["notice"]["text"],
-            "Rules changed: added cargo run"
+            "Rules changed: added cargo run --release in p"
         );
         assert_eq!(view["sessions"][0]["history"][0]["how"], "you allowed");
-        // Next time the rule answers.
+        // Next time the rule answers: the same command in the same project.
         assert_eq!(
-            desk.handle(event("a", "PermissionRequest", "cargo run")),
+            desk.handle(event("a", "PermissionRequest", "cargo run --release")),
             Some(Decision::Allow)
         );
+        // Not with words added or removed, and not in another project.
+        for (session, project, command) in [
+            ("a", "/p", "cargo run --release --verbose"),
+            ("a", "/p", "cargo run"),
+            ("b", "/p2", "cargo run --release"),
+            ("c", "/other/p", "cargo run --release"),
+        ] {
+            let mut e = event(session, "PermissionRequest", command);
+            e.project = project.into();
+            let (d, e) = (desk.clone(), e);
+            let waiting = std::thread::spawn(move || d.handle(e));
+            let id = queued(&desk, 1).remove(0);
+            desk.decide(&id, false).unwrap();
+            assert_eq!(
+                waiting.join().unwrap(),
+                Some(Decision::Deny),
+                "{project} {command}"
+            );
+        }
         // Nothing to offer: refused.
         let b = ask(&desk, "a", "rm -rf x");
         let id = queued(&desk, 1).remove(0);

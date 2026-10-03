@@ -129,28 +129,101 @@ pub enum Mode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Rule {
-    /// A Bash command starting with these words.
+pub enum Kind {
+    /// A command starting with these words (all of them, if `exact`).
     Command(Vec<String>),
     /// One of `PATH_TOOLS`.
     Tool(String),
 }
 
+/// One `[[allow]]` rule. Hand-written rules are usually just a command
+/// prefix or a tool; "Always allow" writes exact, project-scoped ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rule {
+    pub kind: Kind,
+    /// The command must be exactly these words, nothing added.
+    pub exact: bool,
+    /// A tool rule for this one file only (absolute, resolved).
+    pub path: Option<PathBuf>,
+    /// Only in this project folder (absolute, resolved).
+    pub project: Option<PathBuf>,
+}
+
 impl Rule {
-    /// How the rule reads in the island, e.g. `cargo test` or `Read`.
-    pub fn label(&self) -> String {
-        match self {
-            Rule::Command(words) => words.join(" "),
-            Rule::Tool(tool) => tool.clone(),
+    /// A plain prefix rule, as in the defaults.
+    pub fn command(words: Vec<String>) -> Rule {
+        Rule {
+            kind: Kind::Command(words),
+            exact: false,
+            path: None,
+            project: None,
         }
+    }
+
+    /// A tool rule for any path inside any project, as in the defaults.
+    pub fn tool(name: &str) -> Rule {
+        Rule {
+            kind: Kind::Tool(name.into()),
+            exact: false,
+            path: None,
+            project: None,
+        }
+    }
+
+    /// How the rule reads in the island, e.g. `cargo test`, `Read`, or
+    /// `Write hello.txt in bouncer-playground`.
+    pub fn label(&self) -> String {
+        let name = |p: &Path| {
+            p.file_name()
+                .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into())
+        };
+        let mut label = match &self.kind {
+            Kind::Command(words) => words.join(" "),
+            Kind::Tool(tool) => tool.clone(),
+        };
+        if let Some(path) = &self.path {
+            label = format!("{label} {}", name(path));
+        }
+        if let Some(project) = &self.project {
+            label = format!("{label} in {}", name(project));
+        }
+        label
     }
 
     /// Exactly what "Always allow" appends to the file.
     pub fn to_toml(&self) -> String {
-        match self {
-            Rule::Command(words) => format!("[[allow]]\ncommand = {}\n", quoted(&words.join(" "))),
-            Rule::Tool(tool) => format!("[[allow]]\ntool = {}\n", quoted(tool)),
+        let mut out = String::from("[[allow]]\n");
+        match &self.kind {
+            Kind::Command(words) => {
+                let words: Vec<String> = words.iter().map(|w| shell_quoted(w)).collect();
+                out += &format!("command = {}\n", quoted(&words.join(" ")));
+            }
+            Kind::Tool(tool) => out += &format!("tool = {}\n", quoted(tool)),
         }
+        if let Some(path) = &self.path {
+            out += &format!("path = {}\n", quoted(&path.to_string_lossy()));
+        }
+        if self.exact {
+            out += "exact = true\n";
+        }
+        if let Some(project) = &self.project {
+            out += &format!("project = {}\n", quoted(&project.to_string_lossy()));
+        }
+        out
+    }
+}
+
+/// A word the shell parser reads back as itself: as is when it's plain,
+/// else single-quoted.
+fn shell_quoted(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._/:=@%+,-".contains(c));
+    if plain {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
     }
 }
 
@@ -373,33 +446,45 @@ pub fn parse(text: &str) -> Result<Rules, String> {
     Ok(rules)
 }
 
-/// One `[[allow]]` table: exactly one of `command` or `tool`.
+/// One `[[allow]]` table: exactly one of `command` or `tool`; optionally
+/// `exact` (with `command`), `path` (with `tool`) and `project`.
 fn rule(
     entry: &DeTable,
     span: Range<usize>,
     fail: &impl Fn(Range<usize>, String) -> String,
 ) -> Result<Rule, String> {
-    let mut found = None;
+    let mut kind = None;
+    let mut exact = None;
+    let mut path = None;
+    let mut project = None;
     for (key, value) in entry.iter() {
         let name = key.get_ref().as_ref();
-        if found.is_some() {
-            return Err(fail(
-                key.span(),
-                "an [[allow]] rule has either `command` or `tool`, not both".into(),
-            ));
-        }
-        let DeValue::String(text) = value.get_ref() else {
-            return Err(fail(value.span(), format!("`{name}` must be a string")));
+        let text = || match value.get_ref() {
+            DeValue::String(text) => Ok(text.as_ref()),
+            _ => Err(fail(value.span(), format!("`{name}` must be a string"))),
         };
-        found = Some(match name {
+        let full_path = |text: &str| {
+            let p = PathBuf::from(text);
+            match p.is_absolute() {
+                true => Ok(p),
+                false => Err(fail(value.span(), format!("`{name}` must be a full path"))),
+            }
+        };
+        match name {
+            "command" | "tool" if kind.is_some() => {
+                return Err(fail(
+                    key.span(),
+                    "an [[allow]] rule has either `command` or `tool`, not both".into(),
+                ));
+            }
             "command" => {
-                let parsed = shell::parse(text);
+                let parsed = shell::parse(text()?);
                 match parsed.commands.as_slice() {
                     [c] if parsed.issues.is_empty()
                         && c.writes.is_empty()
                         && c.reads.is_empty() =>
                     {
-                        Rule::Command(c.words.clone())
+                        kind = Some(Kind::Command(c.words.clone()));
                     }
                     _ => {
                         return Err(fail(
@@ -409,17 +494,43 @@ fn rule(
                     }
                 }
             }
-            "tool" if PATH_TOOLS.contains(&text.as_ref()) => Rule::Tool(text.to_string()),
             "tool" => {
-                return Err(fail(
-                    value.span(),
-                    format!("`tool` must be one of {}", PATH_TOOLS.join(", ")),
-                ));
+                let text = text()?;
+                if !PATH_TOOLS.contains(&text) {
+                    return Err(fail(
+                        value.span(),
+                        format!("`tool` must be one of {}", PATH_TOOLS.join(", ")),
+                    ));
+                }
+                kind = Some(Kind::Tool(text.into()));
             }
+            "exact" => match value.get_ref() {
+                DeValue::Boolean(b) => exact = Some((*b, key.span())),
+                _ => return Err(fail(value.span(), "`exact` must be true or false".into())),
+            },
+            "path" => path = Some((full_path(text()?)?, key.span())),
+            "project" => project = Some(full_path(text()?)?),
             other => return Err(fail(key.span(), format!("unknown key `{other}`"))),
-        });
+        }
     }
-    found.ok_or_else(|| fail(span, "an [[allow]] rule needs `command` or `tool`".into()))
+    let kind =
+        kind.ok_or_else(|| fail(span, "an [[allow]] rule needs `command` or `tool`".into()))?;
+    match (&kind, &exact, &path) {
+        (Kind::Tool(_), Some((_, at)), _) => Err(fail(
+            at.clone(),
+            "`exact` goes with `command`, not `tool`".into(),
+        )),
+        (Kind::Command(_), _, Some((_, at))) => Err(fail(
+            at.clone(),
+            "`path` goes with `tool`, not `command`".into(),
+        )),
+        _ => Ok(Rule {
+            kind,
+            exact: exact.is_some_and(|(b, _)| b),
+            path: path.map(|(p, _)| p),
+            project,
+        }),
+    }
 }
 
 /// A TOML basic string.
@@ -652,9 +763,9 @@ mod tests {
         assert!(
             rules
                 .allow
-                .contains(&Rule::Command(vec!["git".into(), "status".into()]))
+                .contains(&Rule::command(vec!["git".into(), "status".into()]))
         );
-        assert!(rules.allow.contains(&Rule::Tool("Read".into())));
+        assert!(rules.allow.contains(&Rule::tool("Read")));
         assert_eq!(Rules::builtin(), rules);
     }
 
@@ -710,12 +821,74 @@ mod tests {
     #[test]
     fn rules_read_back_from_their_toml() {
         for rule in [
-            Rule::Command(vec!["cargo".into(), "test".into()]),
-            Rule::Command(vec!["./build.sh".into(), "--all".into()]),
-            Rule::Tool("Edit".into()),
+            Rule::command(vec!["cargo".into(), "test".into()]),
+            Rule::command(vec!["./build.sh".into(), "--all".into()]),
+            Rule::tool("Edit"),
         ] {
             let rules = parse(&rule.to_toml()).unwrap();
             assert_eq!(rules.allow, [rule]);
+        }
+    }
+
+    #[test]
+    fn scoped_rules_read_back_exactly() {
+        let project = std::env::temp_dir().join("Full Time").join("my proj");
+        let words = |s: &[&str]| s.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        for rule in [
+            Rule {
+                kind: Kind::Command(words(&["git", "diff", r"src\main.rs", "it's", "a b", ""])),
+                exact: true,
+                path: None,
+                project: Some(project.clone()),
+            },
+            Rule {
+                kind: Kind::Tool("Write".into()),
+                exact: false,
+                path: Some(project.join("hello.txt")),
+                project: Some(project.clone()),
+            },
+        ] {
+            let text = rule.to_toml();
+            assert_eq!(parse(&text).unwrap().allow, [rule], "{text}");
+        }
+    }
+
+    #[test]
+    fn scoped_rule_keys_are_checked() {
+        let full = std::env::temp_dir().to_string_lossy().replace('\\', "\\\\");
+        let ok = format!("[[allow]]\ncommand = \"ls\"\nexact = true\nproject = \"{full}\"\n");
+        assert!(parse(&ok).unwrap().allow[0].exact);
+        for (text, want) in [
+            (
+                "[[allow]]\ncommand = \"ls\"\nexact = \"yes\"\n",
+                "line 3: `exact` must be true or false",
+            ),
+            (
+                "[[allow]]\ntool = \"Read\"\nexact = true\n",
+                "line 3: `exact` goes with `command`, not `tool`",
+            ),
+            (
+                &format!("[[allow]]\ncommand = \"ls\"\npath = \"{full}\"\n"),
+                "line 3: `path` goes with `tool`, not `command`",
+            ),
+            (
+                "[[allow]]\ntool = \"Read\"\npath = \"src/main.rs\"\n",
+                "line 3: `path` must be a full path",
+            ),
+            (
+                "[[allow]]\ncommand = \"ls\"\nproject = \"proj\"\n",
+                "line 3: `project` must be a full path",
+            ),
+            (
+                "[[allow]]\ncommand = \"ls\"\nproject = 5\n",
+                "line 3: `project` must be a string",
+            ),
+            (
+                "[[allow]]\ncommand = \"ls\"\nscope = \"x\"\n",
+                "line 3: unknown key `scope`",
+            ),
+        ] {
+            assert_eq!(err(text), format!("rules.toml {want}"), "{text}");
         }
     }
 
@@ -792,7 +965,7 @@ mod tests {
     fn add_appends_one_rule_atomically() {
         let path = temp_dir("add").join("rules.toml");
         fs::write(&path, "mode = \"auto\" # mine\n[[allow]]\ncommand = \"ls\"").unwrap();
-        let rule = Rule::Command(vec!["cargo".into(), "test".into()]);
+        let rule = Rule::command(vec!["cargo".into(), "test".into()]);
         add(&path, &rule).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert_eq!(

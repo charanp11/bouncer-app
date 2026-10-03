@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bouncer_core::check::{self, *};
-use bouncer_core::rules::Rules;
+use bouncer_core::rules::{Rules, parse};
 use serde_json::{Value, json};
 
 /// What a row expects.
@@ -81,7 +81,10 @@ fn a_project_next_to_the_rules_file() {
     for tool in ["Bash", "PowerShell"] {
         let v = check(tool, "cargo run");
         assert_eq!(v.reasons, Vec::<&str>::new(), "{tool}");
-        assert_eq!(v.offer.map(|r| r.label()).as_deref(), Some("cargo run"));
+        assert_eq!(
+            v.offer.map(|r| r.label()).as_deref(),
+            Some("cargo run in proj")
+        );
         assert_eq!(
             check(tool, "cargo test").allow.as_deref(),
             Some("cargo test")
@@ -508,7 +511,10 @@ fn tool_case_table() {
     }
     // Edits inside the project are offered as a tool rule; outside, never.
     let v = verdict(&s, "Edit", json!({ "file_path": inside("src/main.rs") }));
-    assert_eq!(v.offer.map(|r| r.label()).as_deref(), Some("Edit"));
+    assert_eq!(
+        v.offer.map(|r| r.label()).as_deref(),
+        Some("Edit main.rs in proj")
+    );
     let v = verdict(&s, "Edit", json!({ "file_path": "/etc/hosts" }));
     assert_eq!(v.offer, None);
 }
@@ -637,7 +643,7 @@ fn powershell_case_table() {
     let offered = |c: &str| verdict(&s, "PowerShell", json!({ "command": c })).offer;
     assert_eq!(
         offered("cargo run").map(|r| r.label()).as_deref(),
-        Some("cargo run")
+        Some("cargo run in proj")
     );
     for never in [
         "iex x",
@@ -740,6 +746,121 @@ fn powershell_fuzz_only_allows_plain_commands() {
         allowed > 0,
         "the generator never produced an allowed command"
     );
+}
+
+/// "Always allow" rules: exactly this command (or this one file), only in
+/// this project, compared as fully resolved paths.
+#[test]
+fn scoped_rules_match_only_there() {
+    let s = setup();
+    let lookalike = s.project.parent().unwrap().join("proj-evil");
+    std::fs::create_dir_all(lookalike.join("src")).unwrap();
+    let toml_path = |p: &Path| p.to_string_lossy().replace('\\', "\\\\");
+    // Written in a roundabout form on purpose: it's resolved before comparing.
+    let project = s.project.join("src").join("..");
+    let text = format!(
+        "mode = \"auto\"\n\
+         [[allow]]\ncommand = \"cargo run --release\"\nexact = true\nproject = \"{p}\"\n\
+         [[allow]]\ntool = \"Write\"\npath = \"{f}\"\nproject = \"{p}\"\n",
+        p = toml_path(&project),
+        f = toml_path(&s.project.join("hello.txt")),
+    );
+    let rules = parse(&text).unwrap();
+    let run = |root: &Path, tool: &str, input: Value| {
+        let ctx = Context {
+            root,
+            cwd: root,
+            home: Some(&s.home),
+            rules_file: None,
+        };
+        check::check(&rules, Some(tool), Some(&input), &ctx).allow
+    };
+    let bash = |root: &Path, command: &str| run(root, "Bash", json!({ "command": command }));
+    let ps = |root: &Path, command: &str| run(root, "PowerShell", json!({ "command": command }));
+
+    assert!(bash(&s.project, "cargo run --release").is_some());
+    assert!(ps(&s.project, "cargo run --release").is_some());
+    assert!(
+        ps(&s.project, "CARGO run --release").is_some(),
+        "program case"
+    );
+    for command in [
+        "cargo run --release --verbose",
+        "cargo run --release x",
+        "cargo run",
+        "cargo run --debug",
+        "cargo run --RELEASE",
+    ] {
+        assert_eq!(bash(&s.project, command), None, "{command}");
+        assert_eq!(ps(&s.project, command), None, "{command}");
+    }
+    assert_eq!(
+        bash(&lookalike, "cargo run --release"),
+        None,
+        "look-alike folder"
+    );
+    assert_eq!(
+        bash(&s.project.join("src"), "cargo run --release"),
+        None,
+        "subfolder"
+    );
+    assert_eq!(bash(&s.home, "cargo run --release"), None);
+
+    let write = |root: &Path, file: &Path| {
+        run(
+            root,
+            "Write",
+            json!({ "file_path": file.to_string_lossy(), "content": "x" }),
+        )
+    };
+    assert!(write(&s.project, &s.project.join("hello.txt")).is_some());
+    assert!(
+        write(
+            &s.project,
+            &s.project.join("src").join("..").join("hello.txt")
+        )
+        .is_some()
+    );
+    assert_eq!(write(&s.project, &s.project.join("other.txt")), None);
+    assert_eq!(
+        write(&s.project, &s.project.join("src").join("hello.txt")),
+        None
+    );
+    assert_eq!(write(&lookalike, &lookalike.join("hello.txt")), None);
+    let edit = json!({ "file_path": s.project.join("hello.txt").to_string_lossy() });
+    assert_eq!(run(&s.project, "Edit", edit), None, "another tool");
+
+    // Windows paths ignore case, as the file system does.
+    if cfg!(windows) {
+        let upper = PathBuf::from(s.project.to_string_lossy().to_uppercase());
+        assert!(bash(&upper, "cargo run --release").is_some());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_project_is_the_same_project() {
+    let s = setup();
+    let link = s.project.parent().unwrap().join("link-to-proj");
+    std::os::unix::fs::symlink(&s.project, &link).unwrap();
+    let text = format!(
+        "[[allow]]\ncommand = \"make\"\nexact = true\nproject = \"{}\"\n",
+        link.display()
+    );
+    let rules = parse(&text).unwrap();
+    let ctx = Context {
+        root: &s.project,
+        cwd: &s.project,
+        home: None,
+        rules_file: None,
+    };
+    let v = check::check(
+        &rules,
+        Some("Bash"),
+        Some(&json!({ "command": "make" })),
+        &ctx,
+    );
+    assert!(v.allow.is_some());
 }
 
 /// Real requests from the playground (Claude Code 2.1.288 on Windows). The

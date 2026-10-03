@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::Value;
 
 use crate::approvals::hidden;
-use crate::rules::{PATH_TOOLS, Rule, Rules};
+use crate::rules::{Kind, PATH_TOOLS, Rule, Rules};
 use crate::shell::{self, Command, Issue, Parsed};
 
 pub const DOWNLOAD_AND_RUN: &str = "downloads a script and runs it in the shell";
@@ -112,10 +112,11 @@ fn bash(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
         .commands
         .iter()
         .map(|c| {
-            rules.allow.iter().find_map(|rule| match rule {
-                Rule::Command(prefix) if c.words.starts_with(prefix) => Some(rule.label()),
-                _ => None,
-            })
+            rules
+                .allow
+                .iter()
+                .find(|rule| root.applies(rule) && command_matches(rule, &c.words, false))
+                .map(Rule::label)
         })
         .collect();
     let ok = understood && inside && root.usable;
@@ -130,9 +131,32 @@ fn bash(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
         }
         verdict.allow = Some(unique.join(", "));
     } else if ok && let [only] = parsed.commands.as_slice() {
-        verdict.offer = offer(&only.words);
+        verdict.offer = offer(&only.words, root);
     }
     verdict
+}
+
+/// Whether a `command` rule covers these words: its words first (all of
+/// them if `exact`), the program ignoring case for PowerShell.
+fn command_matches(rule: &Rule, words: &[String], program_any_case: bool) -> bool {
+    let Kind::Command(prefix) = &rule.kind else {
+        return false;
+    };
+    // A part with no words (`> x` alone) matches nothing.
+    let (Some(program), Some(first)) = (prefix.first(), words.first()) else {
+        return false;
+    };
+    let fits = if rule.exact {
+        words.len() == prefix.len()
+    } else {
+        words.len() >= prefix.len()
+    };
+    let same_program = if program_any_case {
+        program.eq_ignore_ascii_case(first)
+    } else {
+        program == first
+    };
+    fits && same_program && prefix[1..] == words[1..prefix.len()]
 }
 
 /// Characters a PowerShell command may contain and still be auto-allowed:
@@ -159,24 +183,20 @@ fn powershell(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
         words: command.split_whitespace().map(str::to_owned).collect(),
         ..Command::default()
     };
-    let Some(program) = c.words.first() else {
+    if c.words.is_empty() {
         return verdict;
-    };
+    }
     let inside = path_words(&c).all(|w| root.inside(&root.resolve(w)));
     if !(inside && root.usable) {
         return verdict;
     }
-    let matched = rules.allow.iter().find(|rule| match rule {
-        Rule::Command(prefix) => {
-            prefix.len() <= c.words.len()
-                && prefix[0].eq_ignore_ascii_case(program)
-                && prefix[1..] == c.words[1..prefix.len()]
-        }
-        Rule::Tool(_) => false,
-    });
+    let matched = rules
+        .allow
+        .iter()
+        .find(|rule| root.applies(rule) && command_matches(rule, &c.words, true));
     match matched {
         Some(rule) => verdict.allow = Some(rule.label()),
-        None => verdict.offer = offer(&c.words),
+        None => verdict.offer = offer(&c.words, root),
     }
     verdict
 }
@@ -277,14 +297,53 @@ fn path_tool(rules: &Rules, tool: &str, input: &Value, root: &Resolved) -> Verdi
         }
     }
     if root.usable && paths.iter().all(|(_, p)| root.inside(p)) {
-        let rule = Rule::Tool(tool.into());
-        if rules.allow.contains(&rule) {
-            verdict.allow = Some(rule.label());
-        } else {
-            verdict.offer = Some(rule);
+        let covers = |rule: &&Rule| {
+            rule.kind == Kind::Tool(tool.into())
+                && root.applies(rule)
+                && match &rule.path {
+                    None => true,
+                    Some(file) => matches!(paths.as_slice(), [(_, p)] if same_path(&real(file), p)),
+                }
+        };
+        match rules.allow.iter().find(covers) {
+            Some(rule) => verdict.allow = Some(rule.label()),
+            // "Always allow" for a file tool: that one file, in this project.
+            None if paths.len() == 1 && SINGLE_FILE_TOOLS.contains(&tool) => {
+                verdict.offer = Some(Rule {
+                    kind: Kind::Tool(tool.into()),
+                    exact: false,
+                    path: Some(stored(&paths[0].1)),
+                    project: Some(stored(&root.root)),
+                });
+            }
+            None => {}
         }
     }
     verdict
+}
+
+/// Tools that touch one file: "Always allow" can name it.
+const SINGLE_FILE_TOOLS: &[&str] = &["Read", "Edit", "MultiEdit", "Write", "NotebookEdit"];
+
+/// Whether two resolved paths are the same: ignoring case on Windows, where
+/// the file system does.
+fn same_path(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
+/// A resolved path as written into `rules.toml`: without Windows' `\\?\`
+/// prefix (it's added back when the rule is read and resolved again).
+fn stored(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.starts_with("UNC\\") => PathBuf::from(format!(r"\\{}", &rest[4..])),
+        Some(rest) => PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
 }
 
 fn add(reasons: &mut Vec<&'static str>, reason: &'static str) {
@@ -517,39 +576,35 @@ const NEVER_OFFER: &[&str] = &[
     "set-executionpolicy", "sc", "set-content", "add-content", "out-file",
 ];
 
-/// Programs with subcommands: a rule names the subcommand too ("cargo test",
-/// never just "cargo").
-#[rustfmt::skip]
-const SUBCOMMANDS: &[&str] = &[
-    "cargo", "npm", "npx", "pnpm", "yarn", "go", "docker", "kubectl", "pip", "pip3", "uv", "gh",
-    "dotnet", "brew", "apt", "make", "rustup", "terraform",
-];
-
 /// Git subcommands "Always allow" may offer (`git` alone never).
 const GIT_OFFER: &[&str] = &["status", "diff", "log", "show", "fetch", "add", "commit"];
 
-/// The rule "Always allow" offers for a plain command: its program, plus its
-/// subcommand when the second word is a plain word.
-fn offer(words: &[String]) -> Option<Rule> {
+/// The rule "Always allow" offers for a single command: exactly these words,
+/// only in this project. Never for programs on `NEVER_OFFER` (compared
+/// ignoring case: PowerShell runs `RM` and `Iex` too).
+fn offer(words: &[String], root: &Resolved) -> Option<Rule> {
     let program = words.first()?.as_str();
-    let plain = |w: &str| {
-        w.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-            && w.chars()
-                .all(|c| c.is_ascii_alphanumeric() || "._:-".contains(c))
-    };
-    let sub = words.get(1).filter(|w| plain(w));
-    // Compared ignoring case: PowerShell runs `RM` and `Iex` too.
+    let plain = program
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric())
+        && program
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._:-".contains(c));
     let lower = name(program);
-    let git = lower == "git" && sub.is_some_and(|s| GIT_OFFER.contains(&s.as_str()));
-    if !(plain(program) || program.starts_with("./"))
-        || (NEVER_OFFER.contains(&lower.as_str()) && !git)
-        || (SUBCOMMANDS.contains(&lower.as_str()) && sub.is_none())
-    {
+    let git = lower == "git"
+        && words
+            .get(1)
+            .is_some_and(|s| GIT_OFFER.contains(&s.as_str()));
+    if !(plain || program.starts_with("./")) || (NEVER_OFFER.contains(&lower.as_str()) && !git) {
         return None;
     }
-    let mut prefix = vec![program.to_owned()];
-    prefix.extend(sub.cloned());
-    Some(Rule::Command(prefix))
+    Some(Rule {
+        kind: Kind::Command(words.to_vec()),
+        exact: true,
+        path: None,
+        project: Some(stored(&root.root)),
+    })
 }
 
 /// Resolves paths the way the shell and the tools would, and knows the project.
@@ -605,6 +660,14 @@ impl<'a> Resolved<'a> {
 
     fn inside(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
+    }
+
+    /// Whether a rule applies in this project: unscoped, or scoped to a
+    /// folder that resolves to exactly this one.
+    fn applies(&self, rule: &Rule) -> bool {
+        rule.project
+            .as_deref()
+            .is_none_or(|p| same_path(&real(p), &self.root))
     }
 }
 
@@ -800,9 +863,15 @@ mod tests {
         );
         assert_eq!(run("Read", json!({})).allow, None);
         let edit = run("Edit", json!({ "file_path": inside }));
+        assert_eq!(edit.allow, None);
+        let offer = edit.offer.unwrap();
+        assert_eq!(offer.label(), "Edit main.rs in proj");
+        assert_eq!(offer.path, Some(stored(&real(Path::new(&inside)))));
+        assert_eq!(offer.project, Some(stored(&real(&dir))));
         assert_eq!(
-            (edit.allow, edit.offer),
-            (None, Some(Rule::Tool("Edit".into())))
+            run("Grep", json!({ "pattern": "x" })).offer,
+            None,
+            "not a file tool"
         );
         assert_eq!(run("Edit", json!({ "file_path": "/etc/x" })).offer, None);
         assert_eq!(
@@ -835,30 +904,46 @@ mod tests {
     }
 
     #[test]
-    fn always_allow_offers_narrow_rules() {
+    fn always_allow_offers_exact_rules_in_this_project() {
+        let dir = temp_project("offer");
+        let ctx = Context {
+            root: &dir,
+            cwd: &dir,
+            home: None,
+            rules_file: None,
+        };
+        let root = Resolved::new(&ctx);
         let w = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
-        let cmd = |s: &str| Some(Rule::Command(w(s)));
-        assert_eq!(offer(&w("cargo run --release")), cmd("cargo run"));
-        assert_eq!(offer(&w("pytest -x tests")), cmd("pytest"));
-        assert_eq!(offer(&w("pytest tests")), cmd("pytest tests"));
-        assert_eq!(offer(&w("./build.sh fast")), cmd("./build.sh fast"));
-        assert_eq!(offer(&w("git fetch origin")), cmd("git fetch"));
-        for never in [
+        let rule = offer(&w("cargo run --release"), &root).unwrap();
+        assert_eq!(rule.kind, Kind::Command(w("cargo run --release")));
+        assert!(rule.exact);
+        assert_eq!(rule.project, Some(stored(&real(&dir))));
+        assert!(!rule.project.unwrap().to_string_lossy().starts_with(r"\\?\"));
+        for ok in [
+            "pytest -x tests",
+            "./build.sh fast",
+            "git fetch origin",
             "cargo",
-            "cargo --version",
+        ] {
+            assert!(offer(&w(ok), &root).is_some(), "{ok}");
+        }
+        for never in [
             "git -C x status",
             "git push",
             "git",
             "bash x.sh",
             "python -m http.server",
             "rm -rf x",
+            "RM x",
             "sudo ls",
             "env ls",
             "curl x",
             "/bin/ls",
             "find . -delete",
+            "iex x",
+            "Remove-Item x",
         ] {
-            assert_eq!(offer(&w(never)), None, "{never}");
+            assert_eq!(offer(&w(never), &root), None, "{never}");
         }
     }
 
