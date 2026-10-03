@@ -6,7 +6,7 @@
 //! another account can write is refused, a day file stops at `MAX_DAY`, and a
 //! line that doesn't parse (a crash mid-write) is skipped when reading.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -23,6 +23,8 @@ pub const MAX_DAY: u64 = 10 * 1024 * 1024;
 const MAX_LABEL: usize = 200;
 const MAX_FILE: usize = 1000;
 const DAY_MS: u64 = 86_400_000;
+/// Day files older than this many days are deleted.
+pub const KEEP_DAYS: u64 = 30;
 /// Tools whose `file` is kept (the away summary counts changed files).
 const EDIT_TOOLS: [&str; 4] = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
@@ -235,7 +237,45 @@ impl Log {
         };
         self.day = Some(Day { n, file, len });
         self.note = note;
+        self.prune(n);
     }
+
+    /// Deletes day files more than `KEEP_DAYS` before day `today`.
+    fn prune(&self, today: u64) {
+        let oldest = name(today.saturating_sub(KEEP_DAYS));
+        for file in day_files(&self.dir) {
+            if file
+                .file_name()
+                .is_some_and(|f| *f.to_string_lossy() < *oldest)
+            {
+                let _ = fs::remove_file(file);
+            }
+        }
+    }
+
+    /// "Wipe history": deletes every day file. Logging goes on afresh.
+    pub fn wipe(&mut self) -> std::io::Result<()> {
+        self.day = None;
+        self.note = None;
+        day_files(&self.dir).iter().try_for_each(fs::remove_file)
+    }
+}
+
+/// Every day file in `dir` (`activity-….jsonl`).
+fn day_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().is_some_and(|f| {
+                let f = f.to_string_lossy();
+                f.starts_with("activity-") && f.ends_with(".jsonl")
+            })
+        })
+        .collect()
 }
 
 /// Entries with `since <= t <= until` from the day files in `dir`, oldest
@@ -270,7 +310,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::rules::tests::temp_dir;
     use serde_json::json;
-    use std::fs;
     use std::time::{Duration, UNIX_EPOCH};
 
     pub(crate) fn event(kind: &str, tool: Option<&str>, input: Value, t: u64) -> Event {
@@ -402,6 +441,45 @@ pub(crate) mod tests {
             let escaped = escaped.trim_matches('"');
             assert!(!written.contains(escaped), "{secret} on disk");
         }
+    }
+
+    #[test]
+    fn old_days_are_deleted_and_wipe_deletes_all() {
+        let dir = temp_dir("retention").join("history");
+        create_private_dir(&dir).unwrap();
+        let today = 20_729;
+        for n in [
+            today - 40,
+            today - KEEP_DAYS - 1,
+            today - KEEP_DAYS,
+            today - 1,
+        ] {
+            fs::write(dir.join(name(n)), "").unwrap();
+        }
+        fs::write(dir.join("notes.txt"), "not ours").unwrap();
+        let mut log = Log::new(dir.clone());
+        log.write(&Entry::of(&event("Stop", None, json!({}), today * DAY_MS)));
+        let mut left: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                name(today - KEEP_DAYS),
+                name(today - 1),
+                name(today),
+                "notes.txt".into()
+            ]
+        );
+        log.wipe().unwrap();
+        assert_eq!(day_files(&dir), Vec::<PathBuf>::new());
+        assert!(dir.join("notes.txt").exists(), "only our files");
+        assert_eq!(read(&dir, 0, (today + 1) * DAY_MS), []);
+        // Logging goes on after a wipe.
+        log.write(&Entry::of(&event("Stop", None, json!({}), today * DAY_MS)));
+        assert_eq!(read(&dir, 0, (today + 1) * DAY_MS).len(), 1);
     }
 
     #[test]
