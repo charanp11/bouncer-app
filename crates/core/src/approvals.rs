@@ -345,7 +345,7 @@ fn request_text(event: &Event) -> String {
 
 /// Characters that are invisible or reorder text when displayed: controls
 /// (ANSI escapes), bidi controls, zero-width characters, tag characters.
-fn hidden(c: char) -> bool {
+pub(crate) fn hidden(c: char) -> bool {
     (c.is_control() && c != '\n' && c != '\t')
         || matches!(c,
             '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
