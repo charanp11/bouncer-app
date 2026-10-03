@@ -38,6 +38,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+        env:
+          BOUNCER_FUZZ_ITERS: 5000
       # Release builds must ignore BOUNCER_ENDPOINT and BOUNCER_RULES.
       - run: cargo test --locked --release -p bouncer-relay --lib
       - run: cargo test --locked --release -p bouncer-core --lib rules::tests::override

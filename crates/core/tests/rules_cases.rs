@@ -731,12 +731,21 @@ const PS_PIECES: &[&str] = &[
     "\u{200B}",
 ];
 
+/// Fuzz rounds: 500 in a local debug run (fast), 5,000 in release, and
+/// whatever `BOUNCER_FUZZ_ITERS` says (CI sets 5,000).
+fn fuzz_iterations() -> usize {
+    std::env::var("BOUNCER_FUZZ_ITERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) { 500 } else { 5_000 })
+}
+
 #[test]
 fn powershell_fuzz_only_allows_plain_commands() {
     let s = setup();
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);
     let mut allowed = 0;
-    for _ in 0..5_000 {
+    for _ in 0..fuzz_iterations() {
         let len = 1 + rng.next() % 8;
         let command: String = (0..len).map(|_| rng.pick(PS_PIECES)).collect();
         let v = verdict(&s, "PowerShell", json!({ "command": command }));
@@ -994,7 +1003,7 @@ fn fuzz_never_panics_and_never_allows_metacharacters() {
     let s = setup();
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut allowed = 0;
-    for _ in 0..5_000 {
+    for _ in 0..fuzz_iterations() {
         let len = 1 + rng.next() % 12;
         let command: String = (0..len).map(|_| rng.pick(PIECES)).collect();
         let v = verdict(&s, "Bash", json!({ "command": command }));
