@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use bouncer_core::approvals::{Desk, WAIT};
 use bouncer_core::ipc::{self, Handler, Server};
+use bouncer_core::rules;
 use serde_json::Value;
 use tauri::image::Image;
 use tauri::ipc::Channel;
@@ -97,7 +98,10 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
-            let desk = Arc::new(Desk::new(WAIT, move |view| show(&handle, view)));
+            let desk = Arc::new(Desk::new(WAIT, rules::path(), move |view| {
+                show(&handle, view)
+            }));
+            watch_rules(desk.clone());
             app.manage(Island {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
@@ -127,6 +131,19 @@ fn start_relay_server(desk: Arc<Desk>) {
         }
         Err(e) => eprintln!("Bouncer: relay endpoint unavailable: {e}"),
     }
+}
+
+/// How often the rules file is checked for edits (one metadata read).
+const RULES_CHECK: Duration = Duration::from_secs(2);
+
+/// Notices edits to the rules file; the island shows every change.
+fn watch_rules(desk: Arc<Desk>) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(RULES_CHECK);
+            desk.reload_rules();
+        }
+    });
 }
 
 const TOOLTIP: &str = "Bouncer";

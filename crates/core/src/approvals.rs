@@ -5,17 +5,24 @@
 //! ID; it's removed when answered, timed out or released by a pause. Every
 //! path that isn't an explicit decision answers nothing, so Claude Code asks in
 //! the terminal.
+//!
+//! The rules (`rules.toml`) are checked first: in auto mode a request a rule
+//! allows is answered at once; otherwise the card carries the risk reason,
+//! what the rules would do, and the rule "Always allow" would add.
 
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::check::{self, Context, sentence};
 use crate::code::code_view;
 use crate::event::Event;
 use crate::ipc::Decision;
+use crate::rules::{self, Loaded, Mode, Rule, Rules};
 
 /// How long a request waits for the user: well under the relay's budget, so
 /// the relay is still listening when the app gives up.
@@ -29,10 +36,14 @@ const IN_TERMINAL: &str = "asks in terminal";
 /// Steps kept per session for the detail view (it groups repeats and shows
 /// the latest few).
 const HISTORY: usize = 40;
+/// How a step that a rule answered is tagged.
+const BY_RULE: &str = "auto-allowed by rule";
 
 struct Session {
     id: String,
     agent: &'static str,
+    /// The folder the session was first seen in: what "inside the project" means.
+    root: String,
     project: String,
     /// What it's doing right now, e.g. "Editing main.rs".
     step: String,
@@ -51,13 +62,41 @@ struct Pending {
     event: Event,
     issued: Instant,
     answer: Sender<Decision>,
+    /// Why it's risky, as a sentence.
+    risk: Option<String>,
+    /// The rules that would allow it (observe mode).
+    would: Option<String>,
+    /// What "Always allow" adds.
+    offer: Option<Rule>,
 }
 
-#[derive(Default)]
+/// The rules in use and where they came from.
+struct RuleFile {
+    path: Option<PathBuf>,
+    loaded: Loaded,
+    stamp: Option<(SystemTime, u64)>,
+    /// The latest change, until the user dismisses it in the island.
+    notice: Option<(u64, String)>,
+}
+
+/// A short message the pill shows for a moment.
+struct Flash {
+    n: u64,
+    at: SystemTime,
+    strong: &'static str,
+    rest: String,
+    badge: &'static str,
+    risk: bool,
+}
+
 struct State {
     sessions: Vec<Session>,
     queue: VecDeque<Pending>,
     paused: bool,
+    rules: RuleFile,
+    flash: Option<Flash>,
+    /// Numbers flashes and notices, so the island can tell them apart.
+    count: u64,
 }
 
 impl State {
@@ -68,6 +107,7 @@ impl State {
                 self.sessions.push(Session {
                     id: event.session.clone(),
                     agent: event.agent,
+                    root: event.project.clone(),
                     project: event.project.clone(),
                     step: "Idle".into(),
                     status: "idle",
@@ -141,6 +181,126 @@ impl State {
         }
         Some(pending)
     }
+
+    /// A rule answered this request: tag the step and flash the pill.
+    fn auto_allowed(&mut self, event: &Event) {
+        let what = match (event.tool.as_deref(), event.input.as_ref()) {
+            (Some("Bash"), Some(input)) => input
+                .get("command")
+                .and_then(Value::as_str)
+                .and_then(|c| c.lines().next())
+                .unwrap_or_default()
+                .to_owned(),
+            _ => step(event),
+        };
+        let folder = Path::new(&event.project)
+            .file_name()
+            .map_or(event.project.clone(), |f| f.to_string_lossy().into_owned());
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
+            s.status = "working";
+            if let Some(last) = s.history.back_mut() {
+                last.1 = BY_RULE;
+            }
+        }
+        self.flash(
+            "Auto-allowed",
+            format!(" · {what} in {folder}"),
+            "rule",
+            false,
+        );
+    }
+
+    /// What the rules say about this request, in its session's project.
+    fn check(&self, event: &Event) -> check::Verdict {
+        let root = self
+            .sessions
+            .iter()
+            .find(|s| s.id == event.session)
+            .map_or(event.project.as_str(), |s| s.root.as_str());
+        let home = std::env::home_dir();
+        let bouncer = self.rules.path.as_deref().and_then(Path::parent);
+        let ctx = Context {
+            root: Path::new(root),
+            cwd: Path::new(&event.project),
+            home: home.as_deref(),
+            bouncer,
+        };
+        check::check(
+            &self.rules.loaded.rules,
+            event.tool.as_deref(),
+            event.input.as_ref(),
+            &ctx,
+        )
+    }
+
+    fn flash(&mut self, strong: &'static str, rest: String, badge: &'static str, risk: bool) {
+        self.count += 1;
+        self.flash = Some(Flash {
+            n: self.count,
+            at: SystemTime::now(),
+            strong,
+            rest,
+            badge,
+            risk,
+        });
+    }
+
+    /// Re-reads the rules file if it changed (or always, with `force`), and
+    /// tells the island what changed. True if anything did.
+    fn reload(&mut self, force: bool) -> bool {
+        let Some(path) = self.rules.path.clone() else {
+            return false;
+        };
+        let stamp = rules::stamp(&path);
+        if !force && stamp.is_some() && stamp == self.rules.stamp {
+            return false;
+        }
+        let loaded = rules::load(&path);
+        self.rules.stamp = rules::stamp(&path);
+        let old = std::mem::replace(&mut self.rules.loaded, loaded);
+        let new = &self.rules.loaded;
+        if new.error.is_some() && new.error != old.error {
+            self.flash(
+                "Rules file ignored",
+                " · using the built-in rules in observe mode".into(),
+                "rules",
+                true,
+            );
+            return true;
+        }
+        let Some(change) = changes(&old.rules, &new.rules) else {
+            return old.error != new.error;
+        };
+        self.flash("Rules changed", format!(" · {change}"), "rules", false);
+        self.rules.notice = Some((self.count, format!("Rules changed: {change}")));
+        true
+    }
+}
+
+/// What changed between two rule sets, e.g. "mode auto · added cargo test".
+fn changes(old: &Rules, new: &Rules) -> Option<String> {
+    let mut parts = Vec::new();
+    if old.mode != new.mode {
+        parts.push(match new.mode {
+            Mode::Auto => "mode auto".to_owned(),
+            Mode::Observe => "mode observe".to_owned(),
+        });
+    }
+    let missing = |a: &Rules, b: &Rules| -> Vec<String> {
+        a.allow
+            .iter()
+            .filter(|r| !b.allow.contains(r))
+            .map(Rule::label)
+            .collect()
+    };
+    let (added, removed) = (missing(new, old), missing(old, new));
+    if !added.is_empty() {
+        parts.push(format!("added {}", added.join(", ")));
+    }
+    if !removed.is_empty() {
+        parts.push(format!("removed {}", removed.join(", ")));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 pub struct Desk {
@@ -150,10 +310,36 @@ pub struct Desk {
 }
 
 impl Desk {
-    /// `changed` gets the new view after every change, outside the lock.
-    pub fn new(wait: Duration, changed: impl Fn(Value) + Send + Sync + 'static) -> Desk {
+    /// `rules` is the rules file (created with defaults if missing); `None`
+    /// uses the built-in rules in observe mode. `changed` gets the new view
+    /// after every change, outside the lock.
+    pub fn new(
+        wait: Duration,
+        rules: Option<PathBuf>,
+        changed: impl Fn(Value) + Send + Sync + 'static,
+    ) -> Desk {
+        let loaded = match &rules {
+            Some(path) => rules::load(path),
+            None => Loaded {
+                rules: Rules::builtin(),
+                error: None,
+            },
+        };
+        let stamp = rules.as_deref().and_then(rules::stamp);
         Desk {
-            state: Mutex::default(),
+            state: Mutex::new(State {
+                sessions: Vec::new(),
+                queue: VecDeque::new(),
+                paused: false,
+                rules: RuleFile {
+                    path: rules,
+                    loaded,
+                    stamp,
+                    notice: None,
+                },
+                flash: None,
+                count: 0,
+            }),
             wait,
             changed: Box::new(changed),
         }
@@ -167,28 +353,37 @@ impl Desk {
         (self.changed)(self.view());
     }
 
-    /// Records the event. A permission request is queued and this blocks until
-    /// the user decides, the wait runs out, or Bouncer is paused; only a
-    /// decision returns `Some`.
+    /// Records the event. A permission request a rule allows (auto mode) is
+    /// answered at once; any other is queued and this blocks until the user
+    /// decides, the wait runs out, or Bouncer is paused. Only a decision
+    /// returns `Some`.
     pub fn handle(&self, event: Event) -> Option<Decision> {
         let (tx, rx) = mpsc::channel();
         let id = {
             let mut state = self.lock();
             state.track(&event);
-            // No ID (the OS random source failed) means no card: the terminal asks.
-            if event.is_permission_request()
-                && !state.paused
-                && let Some(id) = request_id()
-            {
-                state.queue.push_back(Pending {
-                    id: id.clone(),
-                    event,
-                    issued: Instant::now(),
-                    answer: tx,
-                });
-                Some(id)
-            } else {
+            if !event.is_permission_request() || state.paused {
                 None
+            } else {
+                let verdict = state.check(&event);
+                if state.rules.loaded.rules.mode == Mode::Auto && verdict.allow.is_some() {
+                    state.auto_allowed(&event);
+                    drop(state);
+                    self.publish();
+                    return Some(Decision::Allow);
+                }
+                // No ID (the OS random source failed) means no card: the terminal asks.
+                request_id().inspect(|id| {
+                    state.queue.push_back(Pending {
+                        id: id.clone(),
+                        event,
+                        issued: Instant::now(),
+                        answer: tx,
+                        risk: sentence(&verdict.reasons),
+                        would: verdict.allow,
+                        offer: verdict.offer,
+                    });
+                })
             }
         };
         self.publish();
@@ -235,8 +430,44 @@ impl Desk {
         Ok(())
     }
 
-    /// While paused nothing is queued, and pausing releases every queued
-    /// request unanswered, so they all go to the terminal.
+    /// "Always allow": adds the rule offered for this request to the rules
+    /// file, then allows the request. The rule comes from the backend's own
+    /// check of the queued request; nothing from the page is written.
+    pub fn always(&self, id: &str) -> Result<(), &'static str> {
+        let (rule, path) = {
+            let state = self.lock();
+            let pending = state
+                .queue
+                .iter()
+                .find(|p| p.id == id)
+                .ok_or("unknown or already answered request")?;
+            if pending.issued.elapsed() < ARM {
+                return Err("too soon to allow");
+            }
+            let rule = pending
+                .offer
+                .clone()
+                .ok_or("no rule to add for this request")?;
+            let path = state.rules.path.clone().ok_or("no rules file")?;
+            (rule, path)
+        };
+        if let Err(e) = rules::add(&path, &rule) {
+            eprintln!("Bouncer: {e}");
+            return Err("couldn't add the rule");
+        }
+        self.lock().reload(true);
+        self.decide(id, true)
+    }
+
+    /// Checks the rules file for changes; the island hears about any.
+    pub fn reload_rules(&self) {
+        if self.lock().reload(false) {
+            self.publish();
+        }
+    }
+
+    /// While paused nothing is queued or answered by a rule, and pausing
+    /// releases every queued request unanswered, so they all go to the terminal.
     pub fn set_paused(&self, paused: bool) {
         {
             let mut state = self.lock();
@@ -287,10 +518,38 @@ impl Desk {
                     "tool": p.event.tool.as_deref().map(visible),
                     "text": visible(&request_text(&p.event)),
                     "code": code_view(p.event.tool.as_deref(), p.event.input.as_ref()),
+                    "risk": p.risk,
+                    "would": p.would.as_deref().map(visible),
+                    "offer": p.offer.as_ref().map(|r| visible(&r.to_toml())),
                 })
             })
             .collect();
-        json!({ "paused": state.paused, "sessions": sessions, "queue": queue })
+        let rules = &state.rules;
+        let mode = match rules.loaded.rules.mode {
+            Mode::Auto => "auto",
+            Mode::Observe => "observe",
+        };
+        let flash = state.flash.as_ref().map(|f| {
+            json!({
+                "n": f.n,
+                "at_ms": epoch_ms(f.at),
+                "strong": f.strong,
+                "rest": visible(&f.rest),
+                "badge": f.badge,
+                "risk": f.risk,
+            })
+        });
+        json!({
+            "paused": state.paused,
+            "sessions": sessions,
+            "queue": queue,
+            "rules": {
+                "mode": mode,
+                "error": rules.loaded.error.as_deref().map(visible),
+                "notice": rules.notice.as_ref().map(|(n, text)| json!({ "n": n, "text": visible(text) })),
+            },
+            "flash": flash,
+        })
     }
 }
 
@@ -371,6 +630,7 @@ pub fn visible(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::thread::JoinHandle;
     use std::time::SystemTime;
@@ -388,7 +648,7 @@ mod tests {
     }
 
     fn desk(wait: Duration) -> Arc<Desk> {
-        Arc::new(Desk::new(wait, |_| {}))
+        Arc::new(Desk::new(wait, None, |_| {}))
     }
 
     fn ask(desk: &Arc<Desk>, session: &str, command: &str) -> JoinHandle<Option<Decision>> {
@@ -593,5 +853,159 @@ mod tests {
             request_text(&e),
             "{\n  \"file_path\": \"/p/a\",\n  \"content\": \"hi\"\n}"
         );
+    }
+
+    /// A desk reading a fresh rules file with `text` in a private temp folder.
+    fn desk_with_rules(name: &str, text: &str) -> (Arc<Desk>, PathBuf) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("bouncer-desk-{name}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rules.toml");
+        std::fs::write(&path, text).unwrap();
+        (Arc::new(Desk::new(WAIT, Some(path.clone()), |_| {})), path)
+    }
+
+    const AUTO: &str = "mode = \"auto\"\n[[allow]]\ncommand = \"ls\"\n";
+
+    #[test]
+    fn auto_mode_answers_what_a_rule_allows() {
+        let (desk, _) = desk_with_rules("auto", AUTO);
+        desk.handle(event("a", "PreToolUse", "ls src"));
+        let answer = desk.handle(event("a", "PermissionRequest", "ls src"));
+        assert_eq!(answer, Some(Decision::Allow), "answered without a card");
+        let view = desk.view();
+        assert_eq!(view["queue"], json!([]));
+        assert_eq!(view["sessions"][0]["history"][0]["how"], BY_RULE);
+        assert_eq!(view["sessions"][0]["status"], "working");
+        assert_eq!(view["flash"]["strong"], "Auto-allowed");
+        assert_eq!(view["flash"]["rest"], " · ls src in p");
+        assert_eq!(view["flash"]["badge"], "rule");
+        assert_eq!(view["rules"]["mode"], "auto");
+
+        // Not covered, or risky: a card, with the reason.
+        let other = ask(&desk, "a", "pwd");
+        let risky = ask(&desk, "a", "sudo ls");
+        let ids = queued(&desk, 2);
+        let view = desk.view();
+        assert_eq!(view["queue"][0]["risk"], json!(null));
+        assert_eq!(view["queue"][1]["risk"], "Runs as administrator.");
+        assert_eq!(view["queue"][1]["offer"], json!(null));
+        assert_eq!(view["queue"][0]["offer"], "[[allow]]\ncommand = \"pwd\"\n");
+        for id in &ids {
+            desk.decide(id, false).unwrap();
+        }
+        assert_eq!(other.join().unwrap(), Some(Decision::Deny));
+        assert_eq!(risky.join().unwrap(), Some(Decision::Deny));
+
+        // Paused: rules answer nothing either.
+        desk.set_paused(true);
+        assert_eq!(desk.handle(event("a", "PermissionRequest", "ls")), None);
+    }
+
+    #[test]
+    fn observe_mode_only_says_what_it_would_do() {
+        let desk = desk(WAIT);
+        let a = ask(&desk, "a", "git status");
+        let id = queued(&desk, 1).remove(0);
+        let view = desk.view();
+        assert_eq!(view["rules"]["mode"], "observe");
+        assert_eq!(view["queue"][0]["would"], "git status");
+        assert_eq!(view["queue"][0]["offer"], json!(null));
+        desk.decide(&id, false).unwrap();
+        assert_eq!(a.join().unwrap(), Some(Decision::Deny));
+    }
+
+    #[test]
+    fn always_allow_adds_the_offered_rule_then_allows() {
+        let (desk, path) = desk_with_rules("always", "mode = \"auto\"\n");
+        let a = ask(&desk, "a", "cargo run --release");
+        let id = queued(&desk, 1).remove(0);
+        assert_eq!(desk.always(&id), Err("too soon to allow"));
+        std::thread::sleep(ARM);
+        desk.always(&id).unwrap();
+        assert_eq!(a.join().unwrap(), Some(Decision::Allow));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .ends_with("[[allow]]\ncommand = \"cargo run\"\n")
+        );
+        assert_eq!(desk.always(&id), Err("unknown or already answered request"));
+        let view = desk.view();
+        assert_eq!(
+            view["rules"]["notice"]["text"],
+            "Rules changed: added cargo run"
+        );
+        assert_eq!(view["sessions"][0]["history"][0]["how"], "you allowed");
+        // Next time the rule answers.
+        assert_eq!(
+            desk.handle(event("a", "PermissionRequest", "cargo run")),
+            Some(Decision::Allow)
+        );
+        // Nothing to offer: refused.
+        let b = ask(&desk, "a", "rm -rf x");
+        let id = queued(&desk, 1).remove(0);
+        std::thread::sleep(ARM);
+        assert_eq!(desk.always(&id), Err("no rule to add for this request"));
+        desk.decide(&id, false).unwrap();
+        b.join().unwrap();
+    }
+
+    #[test]
+    fn rule_changes_and_errors_reach_the_island() {
+        let (desk, path) = desk_with_rules("reload", "mode = \"observe\"\n");
+        desk.reload_rules();
+        assert_eq!(desk.view()["rules"]["notice"], json!(null), "unchanged");
+        // The stamp includes the size, so a same-second edit is still seen.
+        std::fs::write(&path, AUTO).unwrap();
+        desk.reload_rules();
+        let view = desk.view();
+        assert_eq!(view["rules"]["mode"], "auto");
+        assert_eq!(
+            view["rules"]["notice"]["text"],
+            "Rules changed: mode auto · added ls"
+        );
+        assert_eq!(view["flash"]["strong"], "Rules changed");
+
+        std::fs::write(&path, "mode = \"auto\"\nlol = 1\n").unwrap();
+        desk.reload_rules();
+        let view = desk.view();
+        assert_eq!(view["rules"]["mode"], "observe", "broken file: observe");
+        assert!(
+            view["rules"]["error"]
+                .as_str()
+                .unwrap()
+                .ends_with("line 2: unknown key `lol`")
+        );
+        assert_eq!(
+            (&view["flash"]["strong"], &view["flash"]["risk"]),
+            (&json!("Rules file ignored"), &json!(true))
+        );
+        assert_eq!(desk.handle(event("a", "PreToolUse", "ls")), None);
+        let a = ask(&desk, "a", "ls");
+        let id = queued(&desk, 1).remove(0);
+        desk.decide(&id, false).unwrap();
+        assert_eq!(
+            a.join().unwrap(),
+            Some(Decision::Deny),
+            "never auto-allowed"
+        );
+
+        std::fs::write(&path, AUTO).unwrap();
+        desk.reload_rules();
+        assert_eq!(desk.view()["rules"]["error"], json!(null));
+    }
+
+    #[test]
+    fn a_broken_file_at_start_shows_its_error() {
+        let (desk, _) = desk_with_rules(
+            "start",
+            "mode = \"auto\"\n[[allow]]\ncommand = \"ls; rm x\"\n",
+        );
+        let view = desk.view();
+        assert_eq!(view["rules"]["mode"], "observe");
+        assert!(view["rules"]["error"].as_str().unwrap().contains("line 3"));
     }
 }
