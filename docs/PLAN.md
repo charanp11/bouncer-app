@@ -957,15 +957,15 @@ Phase 4 threats:
 
 Phase 4 is done when:
 
-- [ ] Day files written owner-only, refused if others can write; one event per
+- [x] Day files written owner-only, refused if others can write; one event per
       line; bad lines skipped; 10 MB cap with a note in the island
-- [ ] Redaction of all six families, before write (fake-secret fixture; no
+- [x] Redaction of all six families, before write (fake-secret fixture; no
       fake secret in any log file the tests write)
-- [ ] 30-day retention and "Wipe history" (tray)
+- [x] 30-day retention and "Wipe history" (tray)
 - [ ] Away summary matching the prototype's "Away summary" state, from the
       log, after 10+ idle minutes
-- [ ] Summary of a 30-minute session fixture gives the expected numbers
-- [ ] Idle sessions drop off (30 min; 4 h when waiting on the user)
+- [x] Summary of a 30-minute session fixture gives the expected numbers
+- [x] Idle sessions drop off (30 min; 4 h when waiting on the user)
 - [ ] Manual: away summary in the real island after an idle span, next to the
       prototype; wipe; log file contents read by hand for secrets
 - [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
@@ -978,6 +978,22 @@ Plan corrections found in this audit:
    user (Claude Code's own rules or Bouncer's), as the prototype's numbers
    imply (26 auto-allowed of 31 commands, 3 asked).
 4. Day files are per UTC day (std has no time zones); retention counts UTC days.
+5. (Implement) "Stuck" ends when the user answers the card; only a request
+   that went to the terminal waits until the session's next hook event (else
+   a command's run time after "Allow" counted as being stuck).
+6. (Implement) Retention runs when a day file is first opened (the first
+   event after start or after midnight UTC), not on a timer.
+7. (Test) `activity::read` looped over every day in the asked span; a test
+   asking for "everything" hung. It now reads at most the last 31 days (older
+   files are deleted anyway), with a test.
+8. (Test, Charan) Local test runs: the two fuzz tests were 21 of the 30 s.
+   They run 500 rounds in a debug build and 5,000 in release or with
+   `BOUNCER_FUZZ_ITERS` (CI sets 5,000). CI's check job is capped at 30 min.
+9. (Verify) Scanning the test log files on disk for the fake secrets found
+   the end of one: a secret with `/` inside a Write path left its last chunk
+   in the step label ("Editing <file name>"). Paths are now redacted before
+   the label is made, and the test checks every 8+ character piece of each
+   secret, not just the whole. A rescan after a fresh run found none.
 
 > **Scope change (Charan, 2026-10-02):** after the security core (Phases 2–4),
 > Phases 5–8 add the character, chat, file drop and music; packaging moves to
