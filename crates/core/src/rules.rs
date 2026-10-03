@@ -594,8 +594,11 @@ mod trust {
     /// re-permission it.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub fn sddl_owner_only(sddl: &str, mine: &str) -> Result<(), String> {
+        // SDDL writes the built-in Administrator account (RID 500) as `LA`,
+        // so that's "mine" when the user is that account.
+        let me = |sid: &str| sid == mine || (sid == "LA" && mine.ends_with("-500"));
         let trusted =
-            |sid: &str| sid == mine || matches!(sid, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544");
+            |sid: &str| me(sid) || matches!(sid, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544");
         let section = |tag: &str| {
             let start = sddl.find(tag)? + tag.len();
             let end = ["O:", "G:", "D:", "S:"]
@@ -1034,6 +1037,14 @@ mod tests {
             Ok(())
         );
         assert_eq!(ok("O:BAD:P(A;;FA;;;SY)"), Ok(()));
+        // The built-in Administrator account appears as `LA`: trusted only
+        // when that is the current user.
+        let admin = "S-1-5-21-1-2-3-500";
+        let sddl = "O:LAD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;LA)";
+        assert_eq!(trust::sddl_owner_only(sddl, admin), Ok(()));
+        assert!(trust::sddl_owner_only(sddl, me).is_err());
+        let sddl = format!("O:{me}D:(A;;FA;;;{me})(A;;FA;;;LA)");
+        assert!(trust::sddl_owner_only(&sddl, me).is_err());
         // Others may read and run, not write.
         assert_eq!(
             ok(&format!(
