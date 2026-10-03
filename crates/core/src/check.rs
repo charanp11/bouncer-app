@@ -133,6 +133,11 @@ fn bash(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
 /// targets, and the program when it's given as a path.
 fn path_words(c: &Command) -> impl Iterator<Item = &str> {
     let program = c.words.first().filter(|w| w.contains(['/', '\\']));
+    program.map(String::as_str).into_iter().chain(arg_paths(c))
+}
+
+/// `path_words` without the program.
+fn arg_paths(c: &Command) -> impl Iterator<Item = &str> {
     let args = c.words.iter().skip(1).filter_map(|w| {
         if let Some(opt) = w.strip_prefix('-') {
             match w.split_once('=') {
@@ -145,17 +150,12 @@ fn path_words(c: &Command) -> impl Iterator<Item = &str> {
             Some(w.as_str())
         }
     });
-    program
-        .map(String::as_str)
-        .into_iter()
-        .chain(args)
-        .chain(c.reads.iter().map(String::as_str))
-        .chain(
-            c.writes
-                .iter()
-                .map(String::as_str)
-                .filter(|w| *w != "/dev/null"),
-        )
+    args.chain(c.reads.iter().map(String::as_str)).chain(
+        c.writes
+            .iter()
+            .map(String::as_str)
+            .filter(|w| *w != "/dev/null"),
+    )
 }
 
 fn path_tool(rules: &Rules, tool: &str, input: &Value, root: &Resolved) -> Verdict {
@@ -293,9 +293,7 @@ fn bash_risks(parsed: &Parsed, root: &Resolved, reasons: &mut Vec<&'static str>)
         if ADMINS.contains(&program) || wrappers.iter().any(|w| ADMINS.contains(&w.as_str())) {
             add(reasons, ADMIN);
         }
-        if DELETERS.contains(&program)
-            && path_words(c).any(|w| name(w) != program && !root.inside(&root.resolve(w)))
-        {
+        if DELETERS.contains(&program) && arg_paths(c).any(|w| !root.inside(&root.resolve(w))) {
             add(reasons, DELETES_OUTSIDE);
         }
         if program == "git"
