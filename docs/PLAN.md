@@ -700,17 +700,17 @@ Phase 3 threats:
 
 Phase 3 is done when:
 
-- [ ] `rules.toml` created with defaults in observe mode; strict loading with
+- [x] `rules.toml` created with defaults in observe mode; strict loading with
       line-numbered errors, 64 KB cap, refused when others can write; errors fall
       back to defaults (observe) and show in the island (tests for each)
-- [ ] Parser + compound handling; unparseable → ask
-- [ ] Paths resolved (symlink, `..`, `~`); outside the project → ask
-- [ ] Risk reasons shown on the Risky card (prototype); never auto-allowed
-- [ ] Auto mode auto-allows with the Auto-allowed pill (prototype) and a rail tag
-- [ ] "Always allow" previews the exact rule; backend builds it
-- [ ] Rule changes shown in the island
-- [ ] Request IDs from `getrandom`
-- [ ] 150+ case table incl. every evasion example; fuzz: no panic, no auto-allow
+- [x] Parser + compound handling; unparseable → ask
+- [x] Paths resolved (symlink, `..`, `~`); outside the project → ask
+- [x] Risk reasons shown on the Risky card (prototype); never auto-allowed
+- [x] Auto mode auto-allows with the Auto-allowed pill (prototype) and a rail tag
+- [x] "Always allow" previews the exact rule; backend builds it
+- [x] Rule changes shown in the island
+- [x] Request IDs from `getrandom`
+- [x] 150+ case table incl. every evasion example; fuzz: no panic, no auto-allow
       of metacharacters
 - [ ] Manual: a playground session in auto mode auto-allows `git status`-style
       requests and flags a risky one
@@ -724,6 +724,39 @@ Plan corrections found in this audit:
    observe mode the request still needs the user, so a card is up.
 3. "Always allow" and the rules notice aren't in the prototype; they reuse its
    card, badge and `.after` styles.
+4. (Implement) `BOUNCER_RULES` overrides the rules file in debug/test builds
+   only (like `BOUNCER_ENDPOINT`), so dev runs never write the real config
+   folder; CI proves release ignores it.
+5. (Implement) The capability now has six commands (`always` added).
+6. (Implement) While the island is hidden (no sessions) a rules flash isn't
+   seen; the change notice and a red "rules" badge show once it's peeked or
+   opened.
+7. (Test) The fuzzer found `cat &&` read as plain `cat`. A dangling or
+   leading operator (`&& ls`, `ls |`, `;;`) is now a parse issue (bash
+   wouldn't run it anyway).
+8. (Verify) An argument whose file name matched the program (`rm ../rm`)
+   skipped the delete-outside check. Fixed, with a table row.
+9. Known limits: an allowed command's own flags aren't interpreted (e.g.
+   `git diff --output=f` writes inside the project), so the defaults leave out
+   commands with exec flags (`rg --pre`, `find -exec`); allowed git commands
+   run whatever the repo's config says, which is why `.git/config` and hooks
+   are flagged. Git Bash drive paths (`/c/…`) count as outside (fail safe).
+
+Manual checks:
+
+- 2026-10-02, debug app + debug relay fed by a script, Windows, rules file
+  in a scratch folder (`BOUNCER_RULES`): fresh start wrote the defaults
+  (observe). The prototype's risky command showed the Risky card (red ball,
+  reason "Downloads a script and runs it in the shell, and hides part of the
+  command.", U+202E/U+202C tags, Deny filled) and, unanswered, timed out with
+  the relay printing nothing. Edited to `mode = "auto"`: `cargo test` was
+  answered allow at once and the pill read "Auto-allowed · cargo test in
+  b…" with a "rule" badge (the prototype truncates the same way). Back to
+  observe: `git status` showed "Would auto-allow · git status (observe mode)",
+  "1 of 2"; `cargo run --release` showed "Always allow…". Compared side by
+  side with the prototype's Risky request and Auto-allowed states.
+- Not yet: clicking through the "Always allow" preview in the real window,
+  and a real Claude Code session in the playground (below).
 
 ## Phase 4 — Activity log and away summary (~1 week)
 
@@ -1031,3 +1064,44 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   reader / keyboard access (Phase 5).
 - Visual design is deliberately bare; the final design comes as an HTML
   prototype in `design/prototype/`.
+
+### Phase 3 summary (2026-10-02, pending the playground check)
+
+- `bouncer-core::shell`: a POSIX shell parser for Bash tool commands (words,
+  quotes, escapes, comments, compound operators, redirections). Anything it
+  can't be sure about is an issue that blocks auto-allow: substitutions,
+  variables, grouping, heredocs, `NAME=value`, unterminated or dangling input.
+- `bouncer-core::rules`: `rules.toml` (`toml` 1.1.6, parse only) in
+  `%APPDATA%\Bouncer` / `~/Library/Application Support/Bouncer`, written with
+  defaults in observe mode. Strict: 64 KB cap, unknown keys, wrong types,
+  unknown tools and non-plain commands refused with the line number; refused
+  too if anyone else can write the file or its folder (owner + mode on macOS,
+  owner + DACL on Windows) or it's a link. Any refusal falls back to the
+  built-in rules in observe mode and shows in the island. "Always allow"
+  appends one `[[allow]]` table after checking it reads back exactly.
+- `bouncer-core::check`: every Bash part must match a `command` rule, every
+  path (arguments, `--opt=value`, redirections, tool paths, globs) must
+  resolve inside the session's project (symlinks followed, `..` applied like
+  the OS); root or home as the project never auto-allows. Twelve risk reasons
+  (downloads and runs, built at run time, command in a string, deletes
+  outside, secrets, force-push, administrator, shell startup file, Claude
+  Code settings, Bouncer's rules, git config/hooks, look-alike letters, hidden
+  characters), joined into one sentence; risky requests are never
+  auto-allowed or offered.
+- Desk: auto mode answers what a rule allows (pill flash, rail tag
+  "auto-allowed by rule"); observe mode adds "Would auto-allow" to the card;
+  `always(id)` (sixth command) adds the backend's own offered rule then
+  allows; the rules file is checked every 2 s and changes or errors reach the
+  island. Paused answers nothing, rules included.
+- Island: Risky request and Auto-allowed states built to the prototype;
+  observe note, "Always allow…" preview (arms after 600 ms), rules notice and
+  red "rules" badge reuse its card, badge and box styles.
+- Request IDs: 128 bits from `getrandom` 0.4 (already in the tree); no ID →
+  no card (terminal asks).
+- New dependencies: `toml` 1.1.6 (approved), `getrandom` 0.4.3 (requested);
+  both were already in `Cargo.lock`.
+- Tests: 92 Rust (relay 21, core 66, app 5) + 7 frontend. The case table has
+  210 Bash rows and 32 tool rows; the fuzzer runs 5,000 generated commands
+  plus 5,000 random strings.
+- Still to do by hand before closing: the playground session in auto mode
+  and the "Always allow" click-through (steps in the PR).
