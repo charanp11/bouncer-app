@@ -626,6 +626,11 @@ const POWERSHELL: &[(&str, Want)] = &[
 fn powershell_case_table() {
     let s = setup();
     for (command, want) in POWERSHELL {
+        // Claude Code's PowerShell tool is Windows-only: drive and `..\`
+        // paths aren't paths anywhere else.
+        if !cfg!(windows) && (command.contains(":\\") || command.contains("..\\")) {
+            continue;
+        }
         expect(&s, "PowerShell", json!({ "command": command }), want);
     }
     // An absolute path inside the project is fine.
