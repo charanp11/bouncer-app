@@ -1,0 +1,99 @@
+name: macOS smoke test
+
+# Launches the real app on a Mac, feeds it a session and a permission request
+# through the real relay and socket, and keeps a screenshot. Not a required
+# check: there's no Mac for development, so this is the closest look we get.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: npm ci
+      # Debug build with the page built in (no dev server), plus the relay.
+      - run: npx tauri build --debug --no-bundle
+      - run: cargo build --locked -p bouncer-relay
+      - name: Launch, feed a session and a request, screenshot, quit
+        run: |
+          set -euo pipefail
+          dir="$HOME/Library/Application Support/Bouncer"
+          sock="$dir/bouncer.sock"
+          fail() { echo "::error::$1"; echo "--- app log"; cat app.log || true; exit 1; }
+
+          target/debug/bouncer-app > app.log 2>&1 &
+          app=$!
+          for _ in $(seq 1 60); do
+            [ -S "$sock" ] && break
+            kill -0 "$app" 2>/dev/null || fail "the app exited before opening its socket"
+            sleep 0.5
+          done
+          [ -S "$sock" ] || fail "the app never opened its socket"
+
+          # Recorded hook events, pointed at this checkout, through the real relay.
+          event() {
+            jq -c --arg cwd "$PWD" '.cwd = $cwd | .session_id = "smoke-test"' \
+              "crates/relay/tests/fixtures/$1"
+          }
+          event claude-code-2.1.287-SessionStart.json | target/debug/bouncer-hook
+          event claude-code-2.1.287-PreToolUse-Bash.json | target/debug/bouncer-hook
+          # The request waits for a decision, so it runs in the background.
+          event claude-code-2.1.288-PermissionRequest-Bash.json \
+            | target/debug/bouncer-hook > relay-answer.txt &
+          relay=$!
+          sleep 5
+
+          kill -0 "$app" 2>/dev/null || fail "the app crashed"
+          screencapture -x island.png
+          size=$(stat -f %z island.png 2>/dev/null || echo 0)
+          [ "$size" -gt 10000 ] || fail "the screenshot is empty ($size bytes)"
+
+          # Private folders and files on a real Mac.
+          mode() { stat -f %Lp "$1"; }
+          [ "$(mode "$dir")" = 700 ] || fail "socket folder is $(mode "$dir"), not 700"
+          [ "$(mode "$dir/rules.toml")" = 600 ] || fail "rules.toml is $(mode "$dir/rules.toml"), not 600"
+          [ "$(mode "$dir/history")" = 700 ] || fail "history folder is $(mode "$dir/history"), not 700"
+          days=("$dir"/history/activity-*.jsonl)
+          [ -f "${days[0]}" ] || fail "no history day file was written"
+          for f in "${days[@]}"; do
+            [ "$(mode "$f")" = 600 ] || fail "$(basename "$f") is $(mode "$f"), not 600"
+          done
+          ls -la "$dir" "$dir/history"
+
+          # Quit. The waiting relay must then print nothing and exit 0 (fail safe).
+          kill -0 "$app" 2>/dev/null || fail "the app crashed"
+          kill "$app"
+          wait "$app" || true
+          wait "$relay" || fail "the relay exited with an error after the app quit"
+          [ ! -s relay-answer.txt ] || fail "the relay answered: $(cat relay-answer.txt)"
+          ! grep -q "panicked" app.log || fail "the app panicked"
+          echo "--- app log"; cat app.log
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-smoke
+          path: |
+            island.png
+            app.log
+          if-no-files-found: warn
