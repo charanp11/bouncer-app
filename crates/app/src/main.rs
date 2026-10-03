@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use bouncer_core::activity;
 use bouncer_core::approvals::{Desk, WAIT};
+use bouncer_core::away::{self, Away};
 use bouncer_core::ipc::{self, Handler, Server};
 use bouncer_core::rules;
 use serde_json::Value;
@@ -101,7 +103,7 @@ fn main() {
             let desk = Arc::new(Desk::new(WAIT, rules::path(), move |view| {
                 show(&handle, view)
             }));
-            tick(desk.clone());
+            tick(app.handle().clone(), desk.clone());
             app.manage(Island {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
@@ -136,14 +138,27 @@ fn start_relay_server(desk: Arc<Desk>) {
 /// How often the background checks run (each is a metadata read or less).
 const TICK: Duration = Duration::from_secs(2);
 
-/// Notices edits to the rules file (the island shows every change) and drops
-/// sessions that went quiet without ending.
-fn tick(desk: Arc<Desk>) {
+/// Notices edits to the rules file (the island shows every change), drops
+/// sessions that went quiet without ending, and opens the away summary when
+/// the user comes back after a long idle span.
+fn tick(app: AppHandle, desk: Arc<Desk>) {
     std::thread::spawn(move || {
+        let mut away = Away::default();
+        let limit = away::limit();
         loop {
             std::thread::sleep(TICK);
             desk.reload_rules();
             desk.expire_sessions();
+            let now = activity::ms(std::time::SystemTime::now());
+            if let Some(idle) = away::user_idle()
+                && let Some(since) = away.update(now, idle, limit)
+                && desk.came_back(since)
+            {
+                app.state::<Island>()
+                    .expanded
+                    .store(true, Ordering::Relaxed);
+                show(&app, desk.view());
+            }
         }
     });
 }
@@ -151,12 +166,13 @@ fn tick(desk: Arc<Desk>) {
 const TOOLTIP: &str = "Bouncer";
 const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal";
 
-/// Tray menu: Pause / Resume and Quit. While paused the icon is greyed and
+/// Tray menu: Pause / Resume, Wipe history and Quit. While paused the icon is greyed and
 /// every request goes to the terminal.
 fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
     let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
+    let wipe = MenuItem::with_id(app, "wipe", "Wipe history", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Bouncer", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&pause, &quit])?;
+    let menu = Menu::with_items(app, &[&pause, &wipe, &quit])?;
     let icon = app
         .default_window_icon()
         .ok_or_else(|| tauri::Error::AssetNotFound("app icon".into()))?;
@@ -177,6 +193,12 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
                     let _ = tray.set_icon(Some(icon.clone()));
                     let _ =
                         tray.set_tooltip(Some(if now_paused { TOOLTIP_PAUSED } else { TOOLTIP }));
+                }
+            }
+            "wipe" => {
+                // The pill says whether it worked.
+                if let Err(e) = desk.wipe_history() {
+                    eprintln!("Bouncer: couldn't wipe history: {e}");
                 }
             }
             "quit" => app.exit(0),
@@ -204,8 +226,10 @@ fn greyed(rgba: &[u8]) -> Vec<u8> {
 fn show(app: &AppHandle, mut view: Value) {
     let island = app.state::<Island>();
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
-    let open = has("queue") || (has("sessions") && island.expanded.load(Ordering::Relaxed));
-    let hidden = !has("queue") && !has("sessions") && view["paused"] != true;
+    let away = !view["away"].is_null();
+    let open =
+        has("queue") || ((has("sessions") || away) && island.expanded.load(Ordering::Relaxed));
+    let hidden = !has("queue") && !has("sessions") && !away && view["paused"] != true;
     island.hidden.store(hidden, Ordering::Relaxed);
     view["open"] = open.into();
     view["hidden"] = hidden.into();
@@ -387,6 +411,10 @@ fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
 #[tauri::command]
 fn expand(app: AppHandle, island: State<'_, Island>, open: bool) {
     island.expanded.store(open, Ordering::Relaxed);
+    if !open {
+        // Closing the island means the away summary was seen.
+        island.desk.clear_away();
+    }
     show(&app, island.desk.view());
 }
 
