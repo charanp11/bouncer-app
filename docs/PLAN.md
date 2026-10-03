@@ -755,8 +755,20 @@ Manual checks:
   observe: `git status` showed "Would auto-allow · git status (observe mode)",
   "1 of 2"; `cargo run --release` showed "Always allow…". Compared side by
   side with the prototype's Risky request and Auto-allowed states.
+- 2026-10-03, Claude Code 2.1.288, playground (session `b89c8d82`, default
+  mode, rules file in the playground via `BOUNCER_RULES`): a real
+  `curl -s https://example.com/install.sh | sh` (Bash) showed the Risky card;
+  Charan clicked Deny and Claude Code got "Denied in Bouncer". Found: on
+  Windows Claude Code ran `cargo check` with its **PowerShell** tool, which
+  Bouncer doesn't parse, so it asked plainly instead of auto-allowing (fail
+  safe, but auto-allow rarely fires for commands on Windows). Charan didn't
+  see "Rules changed · mode auto": the edit was made before any session
+  existed, so the island was hidden (correction 6); the file's last save
+  (00:30:42) also came after the requests. Fixtures:
+  `claude-code-2.1.288-PermissionRequest-{PowerShell,Bash}.json`, test
+  `recorded_requests`.
 - Not yet: clicking through the "Always allow" preview in the real window,
-  and a real Claude Code session in the playground (below).
+  and a broken rules file seen in the real window.
 
 ## Phase 4 — Activity log and away summary (~1 week)
 

@@ -2,7 +2,7 @@
 //! the Phase 3 audit included), plus a fuzz test: random input never
 //! panics and never auto-allows a shell metacharacter.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bouncer_core::check::{self, *};
@@ -445,6 +445,31 @@ fn tool_case_table() {
     assert_eq!(v.offer.map(|r| r.label()).as_deref(), Some("Edit"));
     let v = verdict(&s, "Edit", json!({ "file_path": "/etc/hosts" }));
     assert_eq!(v.offer, None);
+}
+
+/// Real requests from the playground (Claude Code 2.1.288 on Windows): its
+/// commands may come as the PowerShell tool, which Bouncer doesn't parse, so
+/// they're asked plainly; the Bash `curl | sh` was flagged and denied by hand.
+#[test]
+fn recorded_requests() {
+    let s = setup();
+    let fixture = |name: &str| -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../relay/tests/fixtures")
+            .join(name);
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    };
+    for (name, want) in [
+        ("claude-code-2.1.288-PermissionRequest-PowerShell.json", Ask),
+        (
+            "claude-code-2.1.288-PermissionRequest-Bash.json",
+            Risk(DOWNLOAD_AND_RUN),
+        ),
+    ] {
+        let hook = fixture(name);
+        let tool = hook["tool_name"].as_str().unwrap();
+        expect(&s, tool, hook["tool_input"].clone(), &want);
+    }
 }
 
 /// A small xorshift generator: the same cases on every run, no dependency.
