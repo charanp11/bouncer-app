@@ -148,6 +148,7 @@ function plural(n: number, word: string): string {
 function what(tool: string | null): string {
   switch (tool) {
     case "Bash":
+    case "PowerShell":
       return "Run a command";
     case "Write":
       return "Write a file";

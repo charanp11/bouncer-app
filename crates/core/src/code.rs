@@ -43,7 +43,7 @@ pub fn code_view(tool: Option<&str>, input: Option<&Value>) -> Option<Value> {
         }
         "Write" => (text("file_path")?, added(text("content")?)),
         "NotebookEdit" => (text("notebook_path")?, added(text("new_source")?)),
-        "Bash" => {
+        shell @ ("Bash" | "PowerShell") => {
             let lines = text("command")?
                 .lines()
                 .enumerate()
@@ -53,7 +53,8 @@ pub fn code_view(tool: Option<&str>, input: Option<&Value>) -> Option<Value> {
                     text: l.into(),
                 })
                 .collect();
-            return Some(render("command", "", "SH", "shell", 0, false, lines));
+            let badge = if shell == "Bash" { "SH" } else { "PS" };
+            return Some(render("command", "", badge, "shell", 0, false, lines));
         }
         _ => return None,
     };
