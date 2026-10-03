@@ -55,6 +55,8 @@ struct Parser {
     command: Command,
     word: Option<String>,
     redirect: Option<Redirect>,
+    /// The last operator (`&&`, `||`, `|`) still needs a command after it.
+    dangling: bool,
 }
 
 pub fn parse(text: &str) -> Parsed {
@@ -65,6 +67,7 @@ pub fn parse(text: &str) -> Parsed {
         command: Command::default(),
         word: None,
         redirect: None,
+        dangling: false,
     };
     p.run();
     p.out
@@ -109,8 +112,24 @@ impl Parser {
         let command = std::mem::take(&mut self.command);
         if !command.words.is_empty() || !command.writes.is_empty() || !command.reads.is_empty() {
             self.out.commands.push(command);
+            self.dangling = false;
         }
         self.command.piped = piped;
+    }
+
+    /// `;`, `&`, `&&`, `||`, `|`, `|&`: each must follow a command (a syntax
+    /// error otherwise), and the joining ones need one after them too.
+    fn operator(&mut self, len: usize, piped: bool, joins: bool) {
+        let empty = self.word.is_none()
+            && self.command.words.is_empty()
+            && self.command.writes.is_empty()
+            && self.command.reads.is_empty();
+        if empty {
+            self.issue(Issue::Unterminated);
+        }
+        self.end_command(piped);
+        self.dangling = joins;
+        self.at += len;
     }
 
     /// Starts a redirection. Digits right before it name a file descriptor,
@@ -154,10 +173,11 @@ impl Parser {
                     self.end_word();
                     self.at += 1;
                 }
-                '\n' | ';' => {
+                '\n' => {
                     self.end_command(false);
                     self.at += 1;
                 }
+                ';' => self.operator(1, false, false),
                 '#' if self.word.is_none() => {
                     while self.peek(0).is_some_and(|c| c != '\n') {
                         self.at += 1;
@@ -168,28 +188,13 @@ impl Parser {
                         let len = if self.peek(2) == Some('>') { 3 } else { 2 };
                         self.redirect(Redirect::Write, len);
                     }
-                    Some('&') => {
-                        self.end_command(false);
-                        self.at += 2;
-                    }
-                    _ => {
-                        self.end_command(false);
-                        self.at += 1;
-                    }
+                    Some('&') => self.operator(2, false, true),
+                    _ => self.operator(1, false, false),
                 },
                 '|' => match self.peek(1) {
-                    Some('|') => {
-                        self.end_command(false);
-                        self.at += 2;
-                    }
-                    Some('&') => {
-                        self.end_command(true);
-                        self.at += 2;
-                    }
-                    _ => {
-                        self.end_command(true);
-                        self.at += 1;
-                    }
+                    Some('|') => self.operator(2, false, true),
+                    Some('&') => self.operator(2, true, true),
+                    _ => self.operator(1, true, true),
                 },
                 '<' => match self.peek(1) {
                     Some('<') => {
@@ -316,6 +321,9 @@ impl Parser {
             }
         }
         self.end_command(false);
+        if self.dangling {
+            self.issue(Issue::Unterminated);
+        }
     }
 }
 
@@ -422,10 +430,21 @@ mod tests {
             ("echo 'abc", Unterminated),
             ("echo \"abc", Unterminated),
             ("echo abc\\", Unterminated),
+            ("ls &&", Unterminated),
+            ("ls |", Unterminated),
+            ("ls ||\n", Unterminated),
+            ("&& ls", Unterminated),
+            ("; ls", Unterminated),
+            ("ls;; pwd", Unterminated),
+            ("ls | | pwd", Unterminated),
         ] {
             assert!(issues(text).contains(&want), "{text}: {:?}", issues(text));
         }
         assert_eq!(issues("ls a=b"), [], "assignment only before the command");
+        assert_eq!(issues("ls;"), [], "a trailing ; or & is fine");
+        assert_eq!(issues("ls &"), []);
+        assert_eq!(issues("ls &&\n pwd"), [], "a newline may follow &&");
+        assert_eq!(issues("ls |\n wc"), []);
         assert_eq!(issues("ls =b 1=x"), []);
     }
 
