@@ -1010,6 +1010,12 @@ Plan corrections found in this audit:
     "asks in terminal" with no new event for 2 minutes shows "Waiting in
     terminal" (row and rail, no spinner) until its next event, or drops off
     after 4 h. Fixture `crates/core/tests/fixtures/claude-code-2.1.288-denied-in-terminal.jsonl`.
+13. (After merge, Charan) Three more redacted forms, each in the fake-secret
+    table: a login after `-u` / `--user` (or glued, `-uuser:pass`,
+    `--user=user:pass`) keeps the user and hides what follows the colon;
+    anything glued onto `-p` (`mysql -pSECRET`; option clusters like
+    `-pthread` get hidden too); and JSON written as one word, where a
+    secret-named key's value is hidden (`{"token":"x"}`, `{"api_key":1}`).
 
 Manual checks (2026-10-03, Charan, Windows, Claude Code 2.1.288, playground
 session `7931c6f2`, debug app with `BOUNCER_RULES` in the playground and
