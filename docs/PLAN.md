@@ -924,8 +924,9 @@ Away summary (prototype state "Away summary"):
   calls that didn't need you: `PreToolUse` minus "asked you"), **asked you**
   (`PermissionRequest`s not answered by a rule, questions included). Then
   "**Stuck N min** in <folder>, waiting on <command or step>": the longest wait
-  on the user, from a request to that session's next hook event (not counting
-  `Notification`), or to now; shown at 1 min or more. Then the session rows.
+  on the user, from a request until it was answered on the card, or else
+  until that session's next hook event (the terminal prompt was answered; not
+  counting `Notification`), or now; shown at 1 min or more. Then the session rows.
 - × closes it (the existing `expand(false)`; the backend drops the summary).
   No new command.
 - Token cost: no hook event carries usage or cost (checked every recorded
