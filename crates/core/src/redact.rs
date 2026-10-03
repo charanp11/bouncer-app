@@ -171,7 +171,7 @@ fn json_values(word: &str) -> String {
             continue;
         }
         let end = match rest.strip_prefix('"') {
-            Some(quoted) => quoted.find('"').map_or(rest.len(), |j| j + 2),
+            Some(quoted) => closing_quote(quoted).map_or(rest.len(), |j| j + 2),
             None => rest.find([',', '}']).unwrap_or(rest.len()),
         };
         let quoted = rest.starts_with('"');
@@ -182,6 +182,20 @@ fn json_values(word: &str) -> String {
         rest = &rest[end..];
     }
     out + rest
+}
+
+/// Index of the `"` that ends a JSON string: one not escaped by an odd run
+/// of backslashes (`\"` is part of the value, `\\"` ends it).
+fn closing_quote(s: &str) -> Option<usize> {
+    let mut slashes = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' if slashes % 2 == 0 => return Some(i),
+            '\\' => slashes += 1,
+            _ => slashes = 0,
+        }
+    }
+    None
 }
 
 /// `scheme://user:password@host` → `scheme://user:[redacted]@host`.
@@ -350,6 +364,13 @@ pub(crate) mod tests {
             format!("curl -d {{\"user\":\"bob\",\"api_key\":\"{api}\"}} x"),
         );
         add(api.clone(), format!("echo {{\"apiKey\":{api},\"n\":1}}"));
+        // An escaped quote inside the value must not end it early.
+        let tail = format!("t41l{}", r("val", 2));
+        add(tail.clone(), format!("{{\"token\":\"ab\\\"{tail}\"}}"));
+        add(
+            tail.clone(),
+            format!("{{\"secret\":\"\\\\\\\"{tail}\",\"n\":1}}"),
+        );
         let hex = r("9f3a", 10);
         add(hex.clone(), format!("deploy --x {hex}"));
         let key_body = r("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", 2);
@@ -434,5 +455,13 @@ pub(crate) mod tests {
             "{\"api_key\":\"[redacted]\",\"user\":\"bob\"}"
         );
         assert_eq!(redact("{\"token\":42}"), "{\"token\":[redacted]}");
+        assert_eq!(
+            redact("{\"token\":\"a\\\\\",\"user\":\"bob\"}"),
+            "{\"token\":\"[redacted]\",\"user\":\"bob\"}"
+        );
+        assert_eq!(
+            redact("{\"token\":\"a\\\"b\",\"user\":\"bob\"}"),
+            "{\"token\":\"[redacted]\",\"user\":\"bob\"}"
+        );
     }
 }
