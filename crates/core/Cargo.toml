@@ -11,6 +11,7 @@ publish.workspace = true
 bouncer-relay = { path = "../relay" }
 getrandom = "0.4.3"
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
+toml = { version = "1.1.6", default-features = false, features = ["std", "parse"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
