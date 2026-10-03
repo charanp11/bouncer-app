@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 4 — Activity log and away summary**
+**Current phase: Phase 5 — Character**
 
 ## MVP scope
 
@@ -962,13 +962,13 @@ Phase 4 is done when:
 - [x] Redaction of all six families, before write (fake-secret fixture; no
       fake secret in any log file the tests write)
 - [x] 30-day retention and "Wipe history" (tray)
-- [ ] Away summary matching the prototype's "Away summary" state, from the
+- [x] Away summary matching the prototype's "Away summary" state, from the
       log, after 10+ idle minutes
 - [x] Summary of a 30-minute session fixture gives the expected numbers
 - [x] Idle sessions drop off (30 min; 4 h when waiting on the user)
-- [ ] Manual: away summary in the real island after an idle span, next to the
+- [x] Manual: away summary in the real island after an idle span, next to the
       prototype; wipe; log file contents read by hand for secrets
-- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+- [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Plan corrections found in this audit:
 
@@ -994,6 +994,40 @@ Plan corrections found in this audit:
    in the step label ("Editing <file name>"). Paths are now redacted before
    the label is made, and the test checks every 8+ character piece of each
    secret, not just the whole. A rescan after a fresh run found none.
+10. (Verify) Gitleaks flagged two fake test strings typed literally (a
+    private key header, a Basic auth header). They're built at run time now
+    and the fix was folded into the redaction commit, so the branch history
+    has no scanner hits.
+11. (Verify, Charan) `BOUNCER_AWAY_SECS` is read in debug builds only; a test
+    proves it and CI runs it in release, like `BOUNCER_ENDPOINT` / `BOUNCER_RULES`.
+
+Manual checks (2026-10-03, Charan, Windows, Claude Code 2.1.288, playground
+session `7931c6f2`, debug app with `BOUNCER_RULES` in the playground and
+`BOUNCER_AWAY_SECS=60`):
+
+- Away summary, `acceptEdits` session writing three files and running
+  `echo`: after 90 s hands off, moving the mouse opened "While you were
+  away" with 3 files changed, 1 command, 4 auto-allowed, 0 asked you, no
+  stuck line, the playground row. Pass.
+- × closed it; a later idle span with nothing logged opened nothing. Pass.
+- Stuck, `default` session: `hostname` never asked. Claude Code 2.1.288 ran
+  it as a read-only command with no `PermissionRequest` (recorded events
+  191–194), so Bouncer had nothing to show and counted it auto-allowed
+  (correct; read-only commands no longer reach Bouncer). Redone with
+  `mkdir away-stuck`: card, left alone until it went to the terminal; on
+  return "While you were away · 2 min", 0 / 1 / 0 / 1 and "Stuck 2 min in
+  bouncer-playground, waiting on mkdir away-stuck", row "Asking in the
+  terminal". Matches the prototype's Away summary. Pass.
+- Day file and secrets: `echo DB_PASSWORD=letmein123
+  https://user:hunter2pass@example.com` was logged as `DB_PASSWORD=[redacted]`
+  and `user:[redacted]@example.com`; `Select-String` for both secrets found
+  nothing; `icacls` on `history` lists only SYSTEM, Administrators and the
+  user. Pass.
+- Tray "Wipe history": pill "History wiped · the activity log is empty"
+  with a "log" badge; no day file left; the next prompt started a new file
+  (4 lines, all after the wipe). Pass.
+- Not by hand: a session closed without `SessionEnd` dropping off after
+  30 min (covered by `quiet_sessions_drop_off`).
 
 > **Scope change (Charan, 2026-10-02):** after the security core (Phases 2–4),
 > Phases 5–8 add the character, chat, file drop and music; packaging moves to
@@ -1387,3 +1421,38 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Not done by hand: macOS (CI only).
 - Plan additions (Charan): an observe/auto switch in the island (Phase 5) and
   a model picker for chat (Phase 6).
+
+### Phase 4 summary (2026-10-03)
+
+- `bouncer-core::activity`: the local activity log. JSON Lines, one file per
+  UTC day, in `history/` next to `rules.toml`; owner-only, refused when
+  anyone else can write the file or folder; one event per line, bad lines
+  skipped; 10 MB per day, then a quiet note in the island; 30-day retention;
+  "Wipe history" in the tray. Only the app writes it; no new dependency
+  (Charan chose JSON Lines over SQLite).
+- Stored: time, session, folder, hook kind, tool, step label (first command
+  line, 200 characters), the path for edit tools, and how a request ended.
+  Never outputs, file contents, prompts, notification text or URLs.
+- `bouncer-core::redact`: six families (private keys, URL passwords, 24
+  token prefixes, secret-named assignments / flags / headers, Bearer and
+  Basic, long random-looking runs), run on every field before writing; the
+  whole command and paths are redacted before the label is made.
+- `bouncer-core::away`: OS idle time (`GetLastInputInfo`, CoreGraphics);
+  10+ idle minutes and then input opens the island on "While you were away"
+  (files changed, commands, auto-allowed, asked you, where it got stuck, the
+  sessions), built to the prototype; × drops it. No new IPC command.
+- Sessions that never end drop off after 30 min (4 h when waiting on you);
+  never while a card is up.
+- Test speed: fuzz tests run 500 rounds locally, 5,000 in CI; the local
+  suite takes about 30 s. CI's check job is capped at 30 min.
+- Tests: 122 Rust tests on Windows (129 with the macOS-only ones; relay
+  23, core 101, app 5) + 11 frontend; green locally and in CI on Windows and
+  macOS. Fixtures: a fake-secret table (built at run time) and a 30-minute
+  two-session span.
+- Checked by hand (Charan, Claude Code 2.1.288, Windows): away summary with
+  and without a stuck request, closing, redaction in the real file, folder
+  permissions, wipe. Found: Claude Code now runs read-only commands like
+  `hostname` without a permission request, so they never reach Bouncer.
+- Not done by hand: the 30-minute session drop-off (unit test); macOS (see
+  "Mac checks for Phase 9").
+- Next: a separate `ci: macos smoke test` PR (Charan), then Phase 5.
