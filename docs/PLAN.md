@@ -810,7 +810,9 @@ Plan corrections after the playground check:
     the defaults are unchanged. The card follows prototype v0.4: a dashed
     full-width "Always allow…" button, a preview of the exact TOML, Cancel /
     "Add rule and allow" (arms after 600 ms), never on risky cards. The wide
-    "Approve an edit" view has none, as in the prototype.
+    "Approve an edit" view has none, as in the prototype. In auto mode the
+    "Rule added" message is followed by the Auto-allowed pill for 2.5 s, as
+    the prototype; in observe mode it isn't (nothing is auto-allowed there).
 13. `AskUserQuestion` and `ExitPlanMode` (Charan): never a card, never an
     answer; Claude Code asks in the terminal. The session shows "Needs you ·
     question in the terminal" (row and pill) until the tool runs.
@@ -1179,7 +1181,7 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Request IDs: 128 bits from `getrandom` 0.4; no ID → no card (terminal asks).
 - New dependencies: `toml` 1.1.6 (approved), `getrandom` 0.4.3 (requested);
   both were already in `Cargo.lock`.
-- Tests: 101 Rust (relay 22, core 74, app 5) + 7 frontend. Case tables: 214
+- Tests: 102 Rust (relay 22, core 75, app 5) + 11 frontend. Case tables: 214
   Bash rows, 91 PowerShell rows, 32 tool rows, scoped-rule and recorded-request
   tests; fuzzing: 5,000 generated Bash commands, 5,000 random strings and
   5,000 generated PowerShell commands.
