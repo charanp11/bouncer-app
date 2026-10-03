@@ -44,6 +44,12 @@ const BY_RULE: &str = "auto-allowed by rule";
 const QUESTIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
 /// What a session waiting on one of those shows.
 const QUESTION_STEP: &str = "question in the terminal";
+/// A session with no event for this long is dropped (it may never send
+/// `SessionEnd`: crashed, killed, closed terminal). Any later event brings it back.
+const IDLE_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// Same, for a session waiting on the user: kept longer, so the away
+/// summary can still point at it.
+const WAITING_LIMIT: Duration = Duration::from_secs(4 * 60 * 60);
 
 struct Session {
     id: String,
@@ -177,6 +183,22 @@ impl State {
             "Stop" => "idle",
             _ => session.status,
         };
+    }
+
+    /// Drops sessions quiet for longer than their limit, except any with a
+    /// card in the queue. True if any went.
+    fn expire(&mut self, now: SystemTime) -> bool {
+        let before = self.sessions.len();
+        let queue = &self.queue;
+        self.sessions.retain(|s| {
+            let limit = match s.status {
+                "needs you" | IN_TERMINAL => WAITING_LIMIT,
+                _ => IDLE_LIMIT,
+            };
+            let quiet = now.duration_since(s.last).unwrap_or_default();
+            quiet < limit || queue.iter().any(|p| p.event.session == s.id)
+        });
+        self.sessions.len() != before
     }
 
     /// Removes a request from the queue, gives its session `status`, and notes
@@ -525,6 +547,13 @@ impl Desk {
         Ok(())
     }
 
+    /// Drops sessions that went quiet without ending; the island hears about it.
+    pub fn expire_sessions(&self) {
+        if self.lock().expire(SystemTime::now()) {
+            self.publish();
+        }
+    }
+
     /// Checks the rules file for changes; the island hears about any.
     pub fn reload_rules(&self) {
         if self.lock().reload(false) {
@@ -833,6 +862,47 @@ mod tests {
             ]
         );
         assert_eq!(view["queue"], json!([]));
+    }
+
+    #[test]
+    fn quiet_sessions_drop_off() {
+        let desk = desk(WAIT);
+        desk.handle(event("idle", "Stop", ""));
+        desk.handle(event("working", "PreToolUse", "ls"));
+        // Paused: the request goes to the terminal and the session waits there.
+        desk.set_paused(true);
+        desk.handle(event("waiting", "PermissionRequest", "pwd"));
+        desk.set_paused(false);
+        let carded = ask(&desk, "carded", "cargo run");
+        let ids = queued(&desk, 1);
+        let now = SystemTime::now();
+        let left = |at: Duration| {
+            desk.lock().expire(now + at);
+            let view = desk.view();
+            let mut ids: Vec<String> = view["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s["id"].as_str().unwrap().to_owned())
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(left(Duration::from_secs(29 * 60)).len(), 4);
+        assert_eq!(
+            left(IDLE_LIMIT + Duration::from_secs(60)),
+            ["carded", "waiting"]
+        );
+        assert_eq!(left(WAITING_LIMIT + Duration::from_secs(60)), ["carded"]);
+        desk.decide(&ids[0], false).unwrap();
+        carded.join().unwrap();
+        assert_eq!(
+            left(WAITING_LIMIT + Duration::from_secs(60)),
+            Vec::<String>::new()
+        );
+        // Back with the next event.
+        desk.handle(event("idle", "UserPromptSubmit", ""));
+        assert_eq!(left(Duration::ZERO), ["idle"]);
     }
 
     #[test]

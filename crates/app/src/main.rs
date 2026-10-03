@@ -101,7 +101,7 @@ fn main() {
             let desk = Arc::new(Desk::new(WAIT, rules::path(), move |view| {
                 show(&handle, view)
             }));
-            watch_rules(desk.clone());
+            tick(desk.clone());
             app.manage(Island {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
@@ -133,15 +133,17 @@ fn start_relay_server(desk: Arc<Desk>) {
     }
 }
 
-/// How often the rules file is checked for edits (one metadata read).
-const RULES_CHECK: Duration = Duration::from_secs(2);
+/// How often the background checks run (each is a metadata read or less).
+const TICK: Duration = Duration::from_secs(2);
 
-/// Notices edits to the rules file; the island shows every change.
-fn watch_rules(desk: Arc<Desk>) {
+/// Notices edits to the rules file (the island shows every change) and drops
+/// sessions that went quiet without ending.
+fn tick(desk: Arc<Desk>) {
     std::thread::spawn(move || {
         loop {
-            std::thread::sleep(RULES_CHECK);
+            std::thread::sleep(TICK);
             desk.reload_rules();
+            desk.expire_sessions();
         }
     });
 }
