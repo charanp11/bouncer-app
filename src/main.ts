@@ -40,7 +40,14 @@ type Request = {
   tool: string | null;
   text: string;
   code: Code | null;
+  /** Why it's risky (one sentence), from the rules engine. */
+  risk: string | null;
+  /** Observe mode: the rules that would have allowed it. */
+  would: string | null;
+  /** The exact TOML "Always allow" appends (built by the backend). */
+  offer: string | null;
 };
+type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
 type View = {
   open: boolean;
   hidden: boolean;
@@ -48,11 +55,15 @@ type View = {
   rounded: boolean;
   sessions: Session[];
   queue: Request[];
+  rules: { mode: string; error: string | null; notice: { n: number; text: string } | null };
+  flash: Flash | null;
 };
 
 /** Allow stays disabled this long after a card reaches the front. */
 const ARM_MS = 600;
 const TOAST_MS = 1400;
+/** How long the pill shows "Auto-allowed" or "Rules changed". */
+const FLASH_MS = 2500;
 const ROTATE_MS = 4000;
 const PEEK_MS = 300;
 const CLOCK_MS = 30_000;
@@ -74,6 +85,7 @@ const ROW: Record<string, string> = {
 };
 /** How a step got through, as the detail rail's tag class. */
 const TAG: Record<string, string> = {
+  "auto-allowed by rule": "auto",
   "you allowed": "mine",
   "you denied": "flag",
   "waiting for you": "you",
@@ -91,6 +103,10 @@ let front = { id: "", since: 0 };
 let toast: { request: Request; ok: boolean; until: number } | null = null;
 /** Session shown in Session detail. */
 let detail: string | null = null;
+/** The request whose "Always allow" preview is open, and since when (it arms like Allow). */
+let always = { id: "", since: 0 };
+/** The rules notice the user closed. */
+let dismissed = 0;
 /** The wake strip is being hovered: show the idle pill. */
 let peek = false;
 let dragged = false;
@@ -211,6 +227,7 @@ function draggable(node: HTMLElement) {
 
 function mood(view: View): BallState {
   if (view.paused) return "paused";
+  if (view.queue[0]?.risk) return "risky";
   if (view.queue.length || view.sessions.some((s) => s.status === "needs you")) return "needs";
   if (view.sessions.some((s) => s.status === "working")) return "working";
   return "idle";
@@ -218,11 +235,14 @@ function mood(view: View): BallState {
 
 // ---- pieces ----------------------------------------------------------------
 
-function pill(state: BallState, strong: string, rest: string, clickable = true): HTMLElement {
+type Badge = { text: string; risk: boolean };
+
+function pill(state: BallState, strong: string, rest: string, clickable = true, badge?: Badge): HTMLElement {
   const p = el("div", "pill");
   const label = el("span", "label");
   label.append(el("b", "", strong), rest);
   p.append(ball(state), label);
+  if (badge) p.append(el("span", `badge${badge.risk ? " risk" : ""}`, badge.text));
   if (clickable) {
     p.setAttribute("role", "button");
     p.addEventListener("click", () => {
@@ -292,23 +312,77 @@ function decide(request: Request, allow: boolean, buttons: HTMLButtonElement[]) 
     .finally(() => current && render(current));
 }
 
-/** Deny and Allow for a request; Allow arms ARM_MS after the card arrived. */
-function answerButtons(request: Request, allowLabel: string): HTMLButtonElement[] {
-  const deny = el("button", "btn deny", "Deny");
-  const allow = el("button", "btn allow");
+/** An Allow-style button that stays disabled until ARM_MS after `since`. */
+function armed(label: string, since: number): HTMLButtonElement {
+  const button = el("button", "btn allow");
   const fill = el("span", "arm");
-  allow.append(fill, el("span", "label", allowLabel));
-  const waited = performance.now() - front.since;
+  button.append(fill, el("span", "label", label));
+  const waited = performance.now() - since;
   if (waited < ARM_MS) {
-    allow.disabled = true;
+    button.disabled = true;
     // Keep the fill continuous across re-renders.
     fill.style.animationDelay = `${-waited}ms`;
     later(ARM_MS - waited);
   }
+  return button;
+}
+
+/** Deny and Allow for a request; Allow arms ARM_MS after the card arrived. */
+function answerButtons(request: Request, allowLabel: string): HTMLButtonElement[] {
+  const deny = el("button", "btn deny", "Deny");
+  const allow = armed(allowLabel, front.since);
   const buttons = [deny, allow];
   deny.addEventListener("click", () => decide(request, false, buttons));
   allow.addEventListener("click", () => decide(request, true, buttons));
   return buttons;
+}
+
+/** "Always allow…": opens the preview of the exact rule. */
+function alwaysLink(request: Request): HTMLElement {
+  const link = el("button", "linkbtn", "Always allow…");
+  link.addEventListener("click", () => {
+    always = { id: request.id, since: performance.now() };
+    if (current) render(current);
+  });
+  return link;
+}
+
+/** The exact rule that will be appended, what it means, and the buttons. */
+function alwaysPreview(request: Request, offer: string): HTMLElement[] {
+  const rule = el("pre", "cmd");
+  agentText(rule, offer.trimEnd());
+  const command = /^command = /m.test(offer);
+  const note = el(
+    "div",
+    "note",
+    command
+      ? "From now on, commands starting with these words are allowed in any project when every part of the command is allowed and its paths stay inside the project. Risky ones still ask."
+      : "From now on, this tool is allowed in any project when its paths stay inside the project. Risky ones still ask.",
+  );
+  const cancel = el("button", "btn deny", "Cancel");
+  const add = armed("Add rule and allow", always.since);
+  const buttons = [cancel, add];
+  cancel.addEventListener("click", () => {
+    always = { id: "", since: 0 };
+    if (current) render(current);
+  });
+  add.addEventListener("click", () => {
+    for (const b of buttons) b.disabled = true;
+    invoke("always", { id: request.id })
+      .then(() => {
+        toast = { request, ok: true, until: performance.now() + TOAST_MS };
+      })
+      .catch(() => {
+        // Refused (too soon, already answered, or the file couldn't be saved).
+      })
+      .finally(() => {
+        always = { id: "", since: 0 };
+        if (current) render(current);
+      });
+  });
+  const actions = el("div", "actions");
+  actions.append(...buttons);
+  return [el("div", "note", "Adds this rule to rules.toml:"), rule, note, actions];
 }
 
 /** What the card shows: a file write as its path, a blank line, then the whole
@@ -321,7 +395,7 @@ function cardText(request: Request): string {
 }
 
 function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
-  const c = el("section", "card");
+  const c = el("section", request.risk ? "card risky" : "card");
   if (done !== undefined) {
     c.append(
       el("div", `toast ${done ? "ok" : "no"}`, done ? "Allowed. Back to work." : "Denied. Claude Code was told no."),
@@ -332,11 +406,24 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const who = el("span");
   who.append(el("b", "", AGENTS[request.agent] ?? request.agent), ` · ${folder(request.project)}`);
   top.append(who, el("span", "", queue.length > 1 ? `1 of ${queue.length}` : ""));
+  c.append(top, el("div", "what", what(request.tool)));
+  if (request.risk) c.append(el("div", "reason", request.risk));
+  if (request.would) {
+    const would = el("div", "would");
+    would.append(el("span", "badge", "rule"), `Would auto-allow · ${request.would} (observe mode)`);
+    c.append(would);
+  }
   const cmd = el("pre", "cmd");
   agentText(cmd, cardText(request));
+  c.append(cmd);
+  if (request.offer && always.id === request.id) {
+    c.append(...alwaysPreview(request, request.offer));
+    return c;
+  }
   const actions = el("div", "actions");
   actions.append(...answerButtons(request, "Allow once"));
-  c.append(top, el("div", "what", what(request.tool)), cmd, actions);
+  c.append(actions);
+  if (request.offer) c.append(alwaysLink(request));
   const next = queue[1];
   if (next) c.append(el("div", "after", `Next: ${what(next.tool)} in ${folder(next.project)}`));
   return c;
@@ -426,7 +513,9 @@ function setShape(next: Shape) {
 }
 
 function renderApproval(view: View, request: Request, done?: boolean) {
-  const edit = EDITS.has(request.tool ?? "") && request.code;
+  // Risky edits, and the "Always allow" preview, use the card: the reason,
+  // the flipped buttons and the rule always show.
+  const edit = EDITS.has(request.tool ?? "") && !request.risk && always.id !== request.id;
   const session = view.sessions.find((s) => s.id === request.session);
   if (edit && request.code) {
     setShape("wide");
@@ -443,6 +532,7 @@ function renderApproval(view: View, request: Request, done?: boolean) {
       const q = el("div", "q");
       const count = view.queue.length > 1 ? ` · 1 of ${view.queue.length}` : "";
       q.append("Wants to ", el("b", "", `edit ${request.code.file}`), ` (${plural(request.code.changes, "change")})${count}`);
+      if (request.offer) q.append(" · ", alwaysLink(request));
       ask.append(q, ...answerButtons(request, "Allow edit"));
     }
     pane.append(ask);
@@ -454,7 +544,46 @@ function renderApproval(view: View, request: Request, done?: boolean) {
   const waiting = view.queue.length > 1 ? `· ${view.queue.length} waiting` : "";
   const body = el("div", "body");
   body.append(card(request, view.queue, done));
-  island.replaceChildren(head("needs", "Needs you", waiting), body);
+  const top = request.risk && done === undefined
+    ? head("risky", "Risky", "· check before allowing")
+    : head("needs", "Needs you", waiting);
+  island.replaceChildren(top, body);
+}
+
+/** The pill's "Auto-allowed" / "Rules changed" message, while it's fresh. */
+function freshFlash(view: View): Flash | null {
+  const f = view.flash;
+  if (!f) return null;
+  const left = f.at_ms + FLASH_MS - Date.now();
+  if (left <= 0) return null;
+  later(left);
+  return f;
+}
+
+/** Rules file problems and changes, above the session list. */
+function rulesNotes(view: View): HTMLElement[] {
+  const notes: HTMLElement[] = [];
+  if (view.rules.error) {
+    notes.push(el("div", "reason", `${view.rules.error}. Using the built-in rules in observe mode until it's fixed.`));
+  }
+  const notice = view.rules.notice;
+  if (notice && notice.n !== dismissed) {
+    const row = el("div", "notice");
+    row.append(
+      el("span", "", notice.text),
+      closeButton(() => {
+        dismissed = notice.n;
+        if (current) render(current);
+      }),
+    );
+    notes.push(row);
+  }
+  return notes;
+}
+
+/** A red "rules" badge on the pill while the rules file is refused. */
+function rulesBadge(view: View): Badge | undefined {
+  return view.rules.error ? { text: "rules", risk: true } : undefined;
 }
 
 function render(view: View) {
@@ -509,7 +638,7 @@ function render(view: View) {
   if (view.open) {
     setShape("open");
     const body = el("div", "body");
-    body.append(sessionRows(view.sessions));
+    body.append(...rulesNotes(view), sessionRows(view.sessions));
     const close = () => {
       detail = null;
       invoke("expand", { open: false });
@@ -524,18 +653,25 @@ function render(view: View) {
     island.replaceChildren(pill("paused", "Paused", " · requests go to the terminal"));
     return;
   }
+  const badge = rulesBadge(view);
+  const flash = freshFlash(view);
+  if (flash) {
+    const state: BallState = flash.risk ? "risky" : "working";
+    island.replaceChildren(pill(state, flash.strong, flash.rest, true, { text: flash.badge, risk: flash.risk }));
+    return;
+  }
   const working = view.sessions
     .filter((s) => s.status === "working")
     .sort((a, b) => b.last_ms - a.last_ms);
   if (working.length) {
     // Several busy sessions: the label rotates every ROTATE_MS.
     const s = working[Math.floor(Date.now() / ROTATE_MS) % working.length];
-    island.replaceChildren(pill("working", folder(s.project), ` · ${s.step}`));
+    island.replaceChildren(pill("working", folder(s.project), ` · ${s.step}`, true, badge));
     if (working.length > 1) later(ROTATE_MS - (Date.now() % ROTATE_MS));
     return;
   }
   const n = view.sessions.length;
-  island.replaceChildren(pill("idle", n ? plural(n, "session") : "No sessions", " · all quiet", n > 0));
+  island.replaceChildren(pill("idle", n ? plural(n, "session") : "No sessions", " · all quiet", n > 0, badge));
 }
 
 // The wake strip peeks the idle pill after PEEK_MS of hover.

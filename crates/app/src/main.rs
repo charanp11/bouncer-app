@@ -87,7 +87,7 @@ fn main() {
     clear_webview_args(!cfg!(debug_assertions));
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            subscribe, decide, expand, drag, fit
+            subscribe, decide, always, expand, drag, fit
         ])
         .on_window_event(|window, event| {
             if let (WindowEvent::Moved(_), Some(island)) = (event, window.try_state::<Island>()) {
@@ -343,6 +343,13 @@ fn subscribe(app: AppHandle, island: State<'_, Island>, feed: Channel<Value>) {
 #[tauri::command]
 fn decide(island: State<'_, Island>, id: String, allow: bool) -> Result<(), String> {
     island.desk.decide(&id, allow).map_err(str::to_owned)
+}
+
+/// "Always allow": adds the rule the backend offered for this request, then
+/// allows it. The page sends only the ID; the rule is never taken from it.
+#[tauri::command]
+fn always(island: State<'_, Island>, id: String) -> Result<(), String> {
+    island.desk.always(&id).map_err(str::to_owned)
 }
 
 /// Moves the island with the mouse while the button is held (the page calls

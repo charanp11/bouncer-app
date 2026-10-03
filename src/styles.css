@@ -171,6 +171,11 @@ html.square .island {
   padding: 1px 7px;
 }
 
+.badge.risk {
+  background: var(--risk);
+  color: #fff;
+}
+
 .body {
   padding: 0 var(--pad) var(--pad);
   display: grid;
@@ -416,6 +421,107 @@ pre.cmd {
   font-size: 12px;
   color: var(--faint);
   text-align: center;
+}
+
+/* Risky: red edge and reason box; Deny becomes the filled button. */
+.card.risky {
+  border-color: rgba(239, 90, 82, 0.55);
+  box-shadow: inset 3px 0 0 var(--risk);
+}
+
+.reason {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  color: #ffb4ae;
+  font-size: 12.5px;
+  background: rgba(239, 90, 82, 0.1);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.reason::before {
+  content: "!";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--risk);
+  color: #fff;
+  font: 700 11px/16px var(--ui);
+  text-align: center;
+  margin-top: 1px;
+}
+
+.card.risky .btn.allow {
+  background: transparent;
+  color: var(--text);
+  border-color: rgba(239, 90, 82, 0.6);
+}
+
+.card.risky .btn.allow:hover:not(:disabled) {
+  background: rgba(239, 90, 82, 0.12);
+}
+
+.card.risky .btn.allow:disabled {
+  color: var(--muted);
+}
+
+.card.risky .btn.deny {
+  background: var(--text);
+  color: var(--island);
+  border-color: var(--text);
+}
+
+/* Observe mode: what a rule would have done. */
+.would {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* "Always allow…": a quiet link under the buttons, then the exact rule. */
+.linkbtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: 12px var(--ui);
+  color: var(--faint);
+  cursor: pointer;
+  justify-self: center;
+}
+
+.linkbtn:hover {
+  color: var(--text);
+}
+
+.preview {
+  display: grid;
+  gap: 8px;
+}
+
+.preview .note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Rule changes, shown in the session list until dismissed. */
+.notice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: var(--raised);
+  border-radius: 10px;
+  padding: 4px 4px 4px 10px;
+}
+
+.notice span {
+  flex: 1;
+  min-width: 0;
 }
 
 .toast {
@@ -933,6 +1039,30 @@ pre.cmd {
   }
   92% {
     transform: none;
+  }
+}
+
+/* risky: turns red, stops smiling, puffs up like he's blocking the door */
+.ball.risky {
+  --body: #ff5a4f;
+  --body-deep: #d63a31;
+}
+
+.ball.risky .smile {
+  display: none;
+}
+
+.ball.risky .flat {
+  display: inline;
+}
+
+.ball.risky .jumper {
+  animation: puff 1.4s ease-in-out infinite;
+}
+
+@keyframes puff {
+  50% {
+    transform: scale(1.1, 1.04);
   }
 }
 
