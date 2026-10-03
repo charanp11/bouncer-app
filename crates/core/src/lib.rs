@@ -6,4 +6,5 @@ pub mod diff;
 pub mod event;
 pub mod hooks;
 pub mod ipc;
+pub mod rules;
 pub mod shell;

@@ -165,6 +165,7 @@ dependencies = [
  "bouncer-relay",
  "getrandom 0.4.3",
  "serde_json",
+ "toml 1.1.6+spec-1.1.0",
  "windows-sys 0.61.2",
 ]
 
