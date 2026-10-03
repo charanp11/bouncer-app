@@ -62,6 +62,8 @@ type View = {
 /** Allow stays disabled this long after a card reaches the front. */
 const ARM_MS = 600;
 const TOAST_MS = 1400;
+/** "Rule added." stays a little longer (as the prototype). */
+const RULE_TOAST_MS = 1600;
 /** How long the pill shows "Auto-allowed" or "Rules changed". */
 const FLASH_MS = 2500;
 const ROTATE_MS = 4000;
@@ -100,7 +102,7 @@ let current: View | null = null;
 /** The request shown at the front, and when it got there (for the arm delay). */
 let front = { id: "", since: 0 };
 /** Shown for TOAST_MS after a decision, in place of the request. */
-let toast: { request: Request; ok: boolean; until: number } | null = null;
+let toast: { request: Request; ok: boolean; until: number; text?: string } | null = null;
 /** Session shown in Session detail. */
 let detail: string | null = null;
 /** The request whose "Always allow" preview is open, and since when (it arms like Allow). */
@@ -338,27 +340,30 @@ function answerButtons(request: Request, allowLabel: string): HTMLButtonElement[
   return buttons;
 }
 
-/** "Always allow…": opens the preview of the exact rule. */
-function alwaysLink(request: Request): HTMLElement {
-  const link = el("button", "linkbtn", "Always allow…");
-  link.addEventListener("click", () => {
+/** "Always allow…": the dashed full-width button under Deny / Allow once.
+ * It only opens the preview; nothing is written until "Add rule and allow". */
+function alwaysButton(request: Request): HTMLButtonElement {
+  const button = el("button", "btn always", "Always allow…");
+  button.addEventListener("click", () => {
     always = { id: request.id, since: performance.now() };
     if (current) render(current);
   });
-  return link;
+  return button;
 }
 
-/** The exact rule that will be appended, what it means, and the buttons. */
-function alwaysPreview(request: Request, offer: string): HTMLElement[] {
+/** The exact rule that will be added (built by the backend), and Cancel /
+ * "Add rule and allow", which arms ARM_MS after the preview opens. */
+function alwaysPreview(request: Request, offer: string, mode: string): HTMLElement {
+  const box = el("div", "rulebox");
+  const label = el("div", "lbl");
+  label.append("This rule will be added to ", el("b", "", "rules.toml"), ":");
   const rule = el("pre", "cmd");
   agentText(rule, offer.trimEnd());
-  const command = /^command = /m.test(offer);
+  const file = /^tool = /m.test(offer);
   const note = el(
     "div",
     "note",
-    command
-      ? "From now on, commands starting with these words are allowed in any project when every part of the command is allowed and its paths stay inside the project. Risky ones still ask."
-      : "From now on, this tool is allowed in any project when its paths stay inside the project. Risky ones still ask.",
+    `Only this exact ${file ? "file" : "command"} in this project. Remove it any time from the rules file.`,
   );
   const cancel = el("button", "btn deny", "Cancel");
   const add = armed("Add rule and allow", always.since);
@@ -371,7 +376,12 @@ function alwaysPreview(request: Request, offer: string): HTMLElement[] {
     for (const b of buttons) b.disabled = true;
     invoke("always", { id: request.id })
       .then(() => {
-        toast = { request, ok: true, until: performance.now() + TOAST_MS };
+        const what = file ? "This file" : "This command";
+        const text =
+          mode === "auto"
+            ? `Rule added. ${what} is auto-allowed from now on.`
+            : "Rule added. In observe mode it still asks.";
+        toast = { request, ok: true, until: performance.now() + RULE_TOAST_MS, text };
       })
       .catch(() => {
         // Refused (too soon, already answered, or the file couldn't be saved).
@@ -381,9 +391,10 @@ function alwaysPreview(request: Request, offer: string): HTMLElement[] {
         if (current) render(current);
       });
   });
-  const actions = el("div", "actions");
-  actions.append(...buttons);
-  return [el("div", "note", "Adds this rule to rules.toml:"), rule, note, actions];
+  const row = el("div", "actions");
+  row.append(...buttons);
+  box.append(label, rule, note, row);
+  return box;
 }
 
 /** What the card shows: a file write as its path, a blank line, then the whole
@@ -398,9 +409,8 @@ function cardText(request: Request): string {
 function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const c = el("section", request.risk ? "card risky" : "card");
   if (done !== undefined) {
-    c.append(
-      el("div", `toast ${done ? "ok" : "no"}`, done ? "Allowed. Back to work." : "Denied. Claude Code was told no."),
-    );
+    const text = toast?.text ?? (done ? "Allowed. Back to work." : "Denied. Claude Code was told no.");
+    c.append(el("div", `toast ${done ? "ok" : "no"}`, text));
     return c;
   }
   const top = el("div", "top");
@@ -417,14 +427,16 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const cmd = el("pre", "cmd");
   agentText(cmd, cardText(request));
   c.append(cmd);
-  if (request.offer && always.id === request.id) {
-    c.append(...alwaysPreview(request, request.offer));
-    return c;
+  // Never on a risky card (the backend offers nothing then either).
+  const offer = request.risk ? null : request.offer;
+  if (offer && always.id === request.id) {
+    c.append(alwaysPreview(request, offer, current?.rules.mode ?? "observe"));
+  } else {
+    const actions = el("div", "actions");
+    actions.append(...answerButtons(request, "Allow once"));
+    if (offer) actions.append(alwaysButton(request));
+    c.append(actions);
   }
-  const actions = el("div", "actions");
-  actions.append(...answerButtons(request, "Allow once"));
-  c.append(actions);
-  if (request.offer) c.append(alwaysLink(request));
   const next = queue[1];
   if (next) c.append(el("div", "after", `Next: ${what(next.tool)} in ${folder(next.project)}`));
   return c;
@@ -514,9 +526,9 @@ function setShape(next: Shape) {
 }
 
 function renderApproval(view: View, request: Request, done?: boolean) {
-  // Risky edits, and the "Always allow" preview, use the card: the reason,
-  // the flipped buttons and the rule always show.
-  const edit = EDITS.has(request.tool ?? "") && !request.risk && always.id !== request.id;
+  // Risky edits use the card, so the reason and the flipped buttons show.
+  // (The wide edit view has no "Always allow", as in the prototype.)
+  const edit = EDITS.has(request.tool ?? "") && !request.risk;
   const session = view.sessions.find((s) => s.id === request.session);
   if (edit && request.code) {
     setShape("wide");
@@ -533,7 +545,6 @@ function renderApproval(view: View, request: Request, done?: boolean) {
       const q = el("div", "q");
       const count = view.queue.length > 1 ? ` · 1 of ${view.queue.length}` : "";
       q.append("Wants to ", el("b", "", `edit ${request.code.file}`), ` (${plural(request.code.changes, "change")})${count}`);
-      if (request.offer) q.append(" · ", alwaysLink(request));
       ask.append(q, ...answerButtons(request, "Allow edit"));
     }
     pane.append(ask);
@@ -659,6 +670,12 @@ function render(view: View) {
   if (flash) {
     const state: BallState = flash.risk ? "risky" : "working";
     island.replaceChildren(pill(state, flash.strong, flash.rest, true, { text: flash.badge, risk: flash.risk }));
+    return;
+  }
+  // A session waiting on the user with no card here: a question in the terminal.
+  const asking = view.sessions.find((s) => s.status === "needs you");
+  if (asking) {
+    island.replaceChildren(pill("needs", folder(asking.project), ` · ${stepText(asking)}`, true, badge));
     return;
   }
   const working = view.sessions
