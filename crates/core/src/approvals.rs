@@ -7,8 +7,6 @@
 //! the terminal.
 
 use std::collections::VecDeque;
-use std::collections::hash_map::RandomState;
-use std::hash::BuildHasher;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -60,7 +58,6 @@ struct State {
     sessions: Vec<Session>,
     queue: VecDeque<Pending>,
     paused: bool,
-    issued: u64,
 }
 
 impl State {
@@ -178,9 +175,11 @@ impl Desk {
         let id = {
             let mut state = self.lock();
             state.track(&event);
-            if event.is_permission_request() && !state.paused {
-                state.issued += 1;
-                let id = request_id(state.issued);
+            // No ID (the OS random source failed) means no card: the terminal asks.
+            if event.is_permission_request()
+                && !state.paused
+                && let Some(id) = request_id()
+            {
                 state.queue.push_back(Pending {
                     id: id.clone(),
                     event,
@@ -300,11 +299,11 @@ fn epoch_ms(time: SystemTime) -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
-/// 128 random-looking bits: two hashes of the counter under OS-seeded SipHash
-/// keys (`RandomState`). Unique per counter, unguessable without the keys.
-fn request_id(counter: u64) -> String {
-    let hash = |part: u8| RandomState::new().hash_one((counter, part));
-    format!("{:016x}{:016x}", hash(0), hash(1))
+/// 128 bits from the OS random source, as hex. `None` if it fails.
+fn request_id() -> Option<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// A short, human description of a tool call for the session list (the
@@ -555,7 +554,8 @@ mod tests {
 
     #[test]
     fn request_ids_are_unique_128_bit_hex() {
-        let ids: std::collections::HashSet<String> = (0..1000).map(request_id).collect();
+        let ids: std::collections::HashSet<String> =
+            (0..1000).map(|_| request_id().unwrap()).collect();
         assert_eq!(ids.len(), 1000);
         assert!(
             ids.iter()
