@@ -913,6 +913,7 @@ mod tests {
 
         // Not covered, or risky: a card, with the reason.
         let other = ask(&desk, "a", "pwd");
+        queued(&desk, 1); // queued first, before the next one is sent
         let risky = ask(&desk, "a", "sudo ls");
         let ids = queued(&desk, 2);
         let view = desk.view();
