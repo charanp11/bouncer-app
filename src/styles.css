@@ -482,29 +482,45 @@ pre.cmd {
   color: var(--muted);
 }
 
-/* "Always allow…": a quiet link under the buttons, then the exact rule. */
-.linkbtn {
-  border: 0;
+/* "Always allow…" (prototype v0.4): a dashed full-width button under Deny /
+   Allow once, then a preview of the exact rule. */
+.btn.always {
+  grid-column: 1 / -1;
+  height: 30px;
+  font-size: 12.5px;
+  color: var(--muted);
   background: transparent;
-  padding: 0;
-  font: 12px var(--ui);
-  color: var(--faint);
-  cursor: pointer;
-  justify-self: center;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
 }
 
-.linkbtn:hover {
+.btn.always:hover:not(:disabled) {
   color: var(--text);
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.preview {
+.rulebox {
   display: grid;
   gap: 8px;
 }
 
-.preview .note {
-  font-size: 12px;
+.rulebox .lbl {
+  font-size: 12.5px;
   color: var(--muted);
+}
+
+.rulebox .lbl b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.rulebox pre.cmd {
+  color: var(--sun);
+}
+
+.rulebox .note {
+  font-size: 11.5px;
+  color: var(--faint);
 }
 
 /* Rule changes, shown in the session list until dismissed. */
