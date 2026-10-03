@@ -1143,6 +1143,45 @@ Phase 8 is done when:
 - Commits: `ci: release workflow with checksums and attestations` →
   `docs: install, verify and uninstall guide` → `chore: v1.0.0`
 
+### macOS-only code from Phases 1–4 (2026-10-03)
+
+There's no Mac for development; the friend's Mac is for the Phase 9 check only.
+"CI" means a test on the `macos-latest` runner; "smoke" means the planned
+`ci: macos smoke test` job (after Phase 4 merges: launch the debug app, feed
+it a session and a request, take a screenshot, check modes).
+
+| What | Where | Covered by |
+| --- | --- | --- |
+| Socket path `~/Library/Application Support/Bouncer/bouncer.sock` | `relay/src/unix.rs` | CI (path unit test); smoke (the real folder) |
+| Server refuses a socket folder that isn't `0700` and ours | `core/src/ipc.rs` | CI (`refuses_a_folder_others_can_open`); smoke (real folder is `0700`) |
+| `getpeereid` same-user check, both ends | `relay/src/unix.rs`, `core/src/ipc.rs` | CI for the same-user path (ipc and relay tests connect through it). **Another user refused: human** |
+| Relay fail-safe over the socket (no app, slow app) | `relay/tests` | CI |
+| Rules file / folder owner + mode check, links refused | `core/src/rules.rs` | CI (`files_others_can_write_are_refused`) |
+| Rules file created `0600`, folder `0700` | `core/src/rules.rs` | CI |
+| Log folder `0700`, day files `0600`, shared folder refused | `core/src/activity.rs` | CI (`files_are_private_and_shared_folders_refused`); smoke (real files) |
+| `install-hooks` backup keeps the file's mode | `core/tests/install.rs` | CI |
+| Symlinked paths (`/private/var` temp, links out of the project) | `core/src/check.rs`, `rules_cases.rs` | CI |
+| Idle time from CoreGraphics (`CGEventSourceSecondsSinceLastEventType`) | `core/src/away.rs` | CI (call returns a value). **Real idle → away summary: human** |
+| No Dock icon (`ActivationPolicy::Accessory`) | `app/src/main.rs` | **Human** |
+| Menu-bar tray icon, greyed when paused, menu items | `app/src/main.rs` | **Human** |
+| Transparent rounded window and shadow (`ROUNDED`); square fallback if it fails | `app/src/main.rs`, `styles.css` | Smoke (screenshot). **Look and corners: human** |
+| Window never takes focus; first click works (`focusable: false`, `acceptFirstMouse`) | `tauri.conf.json` | **Human** |
+| Placement under the menu bar, drag, multi-monitor, stays on screen | `app/src/main.rs` | **Human** |
+| OS fonts (Segoe UI isn't on macOS; falls back to `system-ui`) | `styles.css` | Smoke (screenshot). **Human** |
+| Real Claude Code on a Mac: hooks installed, Bash requests approved / denied from the island | all | **Human** |
+| Unsigned app opens after "Open Anyway" | release | **Human** (Phase 9 itself) |
+
+Mac checks for Phase 9 (a person on a real Mac):
+
+- [ ] A second macOS user can't connect to the socket (getpeereid refusal)
+- [ ] Idle 10+ minutes during a session, come back: the away summary opens
+- [ ] No Dock icon; tray icon in the menu bar; Pause greys it and changes the tooltip; Wipe history and Quit work
+- [ ] Island corners rounded with a shadow, nothing opaque around it; fonts look right
+- [ ] The island never takes keyboard focus; one click on Allow / Deny works
+- [ ] Island sits under the menu bar, can be dragged, comes back if dropped off screen, crosses monitors
+- [ ] Real Claude Code session: hooks installed with `bouncer install-hooks`, a Bash request allowed and one denied from the island, an unanswered one falls back to the terminal
+- [ ] Unsigned `.dmg` opens after "Open Anyway"; uninstall removes only our hook entries
+
 ---
 
 ## Threat model
