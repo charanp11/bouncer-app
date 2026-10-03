@@ -313,6 +313,34 @@ fn decisions_from_the_desk_reach_claude_code() {
 }
 
 #[test]
+fn questions_print_nothing_so_the_terminal_asks() {
+    use bouncer_core::approvals::{Desk, WAIT};
+    let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
+    let handler = desk.clone();
+    let path = serve("question", Arc::new(move |e| handler.handle(e)));
+    for tool in ["AskUserQuestion", "ExitPlanMode"] {
+        let input = serde_json::json!({
+            "session_id": "s",
+            "cwd": "/p",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": tool,
+            "tool_input": { "questions": [{ "question": "Which binary?" }] },
+        });
+        let started = Instant::now();
+        assert_silent(&relay(&path, input.to_string().as_bytes()));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{tool}: never waits"
+        );
+    }
+    assert_eq!(desk.view()["queue"], serde_json::json!([]));
+    assert_eq!(
+        desk.view()["sessions"][0]["step"],
+        "question in the terminal"
+    );
+}
+
+#[test]
 fn windows_paths_reach_the_island_intact() {
     use bouncer_core::approvals::{Desk, WAIT};
     let desk = Arc::new(Desk::new(WAIT, None, |_| {}));

@@ -38,6 +38,11 @@ const IN_TERMINAL: &str = "asks in terminal";
 const HISTORY: usize = 40;
 /// How a step that a rule answered is tagged.
 const BY_RULE: &str = "auto-allowed by rule";
+/// Tools whose "permission request" is really a question for the user (pick
+/// an option, approve a plan). Bouncer never answers them; the terminal does.
+const QUESTIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+/// What a session waiting on one of those shows.
+const QUESTION_STEP: &str = "question in the terminal";
 
 struct Session {
     id: String,
@@ -180,6 +185,17 @@ impl State {
             }
         }
         Some(pending)
+    }
+
+    /// A question Claude Code asks in the terminal: the session needs the user.
+    fn waiting_in_terminal(&mut self, event: &Event) {
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
+            s.status = "needs you";
+            s.step = QUESTION_STEP.into();
+            if let Some(last) = s.history.back_mut() {
+                last.1 = "asked in terminal";
+            }
+        }
     }
 
     /// A rule answered this request: tag the step and flash the pill.
@@ -362,7 +378,13 @@ impl Desk {
         let id = {
             let mut state = self.lock();
             state.track(&event);
-            if !event.is_permission_request() || state.paused {
+            let question = QUESTIONS.contains(&event.tool.as_deref().unwrap_or_default());
+            if event.is_permission_request() && question {
+                // No card, no answer: Claude Code asks it in the terminal.
+                // The session says so, so the user notices.
+                state.waiting_in_terminal(&event);
+                None
+            } else if !event.is_permission_request() || state.paused {
                 None
             } else {
                 let verdict = state.check(&event);
@@ -585,6 +607,8 @@ fn step(event: &Event) -> String {
         Some("Grep" | "Glob") => "Searching".into(),
         Some("WebFetch" | "WebSearch") => "Browsing the web".into(),
         Some("Task" | "Agent") => "Running a subagent".into(),
+        Some("AskUserQuestion") => "Asking you a question".into(),
+        Some("ExitPlanMode") => "Showing you a plan".into(),
         Some(tool) => format!("Using {tool}"),
         None => "Working".into(),
     }
@@ -979,6 +1003,44 @@ mod tests {
         assert_eq!(desk.always(&id), Err("no rule to add for this request"));
         desk.decide(&id, false).unwrap();
         b.join().unwrap();
+    }
+
+    #[test]
+    fn questions_go_to_the_terminal_and_flag_the_session() {
+        // Auto mode and a rule set: still never answered, never queued.
+        let (desk, _) = desk_with_rules("question", AUTO);
+        for tool in ["AskUserQuestion", "ExitPlanMode"] {
+            let mut e = event("q", "PreToolUse", "");
+            e.tool = Some(tool.into());
+            e.input = Some(json!({ "questions": [{ "question": "Which one?" }] }));
+            desk.handle(e.clone());
+            e.kind = "PermissionRequest".into();
+            let started = Instant::now();
+            assert_eq!(desk.handle(e.clone()), None, "{tool}");
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "{tool}: no wait"
+            );
+            let view = desk.view();
+            assert_eq!(view["queue"], json!([]), "{tool}");
+            let s = &view["sessions"][0];
+            assert_eq!(s["status"], "needs you", "{tool}");
+            assert_eq!(s["step"], QUESTION_STEP, "{tool}");
+            let history = s["history"].as_array().unwrap();
+            assert_eq!(history.last().unwrap()["how"], "asked in terminal");
+            // Answered in the terminal: the tool runs and the session moves on.
+            e.kind = "PostToolUse".into();
+            desk.handle(e);
+            assert_eq!(desk.view()["sessions"][0]["status"], "working", "{tool}");
+        }
+        assert_eq!(
+            desk.view()["sessions"][0]["history"][0]["label"],
+            "Asking you a question"
+        );
+        desk.set_paused(true);
+        let mut e = event("q", "PermissionRequest", "");
+        e.tool = Some("AskUserQuestion".into());
+        assert_eq!(desk.handle(e), None, "paused");
     }
 
     #[test]
