@@ -767,8 +767,28 @@ Manual checks:
   (00:30:42) also came after the requests. Fixtures:
   `claude-code-2.1.288-PermissionRequest-{PowerShell,Bash}.json`, test
   `recorded_requests`.
-- Not yet: clicking through the "Always allow" preview in the real window,
-  and a broken rules file seen in the real window.
+- 2026-10-03, same playground setup (sessions `336add2c`, `36a96851`):
+  `oops = 1` added to `rules.toml` showed the red "rules" badge and the
+  error with its line number (Charan). Found: `cargo run` (PowerShell) showed
+  a Risky card, "Touches Bouncer's own rules": with the rules file inside the
+  playground, every word resolving into that folder was flagged. Fixed
+  (correction 11, test `a_project_next_to_the_rules_file`).
+- Not yet: clicking through the "Always allow" preview in the real window.
+
+Plan corrections after the playground check:
+
+10. PowerShell (Charan): Claude Code on Windows runs commands with its
+    PowerShell tool. A PowerShell command can be auto-allowed only if it is
+    ASCII letters, digits, space and `. \ / : - _` alone; anything with
+    `$ ' " ; | & { } ( ) [ ] < > @ % ! # , =` or a backtick (or tabs, newlines,
+    non-ASCII) asks. The program matches existing `command` rules ignoring
+    case (the rest of the words exactly), so `iex`, `rm`, `del`,
+    `Start-Process` and the like are never auto-allowed or offered. Every
+    risk check runs on a rough reading of any PowerShell command (`iwr | iex`,
+    `Remove-Item` outside, `-Verb RunAs`, `iex` / `-Command` strings, `$(`).
+    Case table (91 rows incl. each character and alias) and fuzz.
+11. "Touches Bouncer's own rules" means the rules file itself or its whole
+    folder (delete, replace), not other files that sit beside it.
 
 ## Phase 4 — Activity log and away summary (~1 week)
 
@@ -804,6 +824,13 @@ Manual checks:
   hops when done); a launch greeting; Web Audio generated sounds; settings screen
   (sound, observe/auto-allow, rules file, hooks install/uninstall, wipe history);
   pause when hidden; honour OS reduced motion.
+- **Observe / auto switch in the island** (Charan, 2026-10-03; Phase 5 with the
+  settings screen): one switch shows the current mode. Turning auto on asks for
+  confirmation first (what auto means, that risky requests still ask);
+  turning it off doesn't. Bouncer writes `mode` into `rules.toml` itself: a
+  new backend command, never the page sending file text; the same checked,
+  atomic write as "Always allow", and the change shows in the island like
+  any other.
 - **Test:** each pose renders; physics stays stable at any frame rate; mute works;
   reduced motion stops bounce and tracking; keyboard-only settings; screen reader order.
 - **Verify:** contrast ≥ 4.5:1; idle CPU ~0% (no animation frames while nothing
@@ -835,6 +862,11 @@ Phase 5 is done when:
   `claude -p` as a child process (exec form, no shell, prompt on stdin, never in
   argv); streamed answer shown with `textContent`; locked-down tool permissions
   for chat runs; cancel button; clear "this runs your Claude Code" note.
+- **Model picker** (Charan, 2026-10-03): chooses the model for chat runs,
+  passed with `claude -p`'s model option (exact flag confirmed in the Audit),
+  from a fixed list, never free text into argv. Default: the user's own
+  Claude Code default (no model flag). Bouncer never changes the model of a
+  user's Claude Code session or their Claude Code settings.
 - **Test:** prompt with shell metacharacters stays literal; hostile model output
   renders inert; cancel and timeout kill the child; `claude` missing → clear message.
 - **Verify:** Bouncer itself makes no network calls; no API key read or stored;
