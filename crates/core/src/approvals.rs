@@ -18,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::activity::{self, Entry, Log};
 use crate::check::{self, Context, sentence};
 use crate::code::code_view;
 use crate::event::Event;
@@ -102,9 +103,18 @@ struct State {
     flash: Option<Flash>,
     /// Numbers flashes and notices, so the island can tell them apart.
     count: u64,
+    /// The activity log; `None` without a rules folder (tests, no config dir).
+    log: Option<Log>,
 }
 
 impl State {
+    /// Logs how a permission request ended.
+    fn answered(&mut self, event: &Event, how: &str) {
+        if let Some(log) = self.log.as_mut() {
+            log.write(&Entry::answer(event, how, activity::ms(SystemTime::now())));
+        }
+    }
+
     fn session(&mut self, event: &Event) -> &mut Session {
         let i = match self.sessions.iter().position(|s| s.id == event.session) {
             Some(i) => i,
@@ -174,6 +184,7 @@ impl State {
     fn take(&mut self, id: &str, status: &'static str, how: &'static str) -> Option<Pending> {
         let i = self.queue.iter().position(|p| p.id == id)?;
         let pending = self.queue.remove(i)?;
+        self.answered(&pending.event, how);
         if let Some(s) = self
             .sessions
             .iter_mut()
@@ -189,6 +200,7 @@ impl State {
 
     /// A question Claude Code asks in the terminal: the session needs the user.
     fn waiting_in_terminal(&mut self, event: &Event) {
+        self.answered(event, "asked in terminal");
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
             s.status = "needs you";
             s.step = QUESTION_STEP.into();
@@ -200,6 +212,7 @@ impl State {
 
     /// A rule answered this request: tag the step and flash the pill.
     fn auto_allowed(&mut self, event: &Event) {
+        self.answered(event, BY_RULE);
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) {
             s.status = "working";
             if let Some(last) = s.history.back_mut() {
@@ -347,6 +360,12 @@ impl Desk {
             },
         };
         let stamp = rules.as_deref().and_then(rules::stamp);
+        // The history sits next to the rules file, so dev runs (`BOUNCER_RULES`)
+        // never write the real folder.
+        let log = rules
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|dir| Log::new(dir.join("history")));
         Desk {
             state: Mutex::new(State {
                 sessions: Vec::new(),
@@ -360,6 +379,7 @@ impl Desk {
                 },
                 flash: None,
                 count: 0,
+                log,
             }),
             wait,
             changed: Box::new(changed),
@@ -383,13 +403,19 @@ impl Desk {
         let id = {
             let mut state = self.lock();
             state.track(&event);
+            if let Some(log) = state.log.as_mut() {
+                log.write(&Entry::of(&event));
+            }
             let question = QUESTIONS.contains(&event.tool.as_deref().unwrap_or_default());
             if event.is_permission_request() && question {
                 // No card, no answer: Claude Code asks it in the terminal.
                 // The session says so, so the user notices.
                 state.waiting_in_terminal(&event);
                 None
-            } else if !event.is_permission_request() || state.paused {
+            } else if !event.is_permission_request() {
+                None
+            } else if state.paused {
+                state.answered(&event, "asked in terminal");
                 None
             } else {
                 let verdict = state.check(&event);
@@ -400,7 +426,11 @@ impl Desk {
                     return Some(Decision::Allow);
                 }
                 // No ID (the OS random source failed) means no card: the terminal asks.
-                request_id().inspect(|id| {
+                let id = request_id();
+                if id.is_none() {
+                    state.answered(&event, "asked in terminal");
+                }
+                id.inspect(|id| {
                     state.queue.push_back(Pending {
                         id: id.clone(),
                         event,
@@ -585,6 +615,7 @@ impl Desk {
                 "notice": rules.notice.as_ref().map(|(n, text)| json!({ "n": n, "text": visible(text) })),
             },
             "flash": flash,
+            "history": { "note": state.log.as_ref().and_then(Log::note) },
         })
     }
 }
@@ -1131,6 +1162,41 @@ mod tests {
         std::fs::write(&path, AUTO).unwrap();
         desk.reload_rules();
         assert_eq!(desk.view()["rules"]["error"], json!(null));
+    }
+
+    #[test]
+    fn every_event_and_answer_is_logged() {
+        let (desk, path) = desk_with_rules("log", AUTO);
+        let dir = path.parent().unwrap().join("history");
+        desk.handle(event("a", "PreToolUse", "ls"));
+        assert_eq!(
+            desk.handle(event("a", "PermissionRequest", "ls")),
+            Some(Decision::Allow)
+        );
+        let asked = ask(&desk, "a", "pwd");
+        let id = queued(&desk, 1).remove(0);
+        desk.decide(&id, false).unwrap();
+        asked.join().unwrap();
+        desk.set_paused(true);
+        desk.handle(event("a", "PermissionRequest", "pwd"));
+        let log: Vec<_> = activity::read(&dir, 0, activity::ms(SystemTime::now()))
+            .into_iter()
+            .map(|e| (e.kind, e.label, e.how.unwrap_or_default()))
+            .collect();
+        let row = |k: &str, l: &str, h: &str| (k.to_owned(), l.to_owned(), h.to_owned());
+        assert_eq!(
+            log,
+            [
+                row("PreToolUse", "Running ls", ""),
+                row("PermissionRequest", "Running ls", ""),
+                row("Answer", "Running ls", BY_RULE),
+                row("PermissionRequest", "Running pwd", ""),
+                row("Answer", "Running pwd", "you denied"),
+                row("PermissionRequest", "Running pwd", ""),
+                row("Answer", "Running pwd", "asked in terminal"),
+            ]
+        );
+        assert_eq!(desk.view()["history"]["note"], json!(null));
     }
 
     #[test]

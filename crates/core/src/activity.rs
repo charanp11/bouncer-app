@@ -282,7 +282,9 @@ fn day_files(dir: &Path) -> Vec<PathBuf> {
 /// first. Files someone else can write and lines that don't parse are skipped.
 pub fn read(dir: &Path, since: u64, until: u64) -> Vec<Entry> {
     let mut out = Vec::new();
-    for n in since / DAY_MS..=until / DAY_MS {
+    // Older day files are deleted, so a longer span reads no more than this.
+    let first = (since / DAY_MS).max((until / DAY_MS).saturating_sub(KEEP_DAYS));
+    for n in first..=until / DAY_MS {
         let path = dir.join(name(n));
         if trust::check(&path).is_err() {
             continue;
@@ -477,6 +479,8 @@ pub(crate) mod tests {
         assert_eq!(day_files(&dir), Vec::<PathBuf>::new());
         assert!(dir.join("notes.txt").exists(), "only our files");
         assert_eq!(read(&dir, 0, (today + 1) * DAY_MS), []);
+        // A huge span reads only the days that can exist (this hung once).
+        assert_eq!(read(&dir, 0, u64::MAX), []);
         // Logging goes on after a wipe.
         log.write(&Entry::of(&event("Stop", None, json!({}), today * DAY_MS)));
         assert_eq!(read(&dir, 0, (today + 1) * DAY_MS).len(), 1);
