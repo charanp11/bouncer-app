@@ -24,6 +24,16 @@ export function latest(groups: Group[], max = SHOWN): { shown: Group[]; earlier:
   return { shown: groups.slice(earlier), earlier };
 }
 
+/** How long a request left to Claude Code's own prompt shows as running. */
+export const STALE_MS = 120_000;
+
+/** Claude Code sends no event when a request is answered No in its terminal
+ * (nor while it waits there), so after STALE_MS with nothing new the island
+ * stops showing the step as running: "Waiting in terminal". */
+export function waitingInTerminal(status: string, lastMs: number, now: number): boolean {
+  return status === "asks in terminal" && now - lastMs >= STALE_MS;
+}
+
 /** "Searching ×3" for a repeated step. */
 export function title(g: Group): string {
   return g.count > 1 ? `${g.label} ×${g.count}` : g.label;

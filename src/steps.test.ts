@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { group, latest, title } from "./steps.ts";
+import { group, latest, STALE_MS, title, waitingInTerminal } from "./steps.ts";
 
 const s = (label: string, how = "") => ({ label, how });
 
@@ -24,4 +24,14 @@ test("only the latest six are shown, the rest counted", () => {
   assert.deepEqual(shown.map(title), ["Step 3", "Step 4", "Step 5", "Step 6", "Step 7", "Step 8"]);
   assert.deepEqual(latest(group([s("a")])), { shown: [{ label: "a", how: "", count: 1 }], earlier: 0 });
   assert.deepEqual(latest([]), { shown: [], earlier: 0 });
+});
+
+test("a request left in the terminal stops spinning after two quiet minutes", () => {
+  const asked = 1_000_000;
+  assert.equal(waitingInTerminal("asks in terminal", asked, asked + STALE_MS - 1), false);
+  assert.equal(waitingInTerminal("asks in terminal", asked, asked + STALE_MS), true);
+  // Only that state: working, waiting on a card, or idle sessions never do.
+  for (const status of ["working", "needs you", "idle"]) {
+    assert.equal(waitingInTerminal(status, asked, asked + 10 * STALE_MS), false, status);
+  }
 });
