@@ -185,7 +185,7 @@ impl State {
     /// A rule answered this request: tag the step and flash the pill.
     fn auto_allowed(&mut self, event: &Event) {
         let what = match (event.tool.as_deref(), event.input.as_ref()) {
-            (Some("Bash"), Some(input)) => input
+            (Some("Bash" | "PowerShell"), Some(input)) => input
                 .get("command")
                 .and_then(Value::as_str)
                 .and_then(|c| c.lines().next())
@@ -218,12 +218,12 @@ impl State {
             .find(|s| s.id == event.session)
             .map_or(event.project.as_str(), |s| s.root.as_str());
         let home = std::env::home_dir();
-        let bouncer = self.rules.path.as_deref().and_then(Path::parent);
+        let rules_file = self.rules.path.as_deref();
         let ctx = Context {
             root: Path::new(root),
             cwd: Path::new(&event.project),
             home: home.as_deref(),
-            bouncer,
+            rules_file,
         };
         check::check(
             &self.rules.loaded.rules,
@@ -578,7 +578,7 @@ fn step(event: &Event) -> String {
         Some("Edit" | "MultiEdit" | "Write") => format!("Editing {}", file("file_path")),
         Some("NotebookEdit") => format!("Editing {}", file("notebook_path")),
         Some("Read") => format!("Reading {}", file("file_path")),
-        Some("Bash") => {
+        Some("Bash" | "PowerShell") => {
             let command = text("command").unwrap_or_default();
             format!("Running {}", command.lines().next().unwrap_or_default())
         }
@@ -597,7 +597,9 @@ fn request_text(event: &Event) -> String {
         return String::new();
     };
     match input.get("command").and_then(Value::as_str) {
-        Some(command) if event.tool.as_deref() == Some("Bash") => command.to_owned(),
+        Some(command) if matches!(event.tool.as_deref(), Some("Bash" | "PowerShell")) => {
+            command.to_owned()
+        }
         _ => serde_json::to_string_pretty(input).unwrap_or_default(),
     }
 }

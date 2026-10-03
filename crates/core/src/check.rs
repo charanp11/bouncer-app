@@ -35,8 +35,8 @@ pub struct Context<'a> {
     /// The current working directory (relative paths start here).
     pub cwd: &'a Path,
     pub home: Option<&'a Path>,
-    /// Bouncer's own config folder (the rules file).
-    pub bouncer: Option<&'a Path>,
+    /// Bouncer's rules file.
+    pub rules_file: Option<&'a Path>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -56,17 +56,23 @@ pub fn check(rules: &Rules, tool: Option<&str>, input: Option<&Value>, ctx: &Con
             Some(command) => bash(rules, command, &root),
             None => Verdict::default(),
         },
+        (Some("PowerShell"), Some(input)) => match input.get("command").and_then(Value::as_str) {
+            Some(command) => powershell(rules, command, &root),
+            None => Verdict::default(),
+        },
         (Some(tool), Some(input)) if PATH_TOOLS.contains(&tool) => {
             path_tool(rules, tool, input, &root)
         }
         _ => Verdict::default(),
     };
     if input.is_some_and(has_hidden) {
-        verdict.reasons.push(if tool == Some("Bash") {
-            HIDDEN_COMMAND
-        } else {
-            HIDDEN_REQUEST
-        });
+        verdict
+            .reasons
+            .push(if matches!(tool, Some("Bash" | "PowerShell")) {
+                HIDDEN_COMMAND
+            } else {
+                HIDDEN_REQUEST
+            });
     }
     if !verdict.reasons.is_empty() {
         verdict.allow = None;
@@ -129,6 +135,85 @@ fn bash(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
     verdict
 }
 
+/// Characters a PowerShell command may contain and still be auto-allowed:
+/// ASCII letters and digits, space, and `. \ / : - _`. Everything else
+/// (`$ ' " ; | & { } ( ) [ ] < > @ % ! # , =`, backtick, tabs, newlines,
+/// non-ASCII) means PowerShell syntax Bouncer doesn't parse, so it asks.
+fn plain_powershell(command: &str) -> bool {
+    command
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || " .\\/:-_".contains(c))
+}
+
+/// Claude Code's PowerShell tool (Windows). Only a single command of plain
+/// words is understood; its program matches a `command` rule ignoring case
+/// (PowerShell does), the rest of the words exactly. Risk checks run on a
+/// rough reading of any command.
+fn powershell(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
+    let mut verdict = Verdict::default();
+    bash_risks(&rough_powershell(command), root, &mut verdict.reasons);
+    if !plain_powershell(command) {
+        return verdict;
+    }
+    let c = Command {
+        words: command.split_whitespace().map(str::to_owned).collect(),
+        ..Command::default()
+    };
+    let Some(program) = c.words.first() else {
+        return verdict;
+    };
+    let inside = path_words(&c).all(|w| root.inside(&root.resolve(w)));
+    if !(inside && root.usable) {
+        return verdict;
+    }
+    let matched = rules.allow.iter().find(|rule| match rule {
+        Rule::Command(prefix) => {
+            prefix.len() <= c.words.len()
+                && prefix[0].eq_ignore_ascii_case(program)
+                && prefix[1..] == c.words[1..prefix.len()]
+        }
+        Rule::Tool(_) => false,
+    });
+    match matched {
+        Some(rule) => verdict.allow = Some(rule.label()),
+        None => verdict.offer = offer(&c.words),
+    }
+    verdict
+}
+
+/// A rough reading of a PowerShell command, only for risk checks: commands
+/// split at `|` (piped), `;`, `&` and newlines; words at whitespace, outer
+/// quotes dropped; `$(` counts as a substitution.
+fn rough_powershell(command: &str) -> Parsed {
+    let mut parsed = Parsed::default();
+    if command.contains("$(") || command.contains('`') {
+        parsed.issues.push(Issue::Substitution);
+    }
+    let mut piped = false;
+    let mut rest = command;
+    loop {
+        let end = rest.find(['|', ';', '&', '\n']).unwrap_or(rest.len());
+        let words: Vec<String> = rest[..end]
+            .split_whitespace()
+            .map(|w| w.trim_matches(['\'', '"']).to_owned())
+            .filter(|w| !w.is_empty())
+            .collect();
+        if !words.is_empty() {
+            parsed.commands.push(Command {
+                words,
+                piped,
+                ..Command::default()
+            });
+        }
+        let Some(sep) = rest[end..].chars().next() else {
+            break;
+        };
+        piped = sep == '|';
+        rest = &rest[end + sep.len_utf8()..];
+    }
+    parsed
+}
+
 /// Words that name files: arguments, `--opt=value` values, redirection
 /// targets, and the program when it's given as a path.
 fn path_words(c: &Command) -> impl Iterator<Item = &str> {
@@ -140,7 +225,7 @@ fn path_words(c: &Command) -> impl Iterator<Item = &str> {
 fn arg_paths(c: &Command) -> impl Iterator<Item = &str> {
     let args = c.words.iter().skip(1).filter_map(|w| {
         if let Some(opt) = w.strip_prefix('-') {
-            match w.split_once('=') {
+            match w.split_once(['=', ':']) {
                 Some((_, value)) => Some(value),
                 // -o/etc/x: a short option with its value attached.
                 None if !opt.starts_with('-') && w.contains(['/', '\\', '~']) => w.get(2..),
@@ -287,10 +372,22 @@ fn bash_risks(parsed: &Parsed, root: &Resolved, reasons: &mut Vec<&'static str>)
                 || w.eq_ignore_ascii_case("-command")
                 || w.eq_ignore_ascii_case("/c")
         });
-        if program == "eval" || (SHELLS.contains(&program) && dash_c) {
+        let string_runners = ["eval", "iex", "invoke-expression"];
+        if string_runners.contains(&program) || (SHELLS.contains(&program) && dash_c) {
             add(reasons, IN_A_STRING);
         }
-        if ADMINS.contains(&program) || wrappers.iter().any(|w| ADMINS.contains(&w.as_str())) {
+        // PowerShell: Start-Process … -Verb RunAs.
+        let run_as = c
+            .words
+            .iter()
+            .any(|w| w.eq_ignore_ascii_case("-verb:runas"))
+            || c.words
+                .windows(2)
+                .any(|w| w[0].eq_ignore_ascii_case("-verb") && w[1].eq_ignore_ascii_case("runas"));
+        if ADMINS.contains(&program)
+            || wrappers.iter().any(|w| ADMINS.contains(&w.as_str()))
+            || run_as
+        {
             add(reasons, ADMIN);
         }
         if DELETERS.contains(&program) && arg_paths(c).any(|w| !root.inside(&root.resolve(w))) {
@@ -370,10 +467,12 @@ fn path_risks(raw: &str, resolved: &Path, root: &Resolved, reasons: &mut Vec<&'s
     {
         add(reasons, GIT_INTERNALS);
     }
+    // The rules file itself, or its whole folder (delete, replace, re-permission).
+    // Other files next to it aren't: a project may sit in the same folder.
     if root
-        .bouncer
+        .rules_file
         .as_ref()
-        .is_some_and(|b| resolved.starts_with(b))
+        .is_some_and(|(file, dir)| resolved == file || resolved == dir)
     {
         add(reasons, BOUNCER);
     }
@@ -412,7 +511,10 @@ const NEVER_OFFER: &[&str] = &[
     "timeout", "nice", "watch", "sudo", "doas", "su", "runas", "gsudo", "pkexec", "rm", "rmdir",
     "unlink", "shred", "del", "dd", "mkfs", "chmod", "chown", "chgrp", "curl", "wget", "ssh",
     "scp", "rsync", "nc", "ncat", "socat", "alias", "export", "set", "unset", "trap", "kill",
-    "killall", "pkill", "shutdown", "reboot", "find", "awk", "sed", "git",
+    "killall", "pkill", "shutdown", "reboot", "find", "awk", "sed", "git", "iex",
+    "invoke-expression", "invoke-command", "icm", "start-process", "saps", "start", "remove-item",
+    "ri", "erase", "rd", "iwr", "irm", "invoke-webrequest", "invoke-restmethod",
+    "set-executionpolicy", "sc", "set-content", "add-content", "out-file",
 ];
 
 /// Programs with subcommands: a rule names the subcommand too ("cargo test",
@@ -436,10 +538,12 @@ fn offer(words: &[String]) -> Option<Rule> {
                 .all(|c| c.is_ascii_alphanumeric() || "._:-".contains(c))
     };
     let sub = words.get(1).filter(|w| plain(w));
-    let git = program == "git" && sub.is_some_and(|s| GIT_OFFER.contains(&s.as_str()));
+    // Compared ignoring case: PowerShell runs `RM` and `Iex` too.
+    let lower = name(program);
+    let git = lower == "git" && sub.is_some_and(|s| GIT_OFFER.contains(&s.as_str()));
     if !(plain(program) || program.starts_with("./"))
-        || (NEVER_OFFER.contains(&program) && !git)
-        || (SUBCOMMANDS.contains(&program) && sub.is_none())
+        || (NEVER_OFFER.contains(&lower.as_str()) && !git)
+        || (SUBCOMMANDS.contains(&lower.as_str()) && sub.is_none())
     {
         return None;
     }
@@ -455,7 +559,8 @@ struct Resolved<'a> {
     /// False when the project is a drive root or the home folder: too broad to
     /// call anything "inside".
     usable: bool,
-    bouncer: Option<PathBuf>,
+    /// The rules file and its folder, resolved.
+    rules_file: Option<(PathBuf, PathBuf)>,
 }
 
 impl<'a> Resolved<'a> {
@@ -463,12 +568,14 @@ impl<'a> Resolved<'a> {
         let root = real(ctx.root);
         let home = ctx.home.map(real);
         let usable = root.parent().is_some() && Some(&root) != home.as_ref();
-        let bouncer = ctx.bouncer.map(real);
+        let rules_file = ctx
+            .rules_file
+            .map(|f| (real(f), real(f.parent().unwrap_or(f))));
         Resolved {
             ctx,
             root,
             usable,
-            bouncer,
+            rules_file,
         }
     }
 
@@ -565,7 +672,7 @@ mod tests {
             root: dir,
             cwd: dir,
             home: Some(&home),
-            bouncer: None,
+            rules_file: None,
         };
         check(
             &rules(),
@@ -582,7 +689,7 @@ mod tests {
             root: &dir,
             cwd: &dir.join("src"),
             home: Some(Path::new("/home/me")),
-            bouncer: None,
+            rules_file: None,
         };
         let r = Resolved::new(&ctx);
         let root = real(&dir);
@@ -642,7 +749,7 @@ mod tests {
             root: &root,
             cwd: &root,
             home: None,
-            bouncer: None,
+            rules_file: None,
         };
         assert_eq!(
             check(
@@ -658,7 +765,7 @@ mod tests {
             root: &dir,
             cwd: &dir,
             home: Some(&dir),
-            bouncer: None,
+            rules_file: None,
         };
         assert_eq!(
             check(
@@ -679,7 +786,7 @@ mod tests {
             root: &dir,
             cwd: &dir,
             home: None,
-            bouncer: None,
+            rules_file: None,
         };
         let run = |tool: &str, input: Value| check(&rules(), Some(tool), Some(&input), &ctx);
         let inside = dir.join("src/main.rs").to_string_lossy().into_owned();
@@ -788,11 +895,13 @@ mod tests {
         let bouncer = dir.parent().unwrap().join("Bouncer");
         std::fs::create_dir_all(&bouncer).unwrap();
         let home = dir.parent().unwrap().join("home");
+        let rules_path = bouncer.join("rules.toml");
+        std::fs::write(&rules_path, "").unwrap();
         let ctx = Context {
             root: &dir,
             cwd: &dir,
             home: Some(&home),
-            bouncer: Some(&bouncer),
+            rules_file: Some(&rules_path),
         };
         let reasons = |tool: &str, input: Value| {
             let v = check(&rules(), Some(tool), Some(&input), &ctx);
