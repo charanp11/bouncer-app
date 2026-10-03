@@ -7,7 +7,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
-import { group, latest, title, type Step } from "./steps.ts";
+import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
 
@@ -103,6 +103,7 @@ const TAG: Record<string, string> = {
   "you denied": "flag",
   "waiting for you": "you",
   "asked in terminal": "you",
+  "waiting in terminal": "you",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
 
@@ -289,6 +290,7 @@ function head(state: BallState, title: string, sub = "", onClose?: () => void): 
 
 function stepText(s: Session): string {
   if (s.status === "needs you") return `Needs you · ${s.step}`;
+  if (waitingInTerminal(s.status, s.last_ms, Date.now())) return `Waiting in terminal · ${s.step}`;
   if (s.status === "asks in terminal") return `Asking in the terminal · ${s.step}`;
   return s.step;
 }
@@ -505,12 +507,16 @@ function rail(session: Session | undefined, project: string, agent: string, stat
   const steps = el("ul", "steps");
   const { shown, earlier } = latest(group(session?.history ?? []));
   if (earlier) steps.append(el("li", "earlier", `+${earlier} earlier`));
+  const stale = session ? waitingInTerminal(session.status, session.last_ms, Date.now()) : false;
   shown.forEach((step, i) => {
     const now = i === shown.length - 1 && session?.status !== "idle";
-    const icon = !now ? "ok" : step.how === "waiting for you" ? "wait" : "spin";
+    // Answered (or still waiting) in Claude Code's own prompt: not running.
+    const waiting = now && (step.how === "waiting for you" || stale);
+    const icon = !now ? "ok" : waiting ? "wait" : "spin";
+    const how = now && stale ? "waiting in terminal" : step.how;
     const li = el("li", now ? "now" : "done");
     li.append(el("span", `ic ${icon}`), el("span", "", title(step)));
-    if (step.how) li.append(el("span", `tag ${TAG[step.how] ?? ""}`, step.how));
+    if (how) li.append(el("span", `tag ${TAG[how] ?? ""}`, how));
     steps.append(li);
   });
   who.append(ball(state, true), proj, el("div", "agent", `${AGENTS[agent] ?? agent}${age}`), steps);

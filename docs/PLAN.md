@@ -1000,6 +1000,16 @@ Plan corrections found in this audit:
     has no scanner hits.
 11. (Verify, Charan) `BOUNCER_AWAY_SECS` is read in debug builds only; a test
     proves it and CI runs it in release, like `BOUNCER_ENDPOINT` / `BOUNCER_RULES`.
+12. (After merge, Charan) Known limit: Claude Code sends **no hook event**
+    when a request is answered No in its own terminal prompt: no
+    `PostToolUseFailure`, no `Stop`, no `Notification` (playground test,
+    Claude Code 2.1.288, session `b1ce8275`: `PreToolUse` and
+    `PermissionRequest` at 15:00:55, then nothing for 4 minutes;
+    `PostToolUseFailure` was subscribed for the test and removed after).
+    Bouncer can't tell a No from a prompt still waiting, so a session left
+    "asks in terminal" with no new event for 2 minutes shows "Waiting in
+    terminal" (row and rail, no spinner) until its next event, or drops off
+    after 4 h. Fixture `crates/core/tests/fixtures/claude-code-2.1.288-denied-in-terminal.jsonl`.
 
 Manual checks (2026-10-03, Charan, Windows, Claude Code 2.1.288, playground
 session `7931c6f2`, debug app with `BOUNCER_RULES` in the playground and

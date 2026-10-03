@@ -928,6 +928,35 @@ mod tests {
         assert_eq!(view["queue"], json!([]));
     }
 
+    /// Recorded: a request answered No in Claude Code's own prompt (2.1.288).
+    /// Claude Code sends the request and then nothing at all (no
+    /// `PostToolUseFailure`, no `Stop`, no `Notification`), so the session
+    /// stays "asks in terminal" with its last event's time; the island shows
+    /// "Waiting in terminal" once that is two minutes old.
+    #[test]
+    fn a_no_in_the_terminal_sends_nothing_more() {
+        let desk = desk(Duration::from_millis(100));
+        let recorded =
+            include_str!("../tests/fixtures/claude-code-2.1.288-denied-in-terminal.jsonl");
+        let events: Vec<Event> = recorded
+            .lines()
+            .map(|line| Event::from_claude_code(&serde_json::from_str(line).unwrap()).unwrap())
+            .collect();
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds, ["PreToolUse", "PermissionRequest"]);
+        let before = epoch_ms(SystemTime::now());
+        for e in events {
+            assert_eq!(desk.handle(e), None, "nothing answered; the card timed out");
+        }
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["status"], IN_TERMINAL);
+        assert_eq!(s["step"], "Running mkdir deny-test");
+        assert_eq!(s["history"][0]["how"], "asked in terminal");
+        let last = s["last_ms"].as_u64().unwrap();
+        assert!(last >= before && last <= epoch_ms(SystemTime::now()));
+    }
+
     #[test]
     fn quiet_sessions_drop_off() {
         let desk = desk(WAIT);
