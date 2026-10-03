@@ -121,12 +121,15 @@ impl Entry {
     }
 }
 
-/// The event with its whole command redacted, so the step's first line can't
-/// keep part of a secret that spans lines.
+/// The event with its whole command and paths redacted before the step is
+/// made from them, so the step's first line or file name can't keep part of a
+/// secret (one spanning lines, or one with `/` in a path).
 fn whole_command_redacted(event: &Event) -> Event {
     let mut event = event.clone();
-    if let Some(Value::String(command)) = event.input.as_mut().and_then(|i| i.get_mut("command")) {
-        *command = redact(command);
+    for key in ["command", "file_path", "notebook_path"] {
+        if let Some(Value::String(text)) = event.input.as_mut().and_then(|i| i.get_mut(key)) {
+            *text = redact(text);
+        }
     }
     event
 }
@@ -438,10 +441,14 @@ pub(crate) mod tests {
         let written = fs::read_to_string(dir.join(name(20_729))).unwrap();
         assert!(written.lines().count() >= fakes.len() * 6);
         for (secret, _) in &fakes {
-            // The file holds JSON, so compare with the secret as JSON escapes it.
-            let escaped = serde_json::to_string(secret).unwrap();
-            let escaped = escaped.trim_matches('"');
-            assert!(!written.contains(escaped), "{secret} on disk");
+            // Not the secret, nor any 8+ character piece of it (a path's file
+            // name once kept the end of one with `/` in it).
+            for piece in secret
+                .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .filter(|p| p.len() >= 8)
+            {
+                assert!(!written.contains(piece), "{piece} of {secret} on disk");
+            }
         }
     }
 
@@ -509,6 +516,8 @@ pub(crate) mod tests {
         log.write(&e);
         assert_eq!(log.note(), None);
         assert_eq!(read(&dir, e.t, e.t), [e]);
+        // 10 MB per run: don't leave it in the temp folder.
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
     #[cfg(unix)]
