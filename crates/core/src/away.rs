@@ -17,9 +17,11 @@ pub const AWAY_ENV: &str = "BOUNCER_AWAY_SECS";
 
 /// `AWAY`, or `BOUNCER_AWAY_SECS` in a debug build.
 pub fn limit() -> Duration {
-    std::env::var(AWAY_ENV)
-        .ok()
-        .filter(|_| cfg!(debug_assertions))
+    limit_with(std::env::var(AWAY_ENV).ok())
+}
+
+fn limit_with(over: Option<String>) -> Duration {
+    over.filter(|_| cfg!(debug_assertions))
         .and_then(|v| v.parse().ok())
         .map_or(AWAY, Duration::from_secs)
 }
@@ -214,9 +216,17 @@ mod tests {
     }
 
     #[test]
-    fn the_override_is_debug_only() {
-        // Not set in tests: the real limit.
-        assert_eq!(limit(), AWAY);
+    fn override_is_honored_only_in_debug_builds() {
+        // CI also runs this in a release build.
+        let over = limit_with(Some("60".into()));
+        assert_eq!(over == Duration::from_secs(60), cfg!(debug_assertions));
+        assert_eq!(over == AWAY, !cfg!(debug_assertions));
+        assert_eq!(limit_with(None), AWAY);
+        assert_eq!(
+            limit_with(Some("soon".into())),
+            AWAY,
+            "unparsable: the real limit"
+        );
     }
 
     #[test]
