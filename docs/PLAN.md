@@ -830,7 +830,8 @@ Plan corrections after the playground check:
 
 - **Audit:** exact stored fields; secret patterns (API keys, tokens, URL passwords,
   private keys, `.env` values).
-- **Implement:** SQLite in app data folder, owner-only; redaction before write; never
+- **Implement:** JSON Lines day files in the app data folder, owner-only (was SQLite;
+  changed by Charan in the audit); redaction before write; never
   store outputs or file contents; 30-day retention + "Wipe history"; away summary
   after 10+ idle minutes (files changed, commands, auto-allowed vs asked, where it got
   stuck, time; token cost only if hook data has it).
@@ -839,6 +840,143 @@ Plan corrections after the playground check:
 - **Verify:** nothing leaves the machine; no fake secret anywhere on disk after tests.
 - Commits: `feat(log): local event store` → `feat(log): secret redaction` →
   `feat(log): retention and wipe` → `feat(ui): away summary card` → `test(log): redaction and summary fixtures`
+
+### Phase 4 audit (2026-10-03)
+
+Sources: Phase 1–3 notes, `approvals.rs` (the desk), the recorded hook
+fixtures (2.1.143 / 2.1.287 / 2.1.288), `design/prototype/bouncer-island.html`
+(state "Away summary" and its notes).
+
+Storage (Charan, 2026-10-03): **JSON Lines, std + `serde_json`, no new
+dependency**, replacing SQLite (CLAUDE.md updated):
+
+- One file per UTC day, `history/activity-YYYY-MM-DD.jsonl`, in the folder
+  holding `rules.toml` (`%APPDATA%\Bouncer`, `~/Library/Application
+  Support/Bouncer`; in dev runs next to `BOUNCER_RULES`, so dev never writes
+  the real folder). Folder `0700`, files `0600` on macOS; on Windows they
+  inherit `%APPDATA%`'s user-only list.
+- Before writing a day file, the rules file's owner check runs on the file
+  and its folder (owner + mode / owner + DACL, no links). Refused → nothing
+  is written that day and the island shows a quiet note.
+- One event per line, written with one `write_all` in append mode. A
+  half-written last line (crash) is skipped on read, as is any line that
+  doesn't parse.
+- 10 MB cap per day file: once a line wouldn't fit, logging stops for that
+  day and the island shows a quiet note. The disk can't fill from us.
+- Only the app writes the log. The relay never touches it.
+- Retention: day files older than 30 days are deleted at start and when the
+  day changes. "Wipe history" (tray) deletes every day file and the summary.
+
+Stored fields, exactly (anything else is never written):
+
+| Field | What | Notes |
+| --- | --- | --- |
+| `t` | time, ms since 1970 | |
+| `session` | Claude Code's session ID | |
+| `project` | the session's folder (`cwd`) | redacted |
+| `kind` | hook name (`PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, …) or `Answer` | |
+| `tool` | tool name | |
+| `label` | the session-list step, e.g. `Running cargo test`, `Editing main.rs` | first line only, redacted, then cut to 200 characters |
+| `file` | full path, edit tools only (Edit, MultiEdit, Write, NotebookEdit) | redacted, cut to 1,000 |
+| `how` | `Answer` only: `auto-allowed by rule`, `you allowed`, `you denied`, `asked in terminal` | |
+
+Never stored: tool outputs (the relay already drops `tool_response`), file
+contents and edit strings (`content`, `old_string`, `new_string`), the rest of
+a command after its first line, prompts (`UserPromptSubmit` logs only its
+kind), notification text, assistant messages, transcript paths, URLs and
+search patterns (their steps are "Browsing the web" / "Searching").
+
+Secret patterns (redacted to `[redacted]` before anything reaches disk; the
+whole command is redacted before its first line is taken and cut, so a cut
+can't leave part of a secret behind):
+
+1. Private key blocks: `-----BEGIN … PRIVATE KEY-----` to its `END` line (or
+   the end of the text).
+2. Passwords in URLs: `scheme://user:password@host` → `scheme://user:[redacted]@host`.
+3. Known token prefixes: `sk-` (OpenAI, Anthropic `sk-ant-`), `sk_live_`,
+   `sk_test_`, `rk_live_`, `whsec_` (Stripe), `ghp_` `gho_` `ghu_` `ghs_`
+   `ghr_` `github_pat_` (GitHub), `glpat-` (GitLab), `xoxb-` `xoxp-` `xoxa-`
+   `xoxr-` `xoxs-` (Slack), `AKIA` / `ASIA` (AWS key IDs), `AIza` (Google),
+   `hf_`, `npm_`, `pypi-`, `eyJ` (JWT parts), followed by 8+ token characters.
+4. Secret-named assignments: `NAME=value`, `--name=value`, and a word after
+   `--name` / `name:` (a flag or a header), where the name contains `pass`,
+   `pwd`, `secret`, `token`, `key`, `auth`, `credential` or `cookie` (any
+   case). `.env` lines (`OPENAI_API_KEY=…`) are this case; `.env` files'
+   contents are never stored at all.
+5. The word after `Bearer` / `Basic` (HTTP auth headers).
+6. Anything else that looks like a key: a run of 32+ letters, digits, `_`
+   `+` `=` with both letters and digits (AWS secret keys, hex tokens, JWT
+   signatures). Git hashes get caught too; over-redacting a local log is fine.
+
+Away summary (prototype state "Away summary"):
+
+- "Away" is OS input idle time: `GetLastInputInfo` on Windows (two
+  `windows-sys` features on the crate we already use), `CGEventSourceSeconds
+  SinceLastEventType` from CoreGraphics on macOS (system framework, no crate).
+  Checked every 2 s on the existing rules-watch thread. Idle 10+ minutes then
+  input again = "came back".
+- On return the summary is built from the day files for the idle span and the
+  island opens on it, only if anything was logged in that span. A card that
+  is waiting still comes first.
+- Head: idle ball, "While you were away", "· N min". Four stats (18 px, 600,
+  tabular): **files changed** (distinct paths of edit tools' `PostToolUse`),
+  **commands** (`PreToolUse` of Bash / PowerShell), **auto-allowed** (tool
+  calls that didn't need you: `PreToolUse` minus "asked you"), **asked you**
+  (`PermissionRequest`s not answered by a rule, questions included). Then
+  "**Stuck N min** in <folder>, waiting on <command or step>": the longest wait
+  on the user, from a request to that session's next hook event (not counting
+  `Notification`), or to now; shown at 1 min or more. Then the session rows.
+- × closes it (the existing `expand(false)`; the backend drops the summary).
+  No new command.
+- Token cost: no hook event carries usage or cost (checked every recorded
+  fixture; only the transcript has it, which we never read), so it's left out.
+- `BOUNCER_AWAY_SECS` shortens the 10 minutes in debug builds only, for the
+  manual check.
+
+Idle sessions (Phase 2 correction 7): a session with no event for **30 min**
+is dropped from the list, unless it's waiting on the user ("needs you" / "asks
+in terminal"), which stays **4 h** so the away summary can still point at it;
+a session with a card in the queue is never dropped. Any later event brings it
+back as a new row. Checked on the same 2 s tick.
+
+Phase 4 threats:
+
+| Threat | Fix |
+| --- | --- |
+| Secrets written to disk | Redacted before write (six pattern families); only first command lines and paths kept; never contents, outputs or prompts |
+| A cut secret slips past the patterns | Redact the whole text first, then take the first line and cut |
+| Another account reads or plants history | Owner-only folder and files; owner check before writing; links refused |
+| Log fills the disk | 10 MB per day file, then stops for the day with a note; 30-day retention |
+| Corrupt or half-written file breaks the summary | Bad lines skipped; reads never fail the app |
+| Hostile text in the summary | Backend `visible()` + `textContent` only, as every other agent string |
+| History leaves the machine | No network code; no new dependency; the relay never reads it |
+| Wipe leaves data behind | Plain files deleted (no database free pages or journals) |
+| Away summary hides a waiting request | Cards render first; summary only when the queue is empty |
+| Dead sessions stay forever | 30 min / 4 h expiry; queued sessions kept |
+
+Phase 4 is done when:
+
+- [ ] Day files written owner-only, refused if others can write; one event per
+      line; bad lines skipped; 10 MB cap with a note in the island
+- [ ] Redaction of all six families, before write (fake-secret fixture; no
+      fake secret in any log file the tests write)
+- [ ] 30-day retention and "Wipe history" (tray)
+- [ ] Away summary matching the prototype's "Away summary" state, from the
+      log, after 10+ idle minutes
+- [ ] Summary of a 30-minute session fixture gives the expected numbers
+- [ ] Idle sessions drop off (30 min; 4 h when waiting on the user)
+- [ ] Manual: away summary in the real island after an idle span, next to the
+      prototype; wipe; log file contents read by hand for secrets
+- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+
+Plan corrections found in this audit:
+
+1. Storage is JSON Lines, not SQLite (Charan).
+2. Token cost isn't in any hook payload; not shown.
+3. "Auto-allowed" in the summary counts every tool call that didn't need the
+   user (Claude Code's own rules or Bouncer's), as the prototype's numbers
+   imply (26 auto-allowed of 31 commands, 3 asked).
+4. Day files are per UTC day (std has no time zones); retention counts UTC days.
 
 > **Scope change (Charan, 2026-10-02):** after the security core (Phases 2–4),
 > Phases 5–8 add the character, chat, file drop and music; packaging moves to
