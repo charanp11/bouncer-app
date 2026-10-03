@@ -19,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::activity::{self, Entry, Log};
+use crate::away::{self, Summary};
 use crate::check::{self, Context, sentence};
 use crate::code::code_view;
 use crate::event::Event;
@@ -111,6 +112,8 @@ struct State {
     count: u64,
     /// The activity log; `None` without a rules folder (tests, no config dir).
     log: Option<Log>,
+    /// "While you were away", until the island closes it.
+    away: Option<Summary>,
 }
 
 impl State {
@@ -402,6 +405,7 @@ impl Desk {
                 flash: None,
                 count: 0,
                 log,
+                away: None,
             }),
             wait,
             changed: Box::new(changed),
@@ -554,6 +558,54 @@ impl Desk {
         }
     }
 
+    /// The user came back after an idle span that began at `since` (ms since
+    /// 1970): sums up the log for it. True if anything happened, so the
+    /// island should open on the summary.
+    pub fn came_back(&self, since: u64) -> bool {
+        let Some(dir) = self.lock().log.as_ref().map(|l| l.dir().to_owned()) else {
+            return false;
+        };
+        // Read outside the lock: relay threads keep going meanwhile.
+        let now = activity::ms(SystemTime::now());
+        let summary = away::summarize(&activity::read(&dir, since, now), since, now);
+        let found = summary.is_some();
+        if found {
+            self.lock().away = summary;
+        }
+        found
+    }
+
+    /// The island closed: the away summary has been seen.
+    pub fn clear_away(&self) {
+        self.lock().away = None;
+    }
+
+    /// "Wipe history": deletes every day file and the summary.
+    pub fn wipe_history(&self) -> std::io::Result<()> {
+        let result = {
+            let mut state = self.lock();
+            state.away = None;
+            let result = state.log.as_mut().map_or(Ok(()), Log::wipe);
+            match &result {
+                Ok(()) => state.flash(
+                    "History wiped",
+                    " · the activity log is empty".into(),
+                    "log",
+                    false,
+                ),
+                Err(_) => state.flash(
+                    "History not wiped",
+                    " · a file couldn't be deleted".into(),
+                    "log",
+                    true,
+                ),
+            }
+            result
+        };
+        self.publish();
+        result
+    }
+
     /// Checks the rules file for changes; the island hears about any.
     pub fn reload_rules(&self) {
         if self.lock().reload(false) {
@@ -645,6 +697,18 @@ impl Desk {
             },
             "flash": flash,
             "history": { "note": state.log.as_ref().and_then(Log::note) },
+            "away": state.away.as_ref().map(|a| json!({
+                "minutes": a.minutes,
+                "files": a.files,
+                "commands": a.commands,
+                "auto": a.auto,
+                "asked": a.asked,
+                "stuck": a.stuck.as_ref().map(|s| json!({
+                    "minutes": s.minutes,
+                    "project": visible(&s.project),
+                    "what": visible(&s.what),
+                })),
+            })),
         })
     }
 }
@@ -1267,6 +1331,35 @@ mod tests {
             ]
         );
         assert_eq!(desk.view()["history"]["note"], json!(null));
+    }
+
+    #[test]
+    fn coming_back_shows_a_summary_until_closed_and_wipe_empties_it() {
+        let (desk, _) = desk_with_rules("away", AUTO);
+        let since = activity::ms(SystemTime::now()) - 1;
+        assert!(!desk.came_back(since), "nothing happened");
+        desk.handle(event("a", "PreToolUse", "ls"));
+        desk.handle(event("a", "PermissionRequest", "ls"));
+        desk.handle(event("a", "PostToolUse", "ls"));
+        assert!(desk.came_back(since));
+        let away = desk.view()["away"].clone();
+        assert_eq!(
+            (&away["commands"], &away["auto"], &away["asked"]),
+            (&json!(1), &json!(1), &json!(0))
+        );
+        desk.clear_away();
+        assert_eq!(desk.view()["away"], json!(null));
+        assert!(desk.came_back(since));
+        desk.wipe_history().unwrap();
+        let view = desk.view();
+        assert_eq!(view["away"], json!(null));
+        assert_eq!(view["flash"]["strong"], "History wiped");
+        assert!(!desk.came_back(since), "nothing left to sum up");
+        // No rules folder, no log: nothing to show, wiping is a no-op.
+        let plain = Desk::new(WAIT, None, |_| {});
+        plain.handle(event("a", "PreToolUse", "ls"));
+        assert!(!plain.came_back(0));
+        plain.wipe_history().unwrap();
     }
 
     #[test]

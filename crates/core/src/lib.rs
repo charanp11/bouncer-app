@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod approvals;
+pub mod away;
 pub mod check;
 pub mod code;
 pub mod diff;
