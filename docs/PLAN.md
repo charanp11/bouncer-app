@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 3 — Rules engine**
+**Current phase: Phase 4 — Activity log and away summary**
 
 ## MVP scope
 
@@ -712,9 +712,10 @@ Phase 3 is done when:
 - [x] Request IDs from `getrandom`
 - [x] 150+ case table incl. every evasion example; fuzz: no panic, no auto-allow
       of metacharacters
-- [ ] Manual: a playground session in auto mode auto-allows `git status`-style
-      requests and flags a risky one
-- [ ] fmt, clippy, tests green locally and in CI (Windows + macOS)
+- [x] Manual: a playground session in auto mode auto-allows `git status`-style
+      requests and flags a risky one (`cargo check` auto-allowed; `curl | sh`
+      flagged and denied)
+- [x] fmt, clippy, tests green locally and in CI (Windows + macOS)
 
 Plan corrections found in this audit:
 
@@ -781,9 +782,11 @@ Manual checks:
   harness of the island page (preview, 600 ms arm, toast). Found: Claude
   Code's `AskUserQuestion` sends a `PermissionRequest`, so Bouncer showed
   Allow/Deny for a question (correction 13).
-- Not seen in a real session yet: a request auto-allowed by a rule (the
-  auto-allow path ran end to end with the debug relay; the playground's
-  commands were PowerShell before correction 10).
+- 2026-10-03, same setup (session `899e0aa5`, auto mode): a real PowerShell
+  `cargo check` was auto-allowed by the default rule (request 02:03:32.9,
+  command finished 02:03:34.8, no "waiting for you" notification). The next
+  request, `cargo check --manifest-path "<sibling folder>"` (quotes, outside
+  the project), got a card as it should.
 
 Plan corrections after the playground check:
 
@@ -1181,11 +1184,10 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   tests; fuzzing: 5,000 generated Bash commands, 5,000 random strings and
   5,000 generated PowerShell commands.
 - Checked by hand (Charan, Claude Code 2.1.288, Windows playground): a real
-  `curl | sh` flagged Risky and denied; the rules-file error badge and line
+  `cargo check` auto-allowed; a real `curl | sh` flagged Risky and denied; the rules-file error badge and line
   number; "Always allow" end to end. Found and fixed through those runs:
   PowerShell commands, the over-broad "Bouncer's own rules" flag, questions
   shown as Allow/Deny cards.
-- Not done by hand: a request auto-allowed by a rule in a real Claude Code
-  session (done with the debug relay only); macOS (CI only).
+- Not done by hand: macOS (CI only).
 - Plan additions (Charan): an observe/auto switch in the island (Phase 5) and
   a model picker for chat (Phase 6).
