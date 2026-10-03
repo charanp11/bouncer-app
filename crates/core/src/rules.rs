@@ -176,9 +176,20 @@ pub struct Loaded {
     pub error: Option<String>,
 }
 
+/// Overrides the rules file in debug and test builds only (dev runs keep it
+/// out of the real config folder); release builds ignore it.
+pub const RULES_ENV: &str = "BOUNCER_RULES";
+
 /// Where the rules file lives: `%APPDATA%\Bouncer` on Windows,
 /// `~/Library/Application Support/Bouncer` on macOS (next to the socket).
 pub fn path() -> Option<PathBuf> {
+    path_with(std::env::var_os(RULES_ENV))
+}
+
+fn path_with(over: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    if let Some(path) = over.filter(|v| cfg!(debug_assertions) && !v.is_empty()) {
+        return Some(path.into());
+    }
     #[cfg(windows)]
     let dir = PathBuf::from(std::env::var_os("APPDATA").filter(|v| !v.is_empty())?);
     #[cfg(target_os = "macos")]
@@ -625,6 +636,13 @@ mod tests {
 
     fn err(text: &str) -> String {
         parse(text).unwrap_err()
+    }
+
+    #[test]
+    fn override_is_honored_only_in_debug_builds() {
+        let over = path_with(Some("x-rules.toml".into()));
+        assert_eq!(over == Some("x-rules.toml".into()), cfg!(debug_assertions));
+        assert!(path_with(Some("".into())).is_some_and(|p| p.ends_with("Bouncer/rules.toml")));
     }
 
     #[test]
