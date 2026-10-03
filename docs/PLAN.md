@@ -562,6 +562,12 @@ Manual checks:
   Write cards now show path, blank line, content as the prototype.
 - Dev only: two quick hot reloads can leave the old page's `subscribe` last, so
   updates go to a dead page until the next reload. Not reachable outside dev.
+- Review of #5 (Charan): the WebView2 debug port used for the captures was set
+  inline for one dev run only (not in the user or machine environment; checked
+  in the registry). Release builds now clear `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+  at startup. Session detail groups repeated steps ("Searching ×3"), shows the
+  latest 6 with "+N earlier", and marks Edit diffs "Excerpt" (checked in the
+  real window).
 
 ## Phase 3 — Rules engine (~1.5 weeks)
 
