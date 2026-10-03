@@ -328,7 +328,7 @@ fn create_if_missing(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     fs::DirBuilder::new()
         .recursive(true)
@@ -337,7 +337,7 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
     // The folder inherits the user-only access list of %APPDATA%.
     fs::create_dir_all(dir)
 }
@@ -549,7 +549,7 @@ fn quoted(text: &str) -> String {
 
 /// Who can write the rules file. Only the user (plus SYSTEM and
 /// Administrators on Windows) may; a symlink is refused.
-mod trust {
+pub(crate) mod trust {
     use super::*;
 
     pub fn check(path: &Path) -> Result<(), String> {
@@ -734,7 +734,7 @@ mod trust {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A fresh private folder under the system temp folder.

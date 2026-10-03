@@ -603,7 +603,7 @@ fn request_id() -> Option<String> {
 
 /// A short, human description of a tool call for the session list (the
 /// approval card always shows the full input).
-fn step(event: &Event) -> String {
+pub(crate) fn step(event: &Event) -> String {
     let input = event.input.as_ref();
     let text = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
     let file = |key: &str| {

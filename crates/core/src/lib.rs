@@ -1,5 +1,6 @@
 //! Bouncer core: events, rules and activity log.
 
+pub mod activity;
 pub mod approvals;
 pub mod check;
 pub mod code;
