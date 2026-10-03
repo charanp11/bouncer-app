@@ -1059,7 +1059,8 @@ session `7931c6f2`, debug app with `BOUNCER_RULES` in the playground and
   (inside the island only, or a backend cursor feed, and what that costs at
   idle); carry over the old Phase 5 items: settings screen, reduced motion,
   accessibility, keyboard access to the island (Phase 2 made it non-focusable).
-- **Implement:** bouncing ball on a 2D canvas, no image files: real physics bounce
+- **Implement:** bouncing ball in SVG driven from JS (Charan, 2026-10-03; was a
+  2D canvas), no image files: real physics bounce
   (gravity, squash and stretch); eyes that follow the cursor; blinking; squish on
   click; dizzy after repeated clicks; a pose per state (blocks the door when risky,
   hops when done); a launch greeting; Web Audio generated sounds; settings screen
@@ -1081,7 +1082,7 @@ session `7931c6f2`, debug app with `BOUNCER_RULES` in the playground and
 | Threat | Fix |
 | --- | --- |
 | Animation hides or delays an approval | Card renders above the character; arm delay counts from the card, not the animation |
-| Clicks on the character land on Allow | Character and approval buttons never overlap; squish/dizzy clicks go to the canvas only |
+| Clicks on the character land on Allow | Character and approval buttons never overlap; squish/dizzy clicks stop at the character |
 | Idle CPU / battery drain | Animation loop stops when idle or hidden; cursor feed throttled or window-local |
 | Motion sickness | OS reduced motion honoured; setting to turn motion off |
 
@@ -1121,45 +1122,32 @@ What exists today:
   check `matchMedia("(prefers-reduced-motion: reduce)")` itself and follow
   its `change` event.
 
-Plan corrections (to confirm):
+Decisions (Charan, 2026-10-03):
 
 1. **SVG, not a 2D canvas.** The prototype is SVG; keeping it gives the same
    shapes and colors exactly, stays crisp at 26 and 72 px, and needs no
    image. JS drives only `transform` on the SVG's own groups.
-2. **Bouncer wears shades: no visible eyes.** "Eyes follow the cursor" and
-   "blink" need a reading that keeps the prototype look. Proposed: the face
-   (shades, glint, mouth) shifts up to 1.5 units (of 32) toward the cursor,
-   the glint a little further; a blink is the shades dipping
-   (`scaleY` 1 → 0.2 → 1 over 140 ms) every 3–7 s.
-3. **Idle breathing vs idle CPU.** The prototype breathes forever (3.2 s
-   loop); the plan wants no frames while nothing moves. In Chromium /
-   WebView2 a CSS transform on an SVG child is not compositor-only: every
-   frame restyles and repaints on the main thread. Proposed: idle breathes
-   for 3 cycles (~10 s) after anything changes, then holds still; blinks
-   come from one timer and draw ~9 frames each. Working / needs / risky /
-   done animate continuously (something is happening then).
-4. **Done and dance.** Done: a session going working → idle (its `Stop`)
+2. **The shades are the eyes.** A bouncer at a door wears shades, so there
+   are no pupils. Looking: the face (shades, glint, mouth) shifts up to 1.5
+   units (of 32) toward the cursor, the glint a little further. Blinking:
+   the shades dip (`scaleY` 1 → 0.2 → 1, 140 ms).
+3. **Breathe, then settle.** Idle breathes for about 10 s after any
+   activity, then holds still (in WebView2 a CSS transform on an SVG child
+   restyles and repaints on the main thread every frame). While idle it
+   blinks every 8–12 s from one timer, not a loop. Working / needs / risky /
+   done animate while they last. Reduced motion: no breathing, no blink.
+4. **Cursor from the page's own mouse events only**, while the cursor is
+   over the island. No backend feed, no OS polling, no new command. When
+   the cursor leaves, the face eases back to centre. Idle cost: 0.
+   (Weighed and not taken: tauri's own `AppHandle::cursor_position()`, no
+   new dependency, 15 polls/s as main-loop messages while a ball shows, so
+   he could look anywhere on screen.)
+5. **Done and dance.** Done: a session going working → idle (its `Stop`)
    cheers twice (2.4 s), then idle. Dance is drawn now (sheet parity) but
    nothing triggers it until Phase 8.
-5. **Keyboard access and screen reader order move to 5b**: making the
+6. **Keyboard access and screen reader order move to 5b**: making the
    island focusable touches "Allow is never the default focus, Enter never
    approves"; it goes in with the settings screen that needs it.
-
-How eye tracking gets the cursor:
-
-| | Window-only (`mousemove`) | Backend feed (proposed) |
-| --- | --- | --- |
-| Source | the page's own events | tauri's `AppHandle::cursor_position()` (in tauri 2.12.1; `GetCursorPos` on Windows, `NSEvent.mouseLocation` on macOS, no Accessibility permission) |
-| Feel | looks only while the cursor is over the 288 × 36 pill | looks toward the cursor anywhere on screen |
-| New dependency | none | none |
-| Cost, hidden strip / paused / reduced motion | 0 | 0: the poll thread waits on a channel |
-| Cost, idle pill, cursor still | 0 | 15 polls/s; each is a message to the main event loop (microseconds). Nothing sent to the page, no frames |
-| Cost, cursor moving | rAF ease per move | ≤ 15 messages/s (sent only when it moved ≥ 2 px), a short rAF ease, then stop |
-
-The feed is started by a new `look` command when a ball is on screen and
-stopped when none is (or motion is reduced); it holds none of the island's
-locks while polling (see the deadlock note in `show`); positions are made
-window-relative in logical px and never logged.
 
 Motion design:
 
@@ -1191,9 +1179,8 @@ Threats (5a):
 | Arm delay shortened or reset by animation | Arm counts from the card's arrival (`front.since`), unchanged; a test pins it |
 | Character steals focus from a card | The window stays non-focusable; the ball has no `tabindex`, isn't a button; nothing calls `focus()` |
 | Click on the character lands on Allow | Ball and buttons never overlap; ball clicks stop at the SVG |
-| Idle CPU / battery | Loop only while moving; breathe settles; feed only while a ball is shown and motion allowed; measured |
-| Cursor feed blocks the main thread or deadlocks | Own thread, no island locks held, stops when not needed |
-| Motion sickness | OS reduced motion: no bounce, tracking, blink or greeting drop; the feed is off |
+| Idle CPU / battery | Loop only while moving; breathe settles after ~10 s; blinks from one timer; measured |
+| Motion sickness | OS reduced motion: no bounce, breathing, tracking, blink or greeting drop |
 | Secret fragment kept in the log (`redact.rs`) | `json_values` ends a quoted value at the first `"` that isn't escaped (`\"`); fake-secret test built at run time |
 
 `redact.rs` fix: `json_values` finds the closing quote with `find('"')`,
@@ -1205,7 +1192,7 @@ Phase 5a is done when:
 - [ ] All seven moods match "Meet Bouncer" (side-by-side screenshots at 84 px)
 - [ ] Physics bounce stable at any frame rate (tests); squash / stretch to spec
 - [ ] Eyes look toward the cursor, blink, squish, dizzy, greeting, done cheer
-- [ ] Reduced motion: no bounce, tracking, blink or drop; cursor feed off
+- [ ] Reduced motion: no bounce, breathing, tracking, blink or drop
 - [ ] Idle CPU ~0% measured over 60 s (hidden strip, idle pill)
 - [ ] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [ ] `json_values` skips escaped quotes, with a run-time fake-secret test
