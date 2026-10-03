@@ -278,6 +278,8 @@ const BASH: &[(&str, Want)] = &[
     ("rm ../other/file", Risk(DELETES_OUTSIDE)),
     ("rm -rf ../*", Risk(DELETES_OUTSIDE)),
     ("rmdir ../x", Risk(DELETES_OUTSIDE)),
+    ("rm -rf ../rm", Risk(DELETES_OUTSIDE)),
+    ("/bin/rm src/x", Ask),
     ("sudo rm -rf /tmp/x", Risk(DELETES_OUTSIDE)),
     ("git push --force", Risk(FORCE_PUSH)),
     ("git push -f origin main", Risk(FORCE_PUSH)),
