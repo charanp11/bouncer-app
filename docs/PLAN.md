@@ -1408,7 +1408,25 @@ Manual checks (Charan, 2026-10-04, Claude Code 2.1.289, Windows):
   auto-allow" does nothing; only Space or a click turns auto on. Found on
   the way: focus fell to nothing when a confirm closed; it now returns to
   the switch (or "Wipe…").
-- Not yet: sounds by ear, Narrator, Space / Enter on a real card's Allow.
+- [x] Second round (Charan, 2026-10-04): the soft "needs you" notes on a
+  card; tray "Open Bouncer"; Tab order Deny → Allow once → Always allow;
+  Enter does nothing on Allow, Space allows; the "done" bell; the risky
+  card; mute; Narrator reads the island when you go to it.
+- Found: opening from the tray with a card up didn't put focus (or the
+  ring) on Deny; now it does, and the ring shows whenever the island has
+  focus (it only has focus when opened on purpose).
+- Narrator doesn't announce a new card by itself: the island never takes
+  focus, and Narrator speaks live regions of the focused window. Decision
+  (Charan): accept for now; the sounds alert; revisit in Phase 9.
+- "Still asking in the terminal" after answering No there: Claude Code
+  sends nothing after a No in its own prompt (no Stop either), so Bouncer
+  can't know; "Waiting in terminal" after 2 quiet minutes, cleared by the
+  session's next event (Phase 4 limit). A Yes after a timeout sends
+  PostToolUse and clears it (no live recording yet; unit test). Found and
+  fixed: a Yes in Claude Code's prompt while the card was still up left the
+  card for ~100 s and then marked the session "asks in terminal"; now the
+  tool's PostToolUse (same tool and input), Stop, a new prompt or the
+  session's end clears that card ("answered in terminal").
 
 Phase 5b is done when:
 
@@ -1445,6 +1463,30 @@ Charan, 2026-10-04. Its own PR, all four stages, after 5b is merged.
 - **Reduced motion** turns all of it off.
 - Audit to settle: what "fully visible" means in the window-resize timing;
   where `+N −M` sits in the pill; MultiEdit; the activity-log field change.
+
+## Phase 5d — Sound pack (after 5c)
+
+Charan, 2026-10-04. Its own PR, all four stages, after 5c is merged. 5b
+ships the first three sounds (needs you, risky, done) as they are.
+
+- **All sounds generated in code (Web Audio), no files**, nothing copied
+  from Coucou or anywhere else.
+- **A unique sound for each:** launch greeting; new session started; needs
+  you (card or question); risky request; you allowed; you denied; "Always
+  allow" rule added; auto-allowed (very subtle, off by default); session
+  done; a tool failed / error; welcome back (away summary); poke (click on
+  Bouncer); dizzy; paused; resumed; auto-allow turned on; history wiped.
+- **Settings:** volume, a "Sound style" choice (Soft / Playful / Retro) and
+  per-sound on / off.
+- **Rules:** never more than one sound at a time; a repeat within 2 s is
+  dropped; frequent events stay quiet by default; nothing while paused;
+  idle CPU ~0% (the audio context suspended between sounds).
+- **Design first:** a listen-and-pick page in the prototype with every sound
+  in every style, so Charan hears them all before they're built.
+- Audit to settle: which events are "frequent" (auto-allowed, session
+  started?), what "a tool failed" is in the hook data, the greeting sound
+  vs the no-sound-at-launch rule (5b: the first view is quiet), and how
+  volume and per-sound choices are stored (`preferences.json`).
 
 ## Phase 6 — Chat in the island (~1.5 weeks)
 
@@ -1882,6 +1924,6 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Contrast fixed to ≥ 4.5:1 (faint text, line numbers, risky badge).
 - Fixed on the way: a queued card could arm behind the Allowed / Denied
   message.
-- Tests: 130 Rust + 36 frontend, green locally.
+- Tests: 133 Rust + 36 frontend, green locally.
 - Needs Charan by hand: tray items and real OS focus, Narrator reading
   order, the sounds by ear, Settings on his screen.
