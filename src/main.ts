@@ -910,6 +910,9 @@ function render(view: View) {
 
   if (toast && now >= toast.until) toast = null;
   if (toast) {
+    // The next card is hidden behind this message: it arms (and takes the
+    // keyboard's focus) only once it's actually shown.
+    front = { id: "", since: 0 };
     renderApproval(view, toast.request, toast.ok);
     later(toast.until - now);
     return;
