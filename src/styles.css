@@ -935,8 +935,9 @@ pre.cmd {
   grid-column: 1 / -1;
 }
 
-/* keyboard (opened on purpose): a visible ring on whatever has focus */
-.island :focus-visible {
+/* keyboard: the island only ever has focus when opened on purpose (tray,
+   cog), so whatever has focus shows the ring, also when code put it there */
+.island :focus {
   outline: 2px solid var(--sun);
   outline-offset: 2px;
 }
