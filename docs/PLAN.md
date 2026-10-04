@@ -1248,7 +1248,10 @@ playground session in `default` permission mode):
   the cheer when a session finishes (not reported). `git status` ran
   without a request (Claude Code allows it on its own) and `hello.txt`
   already existed, so the first prompt raised no card.
-- Feedback: the pill and the whole island feel small. Changed (decision 7: one 125% island scale); to re-check by hand.
+- Feedback: the pill and the whole island feel small. Changed (decision 7: one 125% island scale).
+- [x] Re-check (Charan, 2026-10-04): the session list at 125% and the
+  word-free greeting (Bouncer alone, centred in the pill) look good. Not
+  re-checked at 125%: an approval card, the session detail.
 - [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [x] `json_values` skips escaped quotes, with a run-time fake-secret test
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
