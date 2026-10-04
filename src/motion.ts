@@ -18,11 +18,12 @@ const C = 30;
 const IMPACT = 0.28;
 /** Stretch at take-off speed. */
 const STRETCH = 0.12;
-/** Greeting: dropped from above the pill, bouncing back with half its speed. */
+/** Greeting: dropped from above the pill, bouncing back with half its speed,
+ * three times (Charan: two or three bounces, settled well under 2.5 s). */
 const DROP = 24;
 const BOUNCE = 0.5;
 /** Landings slower than this stop bouncing. */
-const SETTLE_SPEED = 8;
+const SETTLE_SPEED = 12;
 const BREATHE = 3.2;
 /** Idle breathes three times after something happens, then holds still. */
 const BREATHS = 3;

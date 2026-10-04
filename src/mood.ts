@@ -20,7 +20,8 @@ export function finished(before: Map<string, string>, sessions: Status[]): boole
 }
 
 /** The launch greeting shows only on a quiet island: never over a card, the
- * paused pill or an open island. */
-export function greeting(view: Seen, now: number, until: number): boolean {
-  return now < until && !view.queue.length && !view.paused && !view.open;
+ * paused pill or an open island, and not at all with reduced motion (it is
+ * only motion: Bouncer dropping in, no words). */
+export function greeting(view: Seen, now: number, until: number, reduced: boolean): boolean {
+  return now < until && !reduced && !view.queue.length && !view.paused && !view.open;
 }
