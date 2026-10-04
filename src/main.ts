@@ -693,6 +693,9 @@ let aboutAsked = false;
 /** The "Wipe…" confirm is open, and since when (its button arms like Allow). */
 let wiping = false;
 let wipeSince = 0;
+/** The "Turn on auto-allow?" confirm is open, and since when (it arms too). */
+let confirmingAuto = false;
+let autoSince = 0;
 
 function setRow(name: string, controls: (HTMLElement | string)[], hint?: string): HTMLElement {
   const row = el("div", "setrow");
@@ -720,7 +723,74 @@ function savePrefs(prefs: Prefs) {
 function closeSettings() {
   aboutAsked = false;
   wiping = false;
+  confirmingAuto = false;
   invoke("settings", { open: false });
+}
+
+/** Observe / auto. Turning auto on asks first (focus on Cancel, Esc cancels,
+ * Enter never turns it on, the button arms after ARM_MS); off doesn't ask. */
+function autoRow(view: View): HTMLElement {
+  const auto = view.rules.mode === "auto";
+  const broken = view.rules.error !== null;
+  const rerender = () => current && render(current);
+  const sw = toggle("Auto-allow", auto, () => {
+    if (auto) {
+      invoke("set_mode", { mode: "observe" }).catch(() => {});
+    } else {
+      confirmingAuto = true;
+      autoSince = performance.now();
+      rerender();
+    }
+  });
+  sw.disabled = broken;
+  const row = setRow(
+    "Auto-allow",
+    [auto ? "On · auto" : "Off · observe", sw],
+    broken ? "Fix the rules file first." : auto ? "Rules answer for you; risky still asks." : "Observe: cards say what rules would do.",
+  );
+  if (confirmingAuto && !auto && !broken) {
+    const box = el("div", "confirm");
+    const text = el("div");
+    text.append(
+      el("b", "", "Turn on auto-allow? "),
+      "Requests your rules allow are approved without asking. Risky requests always ask. You can turn it off here any time.",
+    );
+    const cancel = el("button", "btn deny small", "Cancel");
+    const on = armed("Turn on auto-allow", autoSince);
+    on.classList.add("small");
+    const close = () => {
+      confirmingAuto = false;
+      rerender();
+    };
+    cancel.addEventListener("click", close);
+    on.addEventListener("click", () => {
+      on.disabled = true;
+      invoke("set_mode", { mode: "auto" })
+        .catch(() => {})
+        .finally(close);
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target === on) e.preventDefault();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      }
+    });
+    const actions = el("div", "actions");
+    actions.append(cancel, on);
+    box.append(text, actions);
+    row.append(box);
+    // Fully in view, focus on Cancel (never on "Turn on").
+    requestAnimationFrame(() => {
+      box.scrollIntoView({ block: "nearest" });
+      if (document.activeElement === document.body || !box.contains(document.activeElement)) {
+        cancel.focus({ preventScroll: true });
+      }
+    });
+  }
+  if (auto) confirmingAuto = false;
+  return row;
 }
 
 /** The prototype's "Settings": Size, Sound, history, rules file, hooks. */
@@ -757,6 +827,8 @@ function renderSettings(view: View, state: BallState) {
       "Needs you, risky, done. Not while paused.",
     ),
   );
+
+  list.append(autoRow(view));
 
   const wipe = el("button", "btn deny small", "Wipe…");
   wipe.addEventListener("click", () => {
@@ -850,6 +922,7 @@ function render(view: View) {
   }
   aboutAsked = false;
   wiping = false;
+  confirmingAuto = false;
 
   if (greeting(view, now, greetUntil, REDUCED.matches)) {
     // Just Bouncer dropping in: no words (Charan).
