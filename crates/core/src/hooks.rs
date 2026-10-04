@@ -6,6 +6,9 @@
 //! order is kept (`serde_json` `preserve_order`), so install followed by
 //! uninstall gives back the same JSON.
 
+use std::ffi::OsString;
+use std::path::PathBuf;
+
 use serde_json::{Value, json};
 
 /// Events Bouncer listens to, with the hook timeout in seconds. The permission
@@ -27,6 +30,45 @@ fn is_ours(hook: &Value) -> bool {
     };
     let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
     name.eq_ignore_ascii_case("bouncer-hook") || name.eq_ignore_ascii_case("bouncer-hook.exe")
+}
+
+/// `$CLAUDE_CONFIG_DIR/settings.json` (as Claude Code reads it), else
+/// `~/.claude/settings.json`. Empty values count as unset, so an empty variable
+/// never means "the current folder".
+pub fn settings_path(
+    config_dir: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = config_dir.filter(|d| !d.is_empty()) {
+        return Ok(PathBuf::from(dir).join("settings.json"));
+    }
+    let home = home
+        .filter(|h| !h.is_empty())
+        .ok_or("can't find your home folder; pass --settings")?;
+    Ok(PathBuf::from(home).join(".claude").join("settings.json"))
+}
+
+/// The user's Claude Code settings file, from this process's environment.
+pub fn user_settings() -> Result<PathBuf, String> {
+    settings_path(
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }),
+    )
+}
+
+/// Whether any of our hook commands is in `settings`.
+pub fn installed(settings: &Value) -> bool {
+    settings["hooks"].as_object().is_some_and(|events| {
+        events
+            .values()
+            .filter_map(Value::as_array)
+            .flatten()
+            .any(|group| {
+                group["hooks"]
+                    .as_array()
+                    .is_some_and(|list| list.iter().any(is_ours))
+            })
+    })
 }
 
 /// Adds our hooks (replacing any old ones) pointing at the `relay` executable.
@@ -125,6 +167,18 @@ mod tests {
             },
             "env": { "A": "1" }
         })
+    }
+
+    #[test]
+    fn installed_sees_only_our_hooks() {
+        let mut s = user_settings();
+        assert!(!installed(&s));
+        install(&mut s, RELAY).unwrap();
+        assert!(installed(&s));
+        uninstall(&mut s);
+        assert!(!installed(&s));
+        assert!(!installed(&json!([])));
+        assert!(!installed(&json!({ "hooks": { "Stop": "x" } })));
     }
 
     #[test]
