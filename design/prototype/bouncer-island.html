@@ -46,7 +46,7 @@
   --t-close: 200ms;
   --arm: 600ms;
   /* the whole island is drawn at this scale (spec: sizes are at 100%) */
-  --scale: 1.25;
+  --scale: 1.12;
 }
 * { box-sizing: border-box; }
 body { background: var(--page); color: var(--text); font-family: var(--ui); font-size: 14px; line-height: 1.5; }
@@ -169,12 +169,12 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 
 /* settings (Phase 5b) */
 .setlist { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-card); display: grid; }
-.setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 10px 12px; }
+.setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1px 12px; padding: 8px 12px; }
 .setrow + .setrow { border-top: 1px solid var(--line); }
 .setrow .name { font-weight: 500; }
-.setrow .hint { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.setrow .hint { grid-column: 1 / -1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .setrow .ctl { grid-row: 1; grid-column: 2; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
-.setrow pre.cmd { grid-column: 1 / -1; margin-top: 6px; user-select: all; }
+.setrow pre.cmd { grid-column: 1 / -1; margin-top: 4px; padding: 6px 8px; font-size: 11px; user-select: all; }
 .seg { display: inline-flex; background: var(--island); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
 .seg button { border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--ui); height: 26px; padding: 0 10px; border-radius: 7px; cursor: pointer; }
 .seg button[aria-checked="true"] { background: var(--text); color: var(--island); }
@@ -348,7 +348,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.8 · Oct 4 2026</div>
+    <div class="meta">design/prototype · v0.9 · Oct 4 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -396,7 +396,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <section>
       <h3>Sizes</h3>
       <table>
-        <tr><td>Island scale</td><td>125%</td></tr>
+        <tr><td>Island scale</td><td>112%</td></tr>
         <tr><td>Wake strip (hidden)</td><td>180 × 5</td></tr>
         <tr><td>Pill</td><td>288 × 36</td></tr>
         <tr><td>Open width</td><td>400</td></tr>
@@ -737,10 +737,10 @@ function settings(confirming) {
   const list = el("div", "setlist");
   const seg = el("div", "seg"); seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "Size");
   ["Small", "Medium", "Large"].forEach((n) => { const x = el("button", "", n); x.setAttribute("role", "radio"); x.setAttribute("aria-checked", String(n === "Medium")); seg.append(x); });
-  list.append(setRow("Size", [seg], "Small 100% · Medium 125% · Large 150%. Applies at once."));
-  list.append(setRow("Sound", [el("span", "", "On"), toggle("Sound", true)], "Needs you, risky and done. Never while paused."));
+  list.append(setRow("Size", [seg], "100 · 112 · 125%. Applies at once."));
+  list.append(setRow("Sound", [el("span", "", "On"), toggle("Sound", true)], "Needs you, risky, done. Not while paused."));
   const auto = setRow("Auto-allow", [el("span", "", "Off · observe"), toggle("Auto-allow", false, () => show("settingsauto"))],
-    "Observe: rules never answer for you; cards say what they would do.");
+    "Observe: cards say what rules would do.");
   if (confirming) {
     const c = el("div", "confirm");
     const t = el("div"); t.append(el("b", "", "Turn on auto-allow? "), document.createTextNode("Requests your rules allow are approved without asking. Risky requests always ask. You can turn it off here any time."));
@@ -759,11 +759,11 @@ function settings(confirming) {
   }
   list.append(auto);
   const wipe = el("button", "btn deny small", "Wipe…"); wipe.style.padding = "0 12px";
-  list.append(setRow("Activity history", [wipe], "Kept on this computer for 30 days, secrets redacted. Wipe asks first."));
+  list.append(setRow("Activity history", [wipe], "30 days, on this computer, redacted."));
   const rules = setRow("Rules file", [], null);
   rules.append(el("pre", "cmd", "C:\\Users\\chara\\AppData\\Roaming\\Bouncer\\rules.toml"));
   list.append(rules);
-  list.append(setRow("Claude Code hooks", [el("span", "status", "Installed")], "Not installed shows: run bouncer install-hooks"));
+  list.append(setRow("Claude Code hooks", [el("span", "status", "Installed")], "Remove: bouncer uninstall-hooks"));
   b.append(list);
   island.append(b);
 }
