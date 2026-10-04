@@ -223,6 +223,35 @@ impl State {
         Some(pending)
     }
 
+    /// A request answered in Claude Code's own prompt while its card is still
+    /// up: the tool ran (its PostToolUse, same tool and input), or the turn
+    /// moved on (Stop, a new prompt, the session ended). The card is stale: it
+    /// leaves, unanswered (Claude Code already has its answer). Matching the
+    /// exact tool and input keeps a card up while a subagent runs another tool.
+    fn drop_stale(&mut self, event: &Event) {
+        let stale: Vec<String> = self
+            .queue
+            .iter()
+            .filter(|p| {
+                p.event.session == event.session
+                    && match event.kind.as_str() {
+                        "PostToolUse" => p.event.tool == event.tool && p.event.input == event.input,
+                        "Stop" | "UserPromptSubmit" | "SessionEnd" => true,
+                        _ => false,
+                    }
+            })
+            .map(|p| p.id.clone())
+            .collect();
+        let status = self
+            .sessions
+            .iter()
+            .find(|s| s.id == event.session)
+            .map_or("idle", |s| s.status);
+        for id in stale {
+            self.take(&id, status, "answered in terminal");
+        }
+    }
+
     /// A question Claude Code asks in the terminal: the session needs the user.
     fn waiting_in_terminal(&mut self, event: &Event) {
         self.answered(event, "asked in terminal");
@@ -429,6 +458,7 @@ impl Desk {
         let id = {
             let mut state = self.lock();
             state.track(&event);
+            state.drop_stale(&event);
             if let Some(log) = state.log.as_mut() {
                 log.write(&Entry::of(&event));
             }
@@ -939,6 +969,50 @@ mod tests {
             ]
         );
         assert_eq!(view["queue"], json!([]));
+    }
+
+    /// A card that timed out, then answered Yes in Claude Code's own prompt:
+    /// the tool runs and its PostToolUse clears "asks in terminal".
+    #[test]
+    fn a_yes_in_the_terminal_after_a_timeout_clears_the_wait() {
+        let desk = desk(Duration::from_millis(100));
+        assert_eq!(ask(&desk, "a", "mkdir x").join().unwrap(), None);
+        assert_eq!(desk.view()["sessions"][0]["status"], IN_TERMINAL);
+        assert_eq!(desk.handle(event("a", "PostToolUse", "mkdir x")), None);
+        assert_eq!(desk.view()["sessions"][0]["status"], "working");
+        assert_eq!(desk.handle(event("a", "Stop", "")), None);
+        assert_eq!(desk.view()["sessions"][0]["status"], "idle");
+    }
+
+    /// Answered Yes in Claude Code's own prompt while the card is still up:
+    /// the tool's PostToolUse means the card is stale. It leaves the island at
+    /// once (no answer is sent: Claude Code already has one), and the session
+    /// is working, not "asks in terminal".
+    #[test]
+    fn answering_in_the_terminal_while_the_card_is_up_clears_it() {
+        let desk = desk(Duration::from_millis(400));
+        let a = ask(&desk, "a", "mkdir x");
+        queued(&desk, 1);
+        assert_eq!(desk.handle(event("a", "PostToolUse", "mkdir x")), None);
+        assert_eq!(desk.view()["queue"], json!([]));
+        assert_eq!(a.join().unwrap(), None);
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["status"], "working");
+        assert_eq!(s["history"][0]["how"], "answered in terminal");
+    }
+
+    /// Another tool finishing in the same session (a subagent) is not an
+    /// answer: the card stays up.
+    #[test]
+    fn another_tool_finishing_leaves_the_card_up() {
+        let desk = desk(Duration::from_millis(400));
+        let a = ask(&desk, "a", "mkdir x");
+        queued(&desk, 1);
+        assert_eq!(desk.handle(event("a", "PostToolUse", "ls")), None);
+        assert_eq!(desk.handle(event("b", "Stop", "")), None);
+        assert_eq!(queued(&desk, 1).len(), 1);
+        assert_eq!(a.join().unwrap(), None);
     }
 
     /// Recorded: a request answered No in Claude Code's own prompt (2.1.288).

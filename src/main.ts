@@ -115,6 +115,7 @@ const TAG: Record<string, string> = {
   "you denied": "flag",
   "waiting for you": "you",
   "asked in terminal": "you",
+  "answered in terminal": "mine",
   "waiting in terminal": "you",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
