@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character**
+**Current phase: Phase 5 — Character (5a in review; 5b starts after 5a merges)**
 
 ## MVP scope
 
@@ -1176,7 +1176,7 @@ Threats (5a):
 | Threat | Fix |
 | --- | --- |
 | Animation covers, moves or delays a card | Card rendering never waits on the character; motion is `transform` on SVG groups only (no layout change), upward / sideways by at most 16% of the ball; a card cancels the greeting, done and dizzy at once |
-| Arm delay shortened or reset by animation | Arm counts from the card's arrival (`front.since`), unchanged; a test pins it |
+| Arm delay shortened or reset by animation | Arm counts from the card's arrival (`front.since`), unchanged; the character never calls `render()` |
 | Character steals focus from a card | The window stays non-focusable; the ball has no `tabindex`, isn't a button; nothing calls `focus()` |
 | Click on the character lands on Allow | Ball and buttons never overlap; ball clicks stop at the SVG |
 | Idle CPU / battery | Loop only while moving; breathe settles after ~10 s; blinks from one timer; measured |
@@ -1189,14 +1189,35 @@ It must skip quotes preceded by an odd number of backslashes.
 
 Phase 5a is done when:
 
-- [ ] All seven moods match "Meet Bouncer" (side-by-side screenshots at 84 px)
-- [ ] Physics bounce stable at any frame rate (tests); squash / stretch to spec
-- [ ] Eyes look toward the cursor, blink, squish, dizzy, greeting, done cheer
-- [ ] Reduced motion: no bounce, breathing, tracking, blink or drop
-- [ ] Idle CPU ~0% measured over 60 s (hidden strip, idle pill)
-- [ ] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
-- [ ] `json_values` skips escaped quotes, with a run-time fake-secret test
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push
+- [x] All seven moods match "Meet Bouncer" (side-by-side screenshots at 84 px)
+- [x] Physics bounce stable at any frame rate (tests); squash / stretch to spec
+- [x] Eyes look toward the cursor, blink, squish, dizzy, greeting, done cheer
+- [x] Reduced motion: no bounce, breathing, tracking, blink or drop
+- [x] Idle CPU ~0% measured over 60 s (hidden strip, idle pill)
+
+Verify (2026-10-03, Windows, debug app + Vite dev, fixtures fed through the
+relay on a private test pipe, scratch `BOUNCER_RULES`; page inspected over
+WebView2's debug port, debug builds only):
+
+- Idle CPU, 60 s, app + all WebView2 processes: hidden strip ~0 ms; idle
+  pill 235 ms = 0.39% of one core (was 0.65% before blinks became two
+  repaints; 0.1% with blinks off). The page requests no frames once settled
+  except the blink's two repaints.
+- Approval card: Allow disabled → enabled 604 ms after the card's first
+  paint; nothing focused (`document.activeElement` is `BODY`); the ball's
+  box never overlaps the card or its buttons (ball bottom 32 px, card top
+  37 px) for a plain and a risky card; a card sent during the greeting
+  replaces it at once.
+- Reduced motion (emulated): 0 frames in 3 s while working, still pose;
+  60 fps again when it's turned off.
+- Moods in the app: greeting, idle, working, done (cheer tilt), needs ("!"),
+  risky (red, flat mouth); all seven on `design/sheet.html` next to the
+  prototype's "Meet Bouncer": same shapes and colors.
+- Diff reread: no `innerHTML`, no `focus()`, ball text is static ("z", "!");
+  the sheet page is dev-only (not in `dist`).
+- [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
+- [x] `json_values` skips escaped quotes, with a run-time fake-secret test
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
 
 ## Phase 6 — Chat in the island (~1.5 weeks)
 
@@ -1577,3 +1598,31 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Not done by hand: the 30-minute session drop-off (unit test); macOS (see
   "Mac checks for Phase 9").
 - Next: a separate `ci: macos smoke test` PR (Charan), then Phase 5.
+
+### Phase 5a summary (2026-10-03)
+
+- Bouncer moves from code: `motion.ts` (no DOM) is a fixed-step physics body
+  (1/240 s steps, frames clamped to 50 ms) with gravity, squash 0.84 and
+  stretch 1.12 to the spec's 9-unit, 900 ms jump; `ball.ts` writes it into
+  the prototype's SVG as transforms. One Motion survives re-renders, so a
+  rebuilt island no longer restarts him.
+- Seven moods from "Meet Bouncer": idle breathes ~10 s then holds still,
+  working jumps, needs you hops twice every 1.6 s with "!", risky turns red
+  and puffs up, done cheers when a session finishes (working → idle), paused
+  sleeps, dance is drawn (Phase 8 triggers it). Launch greeting: he drops in
+  and bounces ("Bouncer · at the door", 2.5 s); never over a card, the paused
+  pill or an open island.
+- The shades are the eyes (Charan): the face looks toward the cursor from
+  the page's own mouse events (no backend feed), blinks every 8–12 s as two
+  repaints; a click squashes him without opening the island, four quick
+  clicks make him dizzy.
+- Frames run only while something moves; none when hidden, settled or with
+  OS reduced motion (no bounce, breathing, tracking or blink then).
+- `redact.rs`: JSON secret values end at an unescaped quote, so nothing
+  after `\"` leaks (run-time fake-secret tests).
+- Tests: 123 Rust + 28 frontend (motion 12, mood 4), green locally; gitleaks
+  rules checked on every added line.
+- Checked in the app (see Verify above): idle CPU, card arming / focus /
+  overlap, reduced motion, moods.
+- Not checked by hand yet (Charan): the feel of looking, squish and dizzy
+  with a real mouse in the island; a real Claude Code session; macOS.
