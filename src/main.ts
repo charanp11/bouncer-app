@@ -8,7 +8,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
-import { islandScale, WIDTH } from "./size.ts";
+import { islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -60,6 +60,9 @@ type Away = {
   stuck: { minutes: number; project: string; what: string } | null;
 };
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
+type Prefs = { size: string; sound: boolean };
+/** Read-only facts for the settings screen (asked for when it opens). */
+type About = { rules: string | null; hooks: "installed" | "missing" | "unknown" };
 type View = {
   open: boolean;
   hidden: boolean;
@@ -72,6 +75,9 @@ type View = {
   away: Away | null;
   /** Why the activity log is off today, if it is. */
   history: { note: string | null };
+  /** The settings screen is open. */
+  settings: boolean;
+  prefs: Prefs;
 };
 
 /** Allow stays disabled this long after a card reaches the front. */
@@ -280,15 +286,41 @@ function closeButton(onClick: () => void): HTMLElement {
   return close;
 }
 
-function head(state: BallState, title: string, sub = "", onClose?: () => void): HTMLElement {
+function head(state: BallState, title: string, sub = "", onClose?: () => void, extra: HTMLElement[] = []): HTMLElement {
   const h = el("div", "head");
   const t = el("div", "title");
   t.append(ball(state), el("span", "", title));
   if (sub) t.append(el("span", "sub", sub));
   h.append(t);
-  if (onClose) h.append(closeButton(onClose));
+  if (extra.length || onClose) {
+    const buttons = el("div", "buttons");
+    buttons.append(...extra);
+    if (onClose) buttons.append(closeButton(onClose));
+    h.append(buttons);
+  }
   draggable(h);
   return h;
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/** The settings gear (drawn in code, as the prototype's icon). */
+function gearButton(): HTMLElement {
+  const button = el("button", "iconbtn");
+  button.setAttribute("aria-label", "Settings");
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS(SVG, "circle");
+  circle.setAttribute("cx", "12");
+  circle.setAttribute("cy", "12");
+  circle.setAttribute("r", "3");
+  const path = document.createElementNS(SVG, "path");
+  path.setAttribute("d", "M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4");
+  svg.append(circle, path);
+  button.append(svg);
+  button.addEventListener("click", () => invoke("settings", { open: true }));
+  return button;
 }
 
 function stepText(s: Session): string {
@@ -544,7 +576,12 @@ function setShape(next: Shape) {
   }
   island.classList.remove("hidden", "open", "wide");
   // One scale for the whole island, kept under 40% of this screen's width.
-  document.documentElement.style.setProperty("--scale", String(islandScale(WIDTH[next], screen.availWidth)));
+  // One scale for the whole island (the Size preference), kept under 40% of
+  // this screen's width; the open island never passes the work area's height.
+  const scale = islandScale(WIDTH[next], screen.availWidth, scaleOf(current?.prefs?.size));
+  const root = document.documentElement.style;
+  root.setProperty("--scale", String(scale));
+  root.setProperty("--open-max-h", `${openMaxHeight(screen.availHeight, scale)}px`);
   if (next !== "pill") island.classList.add(next);
   stage.className = next === "hidden" ? "bare" : "";
 }
@@ -650,6 +687,130 @@ function renderAway(view: View, away: Away) {
   later(CLOCK_MS);
 }
 
+/** Settings facts, asked for once each time the screen opens. */
+let about: About | null = null;
+let aboutAsked = false;
+/** The "Wipe…" confirm is open, and since when (its button arms like Allow). */
+let wiping = false;
+let wipeSince = 0;
+
+function setRow(name: string, controls: (HTMLElement | string)[], hint?: string): HTMLElement {
+  const row = el("div", "setrow");
+  const ctl = el("div", "ctl");
+  ctl.append(...controls);
+  row.append(el("div", "name", name), ctl);
+  if (hint) row.append(el("div", "hint", hint));
+  return row;
+}
+
+function toggle(label: string, on: boolean, onClick: () => void): HTMLButtonElement {
+  const t = el("button", "toggle");
+  t.setAttribute("role", "switch");
+  t.setAttribute("aria-checked", String(on));
+  t.setAttribute("aria-label", label);
+  t.addEventListener("click", onClick);
+  return t;
+}
+
+function savePrefs(prefs: Prefs) {
+  // The backend saves, then sends the new view.
+  invoke("set_prefs", { size: prefs.size, sound: prefs.sound }).catch(() => {});
+}
+
+function closeSettings() {
+  aboutAsked = false;
+  wiping = false;
+  invoke("settings", { open: false });
+}
+
+/** The prototype's "Settings": Size, Sound, history, rules file, hooks. */
+function renderSettings(view: View, state: BallState) {
+  setShape("open");
+  if (!aboutAsked) {
+    aboutAsked = true;
+    invoke<About>("about")
+      .then((a) => {
+        about = a;
+        if (current) render(current);
+      })
+      .catch(() => {});
+  }
+  const prefs = view.prefs;
+  const list = el("div", "setlist");
+
+  const seg = el("div", "seg");
+  seg.setAttribute("role", "radiogroup");
+  seg.setAttribute("aria-label", "Size");
+  for (const [size, label] of [["small", "Small"], ["medium", "Medium"], ["large", "Large"]]) {
+    const b = el("button", "", label);
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(prefs.size === size));
+    b.addEventListener("click", () => savePrefs({ ...prefs, size }));
+    seg.append(b);
+  }
+  list.append(setRow("Size", [seg], "Small 100% · Medium 125% · Large 150%. Applies at once."));
+
+  list.append(
+    setRow(
+      "Sound",
+      [el("span", "", prefs.sound ? "On" : "Off"), toggle("Sound", prefs.sound, () => savePrefs({ ...prefs, sound: !prefs.sound }))],
+      "Needs you, risky and done. Never while paused.",
+    ),
+  );
+
+  const wipe = el("button", "btn deny small", "Wipe…");
+  wipe.addEventListener("click", () => {
+    wiping = true;
+    wipeSince = performance.now();
+    if (current) render(current);
+  });
+  const history = setRow("Activity history", wiping ? [] : [wipe], "Kept on this computer for 30 days, secrets redacted. Wipe asks first.");
+  if (wiping) {
+    const box = el("div", "confirm");
+    const text = el("div");
+    text.append(el("b", "", "Delete all activity history? "), "This can't be undone.");
+    const cancel = el("button", "btn deny small", "Cancel");
+    const del = armed("Delete history", wipeSince);
+    del.classList.add("small");
+    cancel.addEventListener("click", () => {
+      wiping = false;
+      if (current) render(current);
+    });
+    del.addEventListener("click", () => {
+      del.disabled = true;
+      invoke("wipe")
+        .catch(() => {})
+        .finally(() => {
+          wiping = false;
+          if (current) render(current);
+        });
+    });
+    const row = el("div", "actions");
+    row.append(cancel, del);
+    box.append(text, row);
+    history.append(box);
+  }
+  list.append(history);
+
+  const rules = setRow("Rules file", []);
+  rules.append(el("pre", "cmd", about?.rules ?? "…"));
+  list.append(rules);
+
+  const hooks = about?.hooks;
+  const status = el("span", `status${hooks === "installed" ? "" : " off"}`, hooks === "installed" ? "Installed" : hooks === "missing" ? "Not installed" : "Unknown");
+  list.append(
+    setRow(
+      "Claude Code hooks",
+      [status],
+      hooks === "installed" ? "To remove: bouncer uninstall-hooks" : "To install: bouncer install-hooks",
+    ),
+  );
+
+  const body = el("div", "body");
+  body.append(list);
+  island.replaceChildren(head(state, "Settings", "", closeSettings), body);
+}
+
 /** A red "rules" badge on the pill while the rules file is refused. */
 function rulesBadge(view: View): Badge | undefined {
   return view.rules.error ? { text: "rules", risk: true } : undefined;
@@ -682,6 +843,13 @@ function render(view: View) {
     renderApproval(view, first);
     return;
   }
+
+  if (view.settings) {
+    renderSettings(view, mood(view, done));
+    return;
+  }
+  aboutAsked = false;
+  wiping = false;
 
   if (greeting(view, now, greetUntil, REDUCED.matches)) {
     // Just Bouncer dropping in: no words (Charan).
@@ -734,7 +902,7 @@ function render(view: View) {
       detail = null;
       invoke("expand", { open: false });
     };
-    island.replaceChildren(head(mood(view, done), "Bouncer", `· ${plural(view.sessions.length, "session")}`, close), body);
+    island.replaceChildren(head(mood(view, done), "Bouncer", `· ${plural(view.sessions.length, "session")}`, close, [gearButton()]), body);
     later(CLOCK_MS);
     return;
   }

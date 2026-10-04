@@ -1,6 +1,8 @@
 // No console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::Read;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -8,9 +10,11 @@ use std::time::Duration;
 use bouncer_core::activity;
 use bouncer_core::approvals::{Desk, WAIT};
 use bouncer_core::away::{self, Away};
+use bouncer_core::hooks;
 use bouncer_core::ipc::{self, Handler, Server};
+use bouncer_core::prefs::{self, Prefs, Size};
 use bouncer_core::rules;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tauri::image::Image;
 use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem};
@@ -35,6 +39,11 @@ struct Island {
     size: Mutex<LogicalSize<f64>>,
     /// Told about every window move; see `settle_after_moves`.
     moved: Mutex<mpsc::Sender<()>>,
+    /// The settings screen is open (gear or tray); a card still comes first.
+    settings: AtomicBool,
+    /// Island size and sound, and where they're saved.
+    prefs: Mutex<Prefs>,
+    prefs_path: Option<PathBuf>,
 }
 
 /// How long the island must stay still before it's checked for being out of
@@ -68,7 +77,7 @@ const MIN_SIZE: (f64, f64) = (80.0, 4.0);
 /// API flag. Set to false for a platform where it fails: the page then draws
 /// square corners on a solid window.
 const ROUNDED: bool = cfg!(any(windows, target_os = "macos"));
-const MAX_SIZE: (f64, f64) = (900.0, 900.0);
+const MAX_SIZE: (f64, f64) = (1200.0, 1200.0);
 
 /// WebView2 takes extra browser flags from this variable, e.g. a remote
 /// debugging port that would let any local process read and drive the
@@ -89,7 +98,7 @@ fn main() {
     clear_webview_args(!cfg!(debug_assertions));
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            subscribe, decide, always, expand, drag, fit
+            subscribe, decide, always, expand, drag, fit, settings, set_prefs, wipe, about
         ])
         .on_window_event(|window, event| {
             if let (WindowEvent::Moved(_), Some(island)) = (event, window.try_state::<Island>()) {
@@ -104,6 +113,7 @@ fn main() {
                 show(&handle, view)
             }));
             tick(app.handle().clone(), desk.clone());
+            let prefs_path = prefs::path();
             app.manage(Island {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
@@ -113,6 +123,9 @@ fn main() {
                 placed: Mutex::new(None),
                 size: Mutex::new(LogicalSize::new(320.0, 44.0)),
                 moved: Mutex::new(settle_after_moves(app.handle().clone())),
+                settings: AtomicBool::new(false),
+                prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
+                prefs_path,
             });
             start_relay_server(desk.clone());
             tray(app, desk)?;
@@ -169,10 +182,11 @@ const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal
 /// Tray menu: Pause / Resume, Wipe history and Quit. While paused the icon is greyed and
 /// every request goes to the terminal.
 fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
     let wipe = MenuItem::with_id(app, "wipe", "Wipe history", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Bouncer", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&pause, &wipe, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &pause, &wipe, &quit])?;
     let icon = app
         .default_window_icon()
         .ok_or_else(|| tauri::Error::AssetNotFound("app icon".into()))?;
@@ -184,6 +198,12 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
         .tooltip(TOOLTIP)
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
+            "settings" => {
+                app.state::<Island>()
+                    .settings
+                    .store(true, Ordering::Relaxed);
+                show(app, desk.view());
+            }
             "pause" => {
                 let now_paused = !desk.paused();
                 desk.set_paused(now_paused);
@@ -227,13 +247,17 @@ fn show(app: &AppHandle, mut view: Value) {
     let island = app.state::<Island>();
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
     let away = !view["away"].is_null();
-    let open =
-        has("queue") || ((has("sessions") || away) && island.expanded.load(Ordering::Relaxed));
-    let hidden = !has("queue") && !has("sessions") && !away && view["paused"] != true;
+    let settings = island.settings.load(Ordering::Relaxed);
+    let open = has("queue")
+        || settings
+        || ((has("sessions") || away) && island.expanded.load(Ordering::Relaxed));
+    let hidden = !has("queue") && !has("sessions") && !away && !settings && view["paused"] != true;
     island.hidden.store(hidden, Ordering::Relaxed);
     view["open"] = open.into();
     view["hidden"] = hidden.into();
     view["rounded"] = ROUNDED.into();
+    view["settings"] = settings.into();
+    view["prefs"] = island.prefs.lock().unwrap().to_json();
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
     }
@@ -406,6 +430,74 @@ fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
         }
     });
 }
+
+/// Opens or closes the settings screen (the gear, its ×, or Esc).
+#[tauri::command]
+fn settings(app: AppHandle, island: State<'_, Island>, open: bool) {
+    island.settings.store(open, Ordering::Relaxed);
+    show(&app, island.desk.view());
+}
+
+/// Saves the island size and sound. Only known sizes are accepted.
+#[tauri::command]
+fn set_prefs(
+    app: AppHandle,
+    island: State<'_, Island>,
+    size: String,
+    sound: bool,
+) -> Result<(), String> {
+    let size = Size::parse(&size).ok_or("unknown size")?;
+    let new = Prefs { size, sound };
+    let path = island
+        .prefs_path
+        .as_deref()
+        .ok_or("no place to save preferences")?;
+    prefs::save(path, new)?;
+    *island.prefs.lock().unwrap() = new;
+    show(&app, island.desk.view());
+    Ok(())
+}
+
+/// "Wipe history" from the settings screen (after its confirm step).
+#[tauri::command]
+fn wipe(island: State<'_, Island>) -> Result<(), String> {
+    island.desk.wipe_history().map_err(|e| e.to_string())
+}
+
+/// Read-only facts for the settings screen: where the rules file is and
+/// whether our hooks are in the user's Claude Code settings.
+#[tauri::command]
+fn about() -> Value {
+    json!({
+        "rules": rules::path().map(|p| p.display().to_string()),
+        "hooks": hook_status(),
+    })
+}
+
+/// "installed", "missing" (no file, or not in it) or "unknown" (unreadable).
+fn hook_status() -> &'static str {
+    let Ok(path) = hooks::user_settings() else {
+        return "unknown";
+    };
+    let mut text = String::new();
+    match std::fs::File::open(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return "missing",
+        Err(_) => return "unknown",
+        Ok(file) => {
+            if file.take(MAX_SETTINGS).read_to_string(&mut text).is_err() {
+                return "unknown";
+            }
+        }
+    }
+    match serde_json::from_str::<Value>(&text) {
+        Ok(settings) if hooks::installed(&settings) => "installed",
+        Ok(_) => "missing",
+        Err(_) => "unknown",
+    }
+}
+
+/// Claude Code settings files bigger than this aren't read for the status.
+const MAX_SETTINGS: u64 = 1024 * 1024;
 
 /// Opens or closes the island when the user clicks it.
 #[tauri::command]
