@@ -6,7 +6,7 @@
 // Frames run only while something moves, and never while the page is
 // hidden or the OS asks for reduced motion. The island's Bouncer keeps one
 // Motion across re-renders, so a rebuilt island doesn't restart him.
-import { advance, blink, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
+import { advance, blink, BLINK_MS, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
 
 export type BallState = Mood;
 
@@ -102,8 +102,14 @@ function scheduleBlink() {
   if (blinkTimer || reduce.matches) return;
   blinkTimer = setTimeout(() => {
     blinkTimer = 0;
-    for (const b of live) if (b.svg.isConnected) blink(b.m);
-    kick();
+    const shut = (open: boolean) => {
+      for (const b of live) {
+        blink(b.m, open);
+        if (!reduce.matches) draw(b, pose(b.m));
+      }
+    };
+    shut(false);
+    setTimeout(shut, BLINK_MS, true);
     if ([...live].some((b) => b.svg.isConnected)) scheduleBlink();
   }, BLINK_MIN_MS + Math.random() * BLINK_SPREAD_MS);
 }
