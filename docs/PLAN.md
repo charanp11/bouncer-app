@@ -1396,6 +1396,20 @@ WebView2's debug port with focus emulated, so the OS focus was never taken):
   (size names, mode names, booleans); the hook status reads Claude Code's
   settings file (≤ 1 MB) and returns only a word.
 
+Manual checks (Charan, 2026-10-04, Claude Code 2.1.289, Windows):
+
+- [x] Tray "Settings…": Tab moves through the controls; Size changes at once
+- [x] After clicking the terminal, Esc goes to the terminal (the island gave
+  the keyboard back, as designed; an open confirm stays until Cancel)
+- [x] A real Write card: Tab skips the unarmed Allow (ring on "Always allow…")
+- Reported "Enter and Space both turn auto on / off". Re-checked with real
+  key presses over the debug port: Enter on the switch turns auto off (off
+  never asks) and only opens the confirm when it's off; Enter on "Turn on
+  auto-allow" does nothing; only Space or a click turns auto on. Found on
+  the way: focus fell to nothing when a confirm closed; it now returns to
+  the switch (or "Wipe…").
+- Not yet: sounds by ear, Narrator, Space / Enter on a real card's Allow.
+
 Phase 5b is done when:
 
 - [x] Settings state in the prototype, approved; then built to it (Size,
