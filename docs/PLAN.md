@@ -1436,13 +1436,13 @@ Phase 5b is done when:
 - [x] Sounds (needs you, risky, done), generated; mute saved; none while
   paused; one at a time, repeats within 2 s dropped; idle CPU still ~0%
 - [x] Observe / auto switch: confirm to turn on, `set_mode` checked write
-- [ ] Keyboard: open from the tray, Tab through settings and cards, Esc
+- [x] Keyboard: open from the tray, Tab through settings and cards, Esc
   closes; Enter never approves; Space on Allow only when armed; a new card
   moves focus to its Deny; focus never taken from the terminal by a card
-  (all checked over the debug port; the tray and real OS focus need a hand
-  check)
-- [ ] Contrast ≥ 4.5:1 everywhere (prototype first) [x measured]; screen
-  reader order checked by hand (Narrator) [needs Charan]
+  (debug port + Charan by hand)
+- [x] Contrast ≥ 4.5:1 everywhere (prototype first); screen reader order
+  checked by hand (Narrator reads the island in order when you go to it; it
+  doesn't announce a new card by itself: accepted, Phase 9)
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 130 Rust + 36 frontend; gitleaks clean)
 
