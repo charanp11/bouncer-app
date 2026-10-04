@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character (5a in review; 5b starts after 5a merges)**
+**Current phase: Phase 5 — Character (5a merged as v0.5.0; 5b current; 5c next)**
 
 ## MVP scope
 
@@ -1256,7 +1256,110 @@ playground session in `default` permission mode):
   the path wraps in its box. Not re-checked at 125%: the session detail.
 - [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [x] `json_values` skips escaped quotes, with a run-time fake-secret test
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (merged as #10, tagged v0.5.0)
+
+
+### Phase 5b audit (2026-10-04)
+
+Scope (Charan): sounds; the settings screen with **Size**; the observe /
+auto switch; keyboard access; screen reader order; contrast. Sources:
+`main.rs` (tray, window, commands), `rules.rs` (`add`, `replace`, owner
+checks), `hooks.rs` / `bin/bouncer.rs` (hook install), `styles.css`,
+`size.ts`, the prototype (no settings screen in it yet), tauri 2.12.1
+(`set_focusable`, `set_focus`, `additionalBrowserArgs`).
+
+What exists: the window is created `focusable: false` (Phase 2: a card
+never takes the keyboard, and one click on Allow / Deny leaves typing in
+the terminal); the tray has Pause, Wipe history, Quit; `mode` lives in
+`rules.toml`, written only by hand or by "Always allow" (`rules::add`:
+read-back check, temp file + rename, owner-only); no sound; `size.ts` has
+`SCALE = 1.25`.
+
+Findings:
+
+1. **No settings screen in the prototype.** The design rule says the
+   prototype comes first: I draft a "Settings" state there (same tokens,
+   rows, switches) and show it before building.
+2. **Contrast (≥ 4.5:1) fails in three places**, measured from the
+   prototype's colors: faint text `#6B7280` is 4.02 on the island and 3.61
+   on raised (times, steps, notes); code line numbers `#4B5261` are 2.48;
+   white on the red "rules" badge is 3.36. Smallest fixes: faint →
+   `#7B8290` (5.04 / 4.52), line numbers → faint, the badge text → island
+   color (5.79). Prototype first.
+3. **Keyboard access without stealing focus.** `set_focusable` exists in
+   tauri 2.12.1, so no plugin: the island stays non-focusable and becomes
+   focusable only when the user opens it on purpose: tray "Open Bouncer" /
+   "Settings…" (the tray is keyboard-reachable: Win+B on Windows) or the
+   island's gear button. Esc or clicking elsewhere makes it non-focusable
+   again. Clicking a card's buttons keeps today's behavior (typing stays in
+   the terminal). A card arriving never moves focus. A global hotkey would
+   need `tauri-plugin-global-shortcut` (a new dependency): not proposed.
+4. **Sound and autoplay.** Web Audio, generated, no files. A page that was
+   never clicked may not be allowed to start audio (Chromium autoplay
+   policy); checked first in Implement. If blocked, the fix is a WebView2
+   argument in `tauri.conf.json` (`--autoplay-policy=no-user-gesture-required`,
+   keeping Tauri's own default arguments), no dependency. The AudioContext
+   is suspended after each sound, so idle CPU stays ~0. macOS → Mac checks.
+5. **Preferences (Size, Sound) need a home.** `rules.toml` is security
+   policy; preferences go in their own `preferences.json` next to it
+   (`serde_json`, already a dependency), with the same owner check and
+   atomic write. Bad or missing file → defaults (Medium, sound on). Size
+   is one of three values, never a free number.
+6. **Mode switch** reuses the rules write: a new `set_mode` command takes
+   only `"observe"` / `"auto"`, changes the one `mode = ...` line (or adds
+   it), checks the file reads back as the same rules with the new mode,
+   then replaces it atomically. The island shows the change like any edit.
+7. **Not in Charan's 5b list, from the old plan:** hooks install /
+   uninstall and "rules file" in settings. Installing from the island means
+   writing `~/.claude/settings.json` with a diff + confirm in the island
+   (security rule 6); opening the rules file in an editor needs an opener
+   plugin (new dependency). Proposed: settings shows the rules file's path
+   (text, copyable) and whether hooks are installed; install / uninstall
+   stays in the `bouncer` CLI for the MVP.
+
+Threats (5b):
+
+| Threat | Fix |
+| --- | --- |
+| Auto mode switched on by accident | Turning auto on asks first (what auto means, risky still asks), and its confirm button arms like Allow (600 ms); turning it off doesn't ask |
+| The page writes arbitrary text into `rules.toml` | `set_mode` takes an enum only; the backend edits the file and checks it reads back as the same rules with the new mode |
+| Keyboard approves by accident | Allow is never focused automatically, Enter never approves (keydown blocked on Allow and "Add rule and allow"), Allow is disabled until armed; the card's arrival never moves focus |
+| The island takes the keyboard from the terminal | Focusable only after the user opens it on purpose; non-focusable again on Esc / blur; card buttons keep working without focus |
+| `preferences.json` tampered or broken | Owner check as for `rules.toml`; only known values accepted, anything else → defaults |
+| Sound wakes the CPU / annoys | One short generated sound, context suspended after; mute saved; no sound while paused |
+| Unreadable text | All text ≥ 4.5:1 (fixes above); color is never the only signal (existing rule) |
+| Screen reader reads the island out of order | DOM order = reading order (head, card: who, what, reason, command, buttons); the card is announced once on arrival (`aria-live` polite, already on the island) |
+
+Phase 5b is done when:
+
+- [ ] Settings state in the prototype, approved; then built to it
+- [ ] Size Small / Medium / Large, saved, applied at once (40% cap kept)
+- [ ] Sound on card arrival, generated; mute saved; idle CPU still ~0%
+- [ ] Observe / auto switch: confirm to turn on, `set_mode` checked write
+- [ ] Keyboard: open from the tray, Tab through settings and cards, Esc
+  closes; Enter never approves; focus never taken by a card
+- [ ] Contrast ≥ 4.5:1 everywhere (prototype first); screen reader order
+  checked by hand (Narrator)
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  before every push
+
+## Phase 5c — Island motion (after 5b)
+
+Charan, 2026-10-04. Its own PR, all four stages, after 5b is merged.
+
+- **Grows out of the top edge** like the prototype: hidden → peek on
+  hover → pill → open, morphing with the 320 ms spring. Growing: resize the
+  window first, then animate inside it. Closing: animate first, then
+  shrink the window.
+- **Never animate an approval card's arrival**; the 600 ms arm still
+  counts from when the card is fully visible.
+- **The ticker** (the pill's step label) shows `+N −M` line counts for Edit
+  / Write, computed from the hook input (Edit: old vs new text; Write: the
+  new text's lines, since the old file is never read). Only the numbers are
+  stored (two new activity-log fields), never the text.
+- **Reduced motion** turns all of it off.
+- Audit to settle: what "fully visible" means in the window-resize timing;
+  where `+N −M` sits in the pill; MultiEdit; the activity-log field change.
 
 ## Phase 6 — Chat in the island (~1.5 weeks)
 
