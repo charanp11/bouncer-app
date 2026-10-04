@@ -46,18 +46,18 @@ test("squash and stretch stay near the spec (1.14 / 1.12)", () => {
   assert.ok(max(sy) > 1.06 && max(sy) <= 1.13, `stretch ${max(sy)}`);
 });
 
-test("the greeting drop loses height every bounce and comes to rest", () => {
+test("the greeting drop bounces three times, lower each time, and rests within 2.2 s", () => {
   const m = motion("greet");
   const apexes: number[] = [];
   let rising = false;
   let last = m.y;
-  for (let i = 0; i < 4 * 60; i++) {
+  for (let i = 0; i < 2.2 * 60; i++) {
     advance(m, 1 / 60);
     if (rising && m.y < last) apexes.push(last);
     rising = m.y > last;
     last = m.y;
   }
-  assert.ok(apexes.length >= 2, `${apexes.length} bounces`);
+  assert.equal(apexes.length, 3, `${apexes.length} bounces`);
   for (let i = 1; i < apexes.length; i++) assert.ok(apexes[i] < apexes[i - 1]);
   assert.ok(apexes[0] < 24);
   assert.equal(moving(m), false);

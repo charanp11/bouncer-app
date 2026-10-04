@@ -110,6 +110,7 @@ const TAG: Record<string, string> = {
   "waiting in terminal": "you",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
 
 const stage = document.getElementById("stage")!;
 const island = document.getElementById("island")!;
@@ -679,9 +680,12 @@ function render(view: View) {
     return;
   }
 
-  if (greeting(view, now, greetUntil)) {
+  if (greeting(view, now, greetUntil, REDUCED.matches)) {
+    // Just Bouncer dropping in: no words (Charan).
     setShape("pill");
-    island.replaceChildren(pill("greet", "Bouncer", " · at the door", false));
+    const p = el("div", "pill greet");
+    p.append(ball("greet"));
+    island.replaceChildren(p);
     later(greetUntil - now);
     return;
   }

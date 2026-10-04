@@ -27,10 +27,11 @@ test("done is a working session going idle", () => {
   assert.equal(finished(new Map(), [{ id: "a", status: "idle" }]), false);
 });
 
-test("the greeting never shows over a card, paused or an open island", () => {
-  assert.equal(greeting(view(), 1, 2), true);
-  assert.equal(greeting(view(), 2, 2), false);
-  assert.equal(greeting(view({ queue: [card] }), 1, 2), false);
-  assert.equal(greeting(view({ paused: true }), 1, 2), false);
-  assert.equal(greeting(view({ open: true }), 1, 2), false);
+test("the greeting never shows over a card, paused, an open island or with reduced motion", () => {
+  assert.equal(greeting(view(), 1, 2, false), true);
+  assert.equal(greeting(view(), 2, 2, false), false);
+  assert.equal(greeting(view({ queue: [card] }), 1, 2, false), false);
+  assert.equal(greeting(view({ paused: true }), 1, 2, false), false);
+  assert.equal(greeting(view({ open: true }), 1, 2, false), false);
+  assert.equal(greeting(view(), 1, 2, true), false);
 });
