@@ -72,7 +72,7 @@ h1 .stamp { color: var(--sun); }
 @media (max-width: 860px) { .stage { grid-template-columns: minmax(0, 1fr); } }
 .screen {
   position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
-  aspect-ratio: 16 / 10; max-width: 100%; min-height: 420px;
+  aspect-ratio: 16 / 10; max-width: 100%; min-height: 700px;
   background:
     radial-gradient(120% 90% at 85% 110%, #1d3a3a 0%, transparent 55%),
     radial-gradient(90% 80% at 10% 0%, #23263a 0%, transparent 60%),
@@ -322,14 +322,14 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .notes p, .notes li { color: var(--muted); font-size: 13px; margin: 0; }
 .notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 
-.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: 16px; }
 .spec section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
 .spec h3 { margin: 0 0 10px; font: 600 12px var(--ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
 .spec table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .spec td { padding: 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
 .spec tr:first-child td { border-top: 0; }
 .spec td:last-child { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--text); padding-left: 12px; white-space: nowrap; }
-.spec td:first-child { color: var(--muted); }
+.spec td:first-child { color: var(--muted); white-space: nowrap; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1px solid var(--line); }
 .rules { grid-column: 1 / -1; }
 .rules ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); font-size: 13px; columns: 2 320px; }
@@ -348,7 +348,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.7 · Oct 4 2026</div>
+    <div class="meta">design/prototype · v0.8 · Oct 4 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -396,8 +396,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <section>
       <h3>Sizes</h3>
       <table>
-        <tr><td>Island scale (all sizes below)</td><td>125%</td></tr>
-        <tr><td>Scale cap</td><td>island ≤ 40% of screen width, never &lt; 100%</td></tr>
+        <tr><td>Island scale</td><td>125%</td></tr>
         <tr><td>Wake strip (hidden)</td><td>180 × 5</td></tr>
         <tr><td>Pill</td><td>288 × 36</td></tr>
         <tr><td>Open width</td><td>400</td></tr>
@@ -411,6 +410,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Button height / radius</td><td>34 / 9</td></tr>
         <tr><td>Character in island</td><td>26 × 26</td></tr>
       </table>
+      <p class="meta" style="margin:10px 0 0">Sizes are at 100%; the island is drawn at the scale. A view never passes 40% of its screen's width or its work area's height (then it scrolls), and never goes under 100%.</p>
     </section>
     <section>
       <h3>Colors</h3>
@@ -453,7 +453,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Breathe (idle)</td><td>3.2s loop</td></tr>
         <tr><td>Hop (needs you)</td><td>every 1.6s</td></tr>
         <tr><td>Cheer (done)</td><td>1.2s, 11px</td></tr>
-        <tr><td>Greeting (launch)</td><td>drop + 3 bounces, &lt; 2.5s, no words</td></tr>
+        <tr><td>Greeting (launch)</td><td>3 bounces, 2.5s</td></tr>
         <tr><td>Reduced motion</td><td>all off</td></tr>
       </table>
     </section>
@@ -470,6 +470,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <li><b>The island sizes to its content</b> up to the max height; the outer window follows.</li>
         <li><b>Color is never the only signal</b>: every state also has words ("Needs you", "Risky", "Paused").</li>
         <li><b>Hidden means hidden</b>: no animation runs and CPU stays near zero.</li>
+        <li><b>Turning auto-allow on is a deliberate step:</b> a confirm that scrolls fully into view, focus on Cancel (never on "Turn on auto-allow"), Esc cancels, Enter never turns it on, and the button arms after 600ms.</li>
       </ol>
     </section>
   </div>
@@ -748,7 +749,13 @@ function settings(confirming) {
     const on = el("button", "btn allow small"); on.append(el("span", "arm"), el("span", "", "Turn on auto-allow"));
     on.lastChild.style.position = "relative"; on.disabled = true; setTimeout(() => { on.disabled = false; }, 600);
     on.addEventListener("click", () => show("settings"));
+    // Enter never turns auto on; Esc means Cancel.
+    c.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target === on) e.preventDefault();
+      if (e.key === "Escape") { e.preventDefault(); cancel.click(); }
+    });
     row.append(cancel, on); c.append(t, row); auto.append(c);
+    requestAnimationFrame(() => { c.scrollIntoView({ block: "nearest" }); cancel.focus({ preventScroll: true }); });
   }
   list.append(auto);
   const wipe = el("button", "btn deny small", "Wipe…"); wipe.style.padding = "0 12px";
@@ -844,7 +851,7 @@ Object.assign(STATES, {
   settings: { phase: "Phase 5b", title: "Settings", render() { settings(false); },
     notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Hooks show status only; install and uninstall stay in the bouncer command (Phase 9 installer)."] },
   settingsauto: { phase: "Phase 5b", title: "Settings · turn on auto", render() { settings(true); },
-    notes: ["Turning auto-allow on asks first; its button arms after 600ms like Allow.", "Turning it off doesn't ask.", "Bouncer writes the mode into rules.toml itself, checked and atomic, and the island shows the change like any other."] },
+    notes: ["Turning auto-allow on asks first; its button arms after 600ms like Allow.", "The confirm scrolls fully into view (Settings scrolls inside the island). Focus goes to Cancel; Esc cancels; Enter never turns auto on.", "Turning it off doesn't ask.", "Bouncer writes the mode into rules.toml itself, checked and atomic, and the island shows the change like any other."] },
   editask: { phase: "Phase 2 · design", title: "Approve an edit", render() {
       island.className = "island open wide";
       island.append(tabs("home"));

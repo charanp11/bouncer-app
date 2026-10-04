@@ -1335,6 +1335,12 @@ Decisions (Charan, 2026-10-04):
    a repeat within 2 s is dropped.
 4. **Contrast fixes as proposed** (faint `#7B8290`, line numbers use faint,
    red badge text dark), prototype first.
+5. **Settings design approved** (prototype v0.8) with three fixes: the
+   spec tables read on one line at any page width; Settings scrolls inside
+   the island and the auto-allow confirm scrolls fully into view (at 125%
+   on a 768-px-tall screen its buttons are fully visible: the island is
+   never taller than the work area, then it scrolls); in the confirm, focus
+   goes to Cancel, Esc cancels, Enter never turns auto on (spec rule 11).
 
 Threats (5b):
 
