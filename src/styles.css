@@ -927,7 +927,8 @@ pre.cmd {
   grid-column: 1 / -1;
 }
 
-/* the character: Bouncer, a tiny bright ball in shades */
+/* the character: Bouncer, a tiny bright ball in shades. Colors and which
+   face shows live here; his motion is drawn by ball.ts. */
 .ball {
   width: 26px;
   height: 26px;
@@ -950,10 +951,10 @@ pre.cmd {
   height: 72px;
 }
 
-.ball .jumper,
-.ball .shadow {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
+.ball.sheet,
+.ball.sheet svg {
+  width: 84px;
+  height: 84px;
 }
 
 .ball .body-c {
@@ -1012,87 +1013,9 @@ pre.cmd {
   font-size: 6px;
 }
 
-/* idle: breathes */
-.ball.idle .jumper {
-  animation: breathe 3.2s ease-in-out infinite;
-}
-
-@keyframes breathe {
-  50% {
-    transform: scale(1.04, 0.97);
-  }
-}
-
-/* working: real jumps, squash on landing, stretch going up, shadow shrinks */
-.ball.working .jumper {
-  animation: jump 900ms cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
-}
-
-.ball.working .shadow {
-  animation: jumpshadow 900ms cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
-}
-
-@keyframes jump {
-  0% {
-    transform: translateY(0) scale(1.14, 0.84);
-  }
-  18% {
-    transform: translateY(-4px) scale(0.9, 1.12);
-  }
-  45% {
-    transform: translateY(-9px) scale(1, 1);
-  }
-  72% {
-    transform: translateY(-3px) scale(0.94, 1.07);
-  }
-  86% {
-    transform: translateY(0) scale(1.16, 0.82);
-  }
-  100% {
-    transform: translateY(0) scale(1.14, 0.84);
-  }
-}
-
-@keyframes jumpshadow {
-  0%,
-  86%,
-  100% {
-    transform: scaleX(1);
-    opacity: 0.4;
-  }
-  45% {
-    transform: scaleX(0.55);
-    opacity: 0.15;
-  }
-}
-
-/* needs you: hops twice with an orange "!" */
+/* needs you: hops twice with an orange "!" (motion.ts) */
 .ball.needs .alert {
   display: inline;
-}
-
-.ball.needs .jumper {
-  animation: hop 1.6s ease-out infinite;
-}
-
-@keyframes hop {
-  0%,
-  60%,
-  100% {
-    transform: none;
-  }
-  68% {
-    transform: translateY(-5px) scale(0.94, 1.06);
-  }
-  76% {
-    transform: scale(1.08, 0.92);
-  }
-  84% {
-    transform: translateY(-3px);
-  }
-  92% {
-    transform: none;
-  }
 }
 
 /* risky: turns red, stops smiling, puffs up like he's blocking the door */
@@ -1107,16 +1030,6 @@ pre.cmd {
 
 .ball.risky .flat {
   display: inline;
-}
-
-.ball.risky .jumper {
-  animation: puff 1.4s ease-in-out infinite;
-}
-
-@keyframes puff {
-  50% {
-    transform: scale(1.1, 1.04);
-  }
 }
 
 /* paused: grey, shades off, eyes shut, z */

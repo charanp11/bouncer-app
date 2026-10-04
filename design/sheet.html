@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Dev only (never built): the app's Bouncer in all seven moods at 84 px, to
+     compare with "Meet Bouncer" in prototype/bouncer-island.html.
+     Run `npm run dev`, open http://127.0.0.1:1420/design/sheet.html -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bouncer sheet</title>
+    <style>
+      body { background: #08090c; color: #eef0f4; margin: 0; padding: 28px 20px; }
+      .cast { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; max-width: 1080px; }
+      .cast figure { margin: 0; background: #0b0d11; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 16px 8px 12px; display: grid; justify-items: center; gap: 8px; }
+      .cast figcaption { font: 12.5px var(--ui); color: #9aa1ad; text-align: center; }
+      .cast figcaption b { display: block; color: #eef0f4; font-weight: 500; }
+    </style>
+  </head>
+  <body>
+    <div class="cast" id="cast"></div>
+    <script type="module">
+      import "../src/styles.css";
+      import { ball } from "../src/ball.ts";
+      import { motion } from "../src/motion.ts";
+      const CAST = [["idle", "Idle", "breathes"], ["working", "Working", "jumps"], ["needs", "Needs you", "hops, shows !"], ["risky", "Risky", "turns red, blocks"], ["done", "Done", "happy hop"], ["paused", "Paused", "sleeps"], ["dance", "Music", "dances"]];
+      for (const [state, name, what] of CAST) {
+        const f = document.createElement("figure");
+        const cap = document.createElement("figcaption");
+        const b = document.createElement("b");
+        b.textContent = name;
+        cap.append(b, what);
+        f.append(ball(state, "sheet", motion(state)), cap);
+        document.getElementById("cast").append(f);
+      }
+    </script>
+  </body>
+</html>
