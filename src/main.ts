@@ -1109,6 +1109,13 @@ document.addEventListener("keydown", (e) => {
   all[next].focus();
 });
 
+// The island just took the keyboard (tray, cog): with a card up, focus starts
+// on its Deny (never Allow).
+window.addEventListener("focus", () => {
+  const card = current?.queue[0];
+  if (card && !island.contains(document.activeElement)) findKey(`deny:${card.id}`)?.focus();
+});
+
 // Esc gives the keyboard back: settings and the session list close; a card
 // stays (it can only be answered), but the keyboard goes back anyway.
 document.addEventListener("keydown", (e) => {
