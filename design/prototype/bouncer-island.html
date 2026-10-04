@@ -67,6 +67,11 @@ h1 .stamp { color: var(--sun); }
 .chip[aria-pressed="true"] { color: var(--island); background: var(--sun); border-color: var(--sun); }
 .chip:focus-visible, button:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
 
+/* the OS window around the island (motion demo): it grows first, shrinks last */
+.win { position: absolute; top: 0; border: 1px dashed rgba(255,206,58,0.55); border-top: 0; pointer-events: none; display: none; }
+.win span { position: absolute; right: 4px; bottom: 2px; font: 10px var(--mono); color: rgba(255,206,58,0.8); }
+.screen.showwin .win { display: block; }
+
 /* stage */
 .stage { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
 @media (max-width: 860px) { .stage { grid-template-columns: minmax(0, 1fr); } }
@@ -91,7 +96,8 @@ h1 .stamp { color: var(--sun); }
   width: var(--pill-w); max-width: calc(100% - 24px); min-height: var(--pill-h);
   background: var(--island); color: var(--text); border-radius: var(--r-pill);
   border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,0.45);
-  transition: width var(--t-open) var(--spring), border-radius var(--t-open) var(--spring), top var(--t-open) var(--spring);
+  /* no CSS transition: the morph (width, height, top, radius, color) is one
+     Web Animation started from show(), so the window can grow first */
   overflow: hidden; font-size: 13px;
   zoom: var(--scale);
 }
@@ -104,9 +110,11 @@ h1 .stamp { color: var(--sun); }
 .pill .label b { color: var(--text); font-weight: 500; }
 .badge { font: 600 11px var(--ui); color: var(--island); background: var(--wait); border-radius: 999px; padding: 1px 7px; }
 .badge.risk { background: var(--risk); color: var(--island); }
+/* the ticker: lines added / removed by the current edit (numbers only) */
+.lines { flex: none; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; display: inline-flex; gap: 6px; }
+.lines .add { color: var(--ok); } .lines .del { color: #ff8f88; }
 
-.body { padding: 0 var(--pad) var(--pad); display: grid; gap: var(--gap); max-height: calc(var(--open-max-h) - var(--pill-h)); overflow-y: auto; animation: rise var(--t-open) var(--spring); }
-@keyframes rise { from { opacity: 0; transform: translateY(-6px); } }
+.body { padding: 0 var(--pad) var(--pad); display: grid; gap: var(--gap); max-height: calc(var(--open-max-h) - var(--pill-h)); overflow-y: auto; }
 
 .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: var(--pill-h); padding: 0 6px 0 10px; }
 .head .title { display: flex; align-items: center; gap: 10px; font-weight: 500; }
@@ -144,6 +152,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .btn.allow:disabled { cursor: default; background: rgba(238,240,244,0.18); color: var(--muted); border-color: transparent; }
 .btn.allow .arm { position: absolute; inset: 0; transform-origin: left; background: rgba(238,240,244,0.28); transform: scaleX(0); }
 .btn.allow:disabled .arm { animation: arm var(--arm) linear forwards; }
+.btn.allow.waiting .arm { animation: none; } /* not fully visible yet: the arm hasn't started */
 @keyframes arm { to { transform: scaleX(1); } }
 .card.risky .btn.allow { background: transparent; color: var(--text); border-color: rgba(239,90,82,0.6); }
 .card.risky .btn.allow:hover:not(:disabled) { background: rgba(239,90,82,0.12); }
@@ -216,7 +225,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .tab:hover { color: var(--text); background: var(--raised); }
 .tab[aria-selected="true"] { color: var(--text); background: var(--raised); }
 .tab svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.detail { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 10px; padding: 0 10px 10px; animation: rise var(--t-open) var(--spring); }
+.detail { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 10px; padding: 0 10px 10px; }
 @media (max-width: 760px) { .detail { grid-template-columns: minmax(0, 1fr); } .who .ball.big { width: 52px; height: 52px; } .who .ball.big svg { width: 52px; height: 52px; } }
 .who { display: grid; gap: 10px; align-content: start; padding: 8px 6px 4px 8px; }
 .who .ball.big { width: 72px; height: 72px; } .who .ball.big svg { width: 72px; height: 72px; }
@@ -348,7 +357,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.10 · Oct 4 2026</div>
+    <div class="meta">design/prototype · v0.11 · Oct 4 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -372,6 +381,13 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <button class="chip" data-s="settings">Settings</button>
       <button class="chip" data-s="settingsauto">Settings · turn on auto</button>
     </div>
+    <div class="group"><span class="label">Phase 5c</span>
+      <button class="chip" data-play>&#9654; Play: wake, open, close</button>
+      <button class="chip" data-s="editing">Working · +N −M</button>
+      <button class="chip" data-t="win" aria-pressed="false">Show window</button>
+      <button class="chip" data-t="slow" aria-pressed="false">Slow ×4</button>
+      <button class="chip" data-t="reduced" aria-pressed="false">Reduced motion</button>
+    </div>
     <div class="group"><span class="label">Phase 6–8</span>
       <button class="chip" data-s="chat">Chat</button>
       <button class="chip" data-s="drop">File drop</button>
@@ -383,6 +399,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <div class="screen" aria-label="Mock Windows desktop">
       <div class="window-ghost"></div>
       <div class="window-ghost b"></div>
+      <div class="win" id="win" aria-hidden="true"><span>window</span></div>
       <div class="island" id="island" role="region" aria-label="Bouncer island" aria-live="polite"></div>
     </div>
     <aside class="notes" id="notes"></aside>
@@ -403,7 +420,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Open max height</td><td>520, then scroll</td></tr>
         <tr><td>Session detail width</td><td>720 (left rail 196)</td></tr>
         <tr><td>Code pane max height</td><td>230, then scroll</td></tr>
-        <tr><td>Gap from screen top</td><td>8</td></tr>
+        <tr><td>Gap from screen top</td><td>8, inside the window</td></tr>
         <tr><td>Inner padding</td><td>14</td></tr>
         <tr><td>Gap between blocks</td><td>8</td></tr>
         <tr><td>Radius: pill / open / card</td><td>18 / 22 / 14</td></tr>
@@ -438,6 +455,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Request title</td><td>14 · 500</td></tr>
         <tr><td>Command</td><td>12.5 mono · lh 1.5</td></tr>
         <tr><td>Away stat number</td><td>18 · 600 tabular</td></tr>
+        <tr><td>Ticker +N −M</td><td>12 mono tabular</td></tr>
       </table>
       <p class="meta" style="margin:10px 0 0">*Ship the OS faces (no font files). This page previews with Geist.</p>
     </section>
@@ -447,14 +465,17 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Open (spring)</td><td>320ms</td></tr>
         <tr><td>Spring curve</td><td>.2 .9 .25 1.12</td></tr>
         <tr><td>Close</td><td>200ms ease-out</td></tr>
-        <tr><td>Content rise</td><td>6px, with open</td></tr>
-        <tr><td>Allow arm delay</td><td>600ms, shown as fill</td></tr>
+        <tr><td>Morph</td><td>width, height, top, radius, color</td></tr>
+        <tr><td>Window</td><td>grows first, shrinks last</td></tr>
+        <tr><td>Content rise</td><td>6px, only when growing</td></tr>
+        <tr><td>Card arrival</td><td>never animated</td></tr>
+        <tr><td>Allow arm delay</td><td>600ms from fully visible</td></tr>
         <tr><td>Jump (working)</td><td>900ms, 9px, squash 1.14</td></tr>
         <tr><td>Breathe (idle)</td><td>3.2s loop</td></tr>
         <tr><td>Hop (needs you)</td><td>every 1.6s</td></tr>
         <tr><td>Cheer (done)</td><td>1.2s, 11px</td></tr>
         <tr><td>Greeting (launch)</td><td>3 bounces, 2.5s</td></tr>
-        <tr><td>Reduced motion</td><td>all off</td></tr>
+        <tr><td>Reduced motion</td><td>all off, one-step resize</td></tr>
       </table>
     </section>
     <section class="rules">
@@ -471,6 +492,8 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <li><b>Color is never the only signal</b>: every state also has words ("Needs you", "Risky", "Paused").</li>
         <li><b>Hidden means hidden</b>: no animation runs and CPU stays near zero.</li>
         <li><b>Turning auto-allow on is a deliberate step:</b> a confirm that scrolls fully into view, focus on Cancel (never on "Turn on auto-allow"), Esc cancels, Enter never turns it on, and the button arms after 600ms.</li>
+        <li><b>A card is never animated in.</b> It appears at full size once the window has grown to hold it, and its 600ms arm starts only then. Nothing morphs while a card is in front, so its buttons never move.</li>
+        <li><b>The ticker is numbers only:</b> <code>+N −M</code> lines for Edit / MultiEdit, <code>+N</code> for Write (the old file is never read). The label shortens first; the numbers are never cut.</li>
       </ol>
     </section>
   </div>
@@ -508,12 +531,18 @@ function ball(state) {
   b.innerHTML = BALL; // static markup, never agent text
   return b;
 }
-function pill(state, labelParts, badge) {
+function pill(state, labelParts, badge, lines) {
   const p = el("div", "pill");
   p.append(ball(state));
   const l = el("span", "label");
   labelParts.forEach(([text, strong]) => l.append(strong ? el("b", "", text) : document.createTextNode(text)));
   p.append(l);
+  if (lines) { // numbers only, from the hook's own text
+    const n = el("span", "lines");
+    n.append(el("span", "add", "+" + lines.add));
+    if (lines.del !== undefined) n.append(el("span", "del", "\u2212" + lines.del));
+    p.append(n);
+  }
   if (badge) p.append(el("span", "badge" + (badge.risk ? " risk" : ""), badge.text));
   return p;
 }
@@ -566,8 +595,7 @@ function card(req, opts = {}) {
   allow.append(el("span", "arm"), el("span", "", "Allow once"));
   allow.style.position = "relative";
   allow.lastChild.style.position = "relative";
-  allow.disabled = true;
-  setTimeout(() => { allow.disabled = false; }, 600);
+  armOnVisible(allow);
   const done = (ok) => {
     c.replaceChildren(el("div", "toast " + (ok ? "ok" : "no"), ok ? "Allowed. Back to work." : "Denied. Claude Code was told no."));
     setTimeout(() => show("working"), 1400);
@@ -585,7 +613,7 @@ function card(req, opts = {}) {
       const row = el("div", "actions");
       const cancel = el("button", "btn deny", "Cancel");
       const add = el("button", "btn allow"); add.append(el("span", "arm"), el("span", "", "Add rule and allow"));
-      add.lastChild.style.position = "relative"; add.disabled = true; setTimeout(() => { add.disabled = false; }, 600);
+      add.lastChild.style.position = "relative"; armOnVisible(add); flushArms(0);
       cancel.addEventListener("click", () => box.replaceWith(actions));
       add.addEventListener("click", () => { c.replaceChildren(el("div", "toast ok", "Rule added. This command is auto-allowed from now on.")); setTimeout(() => show("auto"), 1600); });
       row.append(cancel, add);
@@ -617,7 +645,7 @@ const REQ = {
 
 const STATES = {
   hidden: { phase: "Phase 2", title: "Hidden", render() { island.className = "island hidden"; },
-    notes: ["Shown when no agent session is running.", "Only a 5px yellow wake strip at the top center. Hovering it for 300ms peeks the idle pill.", "No timers or animation run in this state."] },
+    notes: ["Shown when no agent session is running.", "Only a 5px yellow wake strip at the top center. Hover it for 300ms: the idle pill grows out of the top edge (try it). Leave, and it shrinks back.", "No timers or animation run in this state."] },
   idle: { phase: "Phase 2", title: "Idle pill", render() {
       island.className = "island";
       island.append(pill("idle", [["2 sessions", true], [" · all quiet"]]));
@@ -626,6 +654,10 @@ const STATES = {
       island.className = "island";
       island.append(pill("working", [["bouncer-app", true], [" · Editing rules.rs"]]));
     }, notes: ["At least one session is working. Shows the most recent one.", "Bouncer jumps on a 900ms loop, squashing when he lands.", "With several busy sessions, the label rotates every 4s."] },
+  editing: { phase: "Phase 5c", title: "Working · +N \u2212M", render() {
+      island.className = "island";
+      island.append(pill("working", [["bouncer-app", true], [" · Editing approvals.rs"]], null, { add: 12, del: 3 }));
+    }, notes: ["The ticker: lines added and removed by the current edit, counted from the hook's old and new text.", "Write shows +N only: the old file is never read. MultiEdit adds up its edits.", "Only the two numbers are kept in the activity log, never the text.", "The label shortens first; the numbers are never cut. The + and \u2212 signs say it in words; color isn't the only signal."] },
   sessions: { phase: "Phase 2", title: "Sessions", render() {
       island.className = "island open";
       island.append(withGear(head("needs", "Bouncer", "· 4 sessions")));
@@ -639,7 +671,7 @@ const STATES = {
       const b = el("div", "body");
       b.append(card(REQ.write));
       island.append(b);
-    }, notes: ["Opens by itself when a permission request arrives, and plays the one default sound.", "Allow fills over 600ms before it can be clicked.", "No answer within 110s: the card closes and Claude Code asks in its terminal instead."] },
+    }, notes: ["Opens by itself when a permission request arrives, and plays the one default sound.", "Never animated in: the window grows to hold it, then it appears at full size. Allow's 600ms fill starts only then (Show window + Slow \u00d74 show the order).", "Allow fills over 600ms before it can be clicked.", "No answer within 110s: the card closes and Claude Code asks in its terminal instead."] },
   queue: { phase: "Phase 2", title: "Approval · queue", render() {
       island.className = "island open";
       island.append(head("needs", "Needs you", "· 2 waiting"));
@@ -747,7 +779,7 @@ function settings(confirming) {
     const row = el("div", "actions");
     const cancel = el("button", "btn deny small", "Cancel"); cancel.addEventListener("click", () => show("settings"));
     const on = el("button", "btn allow small"); on.append(el("span", "arm"), el("span", "", "Turn on auto-allow"));
-    on.lastChild.style.position = "relative"; on.disabled = true; setTimeout(() => { on.disabled = false; }, 600);
+    on.lastChild.style.position = "relative"; armOnVisible(on);
     on.addEventListener("click", () => show("settings"));
     // Enter never turns auto on; Esc means Cancel.
     c.addEventListener("keydown", (e) => {
@@ -861,7 +893,7 @@ Object.assign(STATES, {
       const q = el("div", "q"); q.append(document.createTextNode("Wants to "), el("b", "", "edit approvals.rs"), document.createTextNode(" (2 changes)"));
       const deny = el("button", "btn deny", "Deny");
       const allow = el("button", "btn allow"); allow.append(el("span", "arm"), el("span", "", "Allow edit"));
-      allow.lastChild.style.position = "relative"; allow.disabled = true; setTimeout(() => { allow.disabled = false; }, 600);
+      allow.lastChild.style.position = "relative"; armOnVisible(allow);
       const done = ok => { ask.replaceChildren(el("div", "toast " + (ok ? "ok" : "no"), ok ? "Allowed. Writing the change." : "Denied. The file is unchanged.")); setTimeout(() => show(ok ? "detail" : "sessions"), 1400); };
       deny.addEventListener("click", () => done(false)); allow.addEventListener("click", () => done(true));
       ask.append(q, deny, allow); pane.append(ask);
@@ -870,20 +902,107 @@ Object.assign(STATES, {
     }, notes: ["Edits are approved with the exact change in view, not just a file name.", "Same rules as every card: Allow arms after 600ms, never the default focus, Enter doesn't approve.", "Long diffs scroll inside the code pane; the ask bar stays pinned at the bottom."] },
 });
 
+// ---- motion (Phase 5c) ------------------------------------------------------
+// One Web Animation morphs the island from the box it had to the box it gets.
+// Growing: the window gets the bigger size first, then the island animates
+// inside it. Closing: the island animates first, then the window shrinks.
+// A card is never animated in, and its arm starts once it's fully visible.
+const RM = matchMedia("(prefers-reduced-motion: reduce)");
+const screenEl = document.querySelector(".screen");
+const win = document.getElementById("win");
+const CARDS = new Set(["approval", "queue", "risky", "editask"]);
+const OS_MS = 60; // the OS takes a frame or two to resize a window
+const SHADOW_X = 20, SHADOW_B = 32; // the window's room for the shadow (at 100%)
+const PROPS = ["width", "height", "minHeight", "top", "borderRadius", "backgroundColor"];
+let slow = 1, simReduced = false, morph = null, rise = null, first = true;
+const reduced = () => RM.matches || simReduced;
+let arms = [];
+function armOnVisible(btn) { btn.disabled = true; btn.classList.add("waiting"); arms.push(btn); }
+function flushArms(after) {
+  const list = arms; arms = [];
+  setTimeout(() => list.forEach((b) => { b.classList.remove("waiting"); setTimeout(() => { b.disabled = false; }, 600); }), after);
+}
+function snap() {
+  const cs = getComputedStyle(island);
+  const kf = {}; PROPS.forEach((k) => { kf[k] = cs[k]; });
+  return { kf, rect: island.getBoundingClientRect() };
+}
+// The window: from the screen's top edge (the 8px gap is inside it) to below
+// the island's shadow, as wide as the island plus its shadow.
+// The hidden strip's window is just the strip (no shadow room).
+function winFor(r, bare) {
+  const s = screenEl.getBoundingClientRect();
+  const z = bare ? 0 : parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--scale")) || 1;
+  return { w: r.width + 2 * SHADOW_X * z, h: r.bottom - s.top + SHADOW_B * z, cx: r.left - s.left + r.width / 2 };
+}
+let winNow = null; // the window as it is right now
+function setWin(b) { winNow = b; win.style.width = b.w + "px"; win.style.height = b.h + "px"; win.style.left = (b.cx - b.w / 2) + "px"; }
+function morphFrom(before, card) {
+  const after = snap();
+  const a = winNow ?? winFor(before.rect), b = winFor(after.rect, current === "hidden");
+  if (first || card || reduced()) { // one step: no morph, no rise
+    first = false;
+    setWin(b);
+    flushArms(card ? OS_MS * slow : 0); // fully visible once the window holds it
+    return;
+  }
+  const grow = after.rect.width * after.rect.height >= before.rect.width * before.rect.height;
+  const timing = { duration: (grow ? 320 : 200) * slow, easing: grow ? "cubic-bezier(.2,.9,.25,1.12)" : "ease-out", fill: "backwards" };
+  if (grow) {
+    setWin({ w: Math.max(a.w, b.w), h: Math.max(a.h, b.h), cx: b.cx }); // window first
+    timing.delay = OS_MS * slow; // the island waits at its old box meanwhile
+  }
+  morph = island.animate([before.kf, after.kf], timing);
+  const content = island.querySelector(".body, .detail");
+  if (grow && content) rise = content.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], timing);
+  morph.finished.then(() => { morph = null; setWin(b); }, () => {}); // window last
+  flushArms(0);
+}
+
 function show(name) {
+  const before = snap(); // mid-morph, this is where the island is right now
+  if (morph) morph.cancel();
+  if (rise) rise.cancel();
+  morph = rise = null;
   current = name;
   island.replaceChildren();
   STATES[name].render();
-  document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", String(c.dataset.s === name)));
+  morphFrom(before, CARDS.has(name));
+  document.querySelectorAll(".chip[data-s]").forEach(c => c.setAttribute("aria-pressed", String(c.dataset.s === name)));
   const n = STATES[name];
   const ul = el("ul");
   n.notes.forEach(t => ul.append(el("li", "", t)));
   notes.replaceChildren(el("div", "phase", n.phase), el("h2", "", n.title), ul);
 }
-document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => show(c.dataset.s)));
+document.querySelectorAll(".chip[data-s]").forEach(c => c.addEventListener("click", () => show(c.dataset.s)));
+document.querySelectorAll(".chip[data-t]").forEach(c => c.addEventListener("click", () => {
+  const on = c.getAttribute("aria-pressed") !== "true";
+  c.setAttribute("aria-pressed", String(on));
+  if (c.dataset.t === "win") screenEl.classList.toggle("showwin", on);
+  if (c.dataset.t === "slow") slow = on ? 4 : 1;
+  if (c.dataset.t === "reduced") simReduced = on;
+}));
+// Play: the strip is hovered and peeks the pill, the pill opens, then it all closes.
+let playing = [];
+document.querySelector("[data-play]").addEventListener("click", () => {
+  playing.forEach(clearTimeout);
+  const steps = [["hidden", 0], ["idle", 900], ["sessions", 1100], ["editing", 1500], ["hidden", 1300]];
+  let t = 0;
+  playing = steps.map(([st, wait]) => { t += wait * slow; return setTimeout(() => show(st), t); });
+});
+// Hovering the wake strip for 300ms peeks the idle pill; leaving hides it again.
+let peekTimer = 0, peeking = false;
+island.addEventListener("mouseenter", () => {
+  if (current !== "hidden") return;
+  peekTimer = setTimeout(() => { peeking = true; show("idle"); }, 300);
+});
+island.addEventListener("mouseleave", () => {
+  clearTimeout(peekTimer);
+  if (peeking) { peeking = false; show("hidden"); }
+});
 island.addEventListener("click", (e) => {
   if (e.target.closest("button, input")) return;
-  if (["idle", "working", "paused", "auto"].includes(current)) show("sessions");
+  if (["idle", "working", "editing", "paused", "auto"].includes(current)) show("sessions");
 });
 const CAST = [["idle","Idle","breathes"],["working","Working","jumps"],["needs","Needs you","hops, shows !"],["risky","Risky","turns red, blocks"],["done","Done","happy hop"],["paused","Paused","sleeps"],["dance","Music","dances"]];
 const cast = document.getElementById("cast");
