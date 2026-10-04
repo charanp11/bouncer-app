@@ -21,14 +21,14 @@
   /* geometry */
   --strip-w: 180px;
   --strip-h: 5px;
-  --pill-w: 288px;
-  --pill-h: 36px;
+  --pill-w: 336px;
+  --pill-h: 42px;
   --open-w: 400px;
   --open-max-h: 520px;
   --detail-w: 720px;
   --rail-w: 196px;
   --code-max-h: 230px;
-  --r-pill: 18px;
+  --r-pill: 21px;
   --r-open: 22px;
   --r-card: 14px;
   --pad: 14px;
@@ -150,12 +150,18 @@ html.square .island {
 }
 
 .pill .label {
+  font-size: 14px;
   flex: 1;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted);
+}
+
+/* The launch greeting: just Bouncer, centred, no words. */
+.pill.greet {
+  justify-content: center;
 }
 
 .pill .label b {
@@ -930,8 +936,8 @@ pre.cmd {
 /* the character: Bouncer, a tiny bright ball in shades. Colors and which
    face shows live here; his motion is drawn by ball.ts. */
 .ball {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   flex: none;
   display: grid;
   place-items: center;
@@ -940,8 +946,8 @@ pre.cmd {
 }
 
 .ball svg {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   overflow: visible;
 }
 

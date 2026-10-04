@@ -29,12 +29,12 @@
   --ui: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   /* island geometry (spec) */
-  --pill-w: 288px;
-  --pill-h: 36px;
+  --pill-w: 336px;
+  --pill-h: 42px;
   --open-w: 400px;
   --open-max-h: 520px;
   --detail-w: 720px;
-  --r-pill: 18px;
+  --r-pill: 21px;
   --r-open: 22px;
   --r-card: 14px;
   --pad: 14px;
@@ -96,7 +96,7 @@ h1 .stamp { color: var(--sun); }
 .island.hidden > * { display: none; }
 
 .pill { display: flex; align-items: center; gap: 10px; height: var(--pill-h); padding: 0 14px 0 10px; width: 100%; }
-.pill .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.pill .label { font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .pill .label b { color: var(--text); font-weight: 500; }
 .badge { font: 600 11px var(--ui); color: var(--island); background: var(--wait); border-radius: 999px; padding: 1px 7px; }
 .badge.risk { background: var(--risk); color: #fff; }
@@ -231,8 +231,8 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .askbar .btn { height: 30px; padding: 0 14px; }
 
 /* the character: Bouncer, a tiny bright ball in shades */
-.ball { width: 26px; height: 26px; flex: none; display: grid; place-items: center; --body: var(--sun); --body-deep: var(--sun-deep); }
-.ball svg { width: 26px; height: 26px; overflow: visible; }
+.ball { width: 30px; height: 30px; flex: none; display: grid; place-items: center; --body: var(--sun); --body-deep: var(--sun-deep); }
+.ball svg { width: 30px; height: 30px; overflow: visible; }
 .ball .jumper, .ball .shadow { transform-box: fill-box; transform-origin: 50% 100%; }
 .ball .body-c { fill: var(--body); }
 .ball .deep { fill: var(--body-deep); }
@@ -321,7 +321,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.4 · Oct 2 2026</div>
+    <div class="meta">design/prototype · v0.5 · Oct 3 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -366,7 +366,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h3>Sizes</h3>
       <table>
         <tr><td>Wake strip (hidden)</td><td>180 × 5</td></tr>
-        <tr><td>Pill</td><td>288 × 36</td></tr>
+        <tr><td>Pill</td><td>336 × 42</td></tr>
         <tr><td>Open width</td><td>400</td></tr>
         <tr><td>Open max height</td><td>520, then scroll</td></tr>
         <tr><td>Session detail width</td><td>720 (left rail 196)</td></tr>
@@ -374,9 +374,9 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Gap from screen top</td><td>8</td></tr>
         <tr><td>Inner padding</td><td>14</td></tr>
         <tr><td>Gap between blocks</td><td>8</td></tr>
-        <tr><td>Radius: pill / open / card</td><td>18 / 22 / 14</td></tr>
+        <tr><td>Radius: pill / open / card</td><td>21 / 22 / 14</td></tr>
         <tr><td>Button height / radius</td><td>34 / 9</td></tr>
-        <tr><td>Character in island</td><td>26 × 26</td></tr>
+        <tr><td>Character in island</td><td>30 × 30</td></tr>
       </table>
     </section>
     <section>
@@ -399,6 +399,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <table>
         <tr><td>UI face</td><td>Segoe UI Variable*</td></tr>
         <tr><td>Command face</td><td>Cascadia Mono*</td></tr>
+        <tr><td>Pill label</td><td>14 · 400 / 500</td></tr>
         <tr><td>Body / row name</td><td>13 · 400 / 500</td></tr>
         <tr><td>Step, meta</td><td>12 · 400</td></tr>
         <tr><td>Request title</td><td>14 · 500</td></tr>
@@ -419,6 +420,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Breathe (idle)</td><td>3.2s loop</td></tr>
         <tr><td>Hop (needs you)</td><td>every 1.6s</td></tr>
         <tr><td>Cheer (done)</td><td>1.2s, 11px</td></tr>
+        <tr><td>Greeting (launch)</td><td>drop + 3 bounces, &lt; 2.5s, no words</td></tr>
         <tr><td>Reduced motion</td><td>all off</td></tr>
       </table>
     </section>
