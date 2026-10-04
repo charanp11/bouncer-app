@@ -1361,21 +1361,58 @@ Threats (5b):
 | Unreadable text | All text ≥ 4.5:1 (fixes above); color is never the only signal (existing rule) |
 | Screen reader reads the island out of order | DOM order = reading order (head, card: who, what, reason, command, buttons); the card is announced once on arrival (`aria-live` polite, already on the island) |
 
+7. **The settings button is a cog** (Charan): the first icon, a circle with
+   eight rays, read as a light / dark theme switch. Prototype v0.10 first.
+
+Verify (2026-10-04, Windows 1366 × 768, debug app, fixtures through the
+relay on a private test pipe, scratch `BOUNCER_RULES`; page driven over
+WebView2's debug port with focus emulated, so the OS focus was never taken):
+
+- Settings at Medium (112%): 493 × 572 window on a 720-px work area, no
+  scrolling; with the auto-allow confirm open the body scrolls and both
+  confirm buttons are fully in view; focus on Cancel.
+- Size: Small / Medium / Large saved to `preferences.json` and applied at
+  once; Large is capped to 137% by the 40% rule on a 1366-wide screen.
+- Mode: confirm opens in view, focus on Cancel, "Turn on" disabled for
+  600 ms, Esc cancels, Enter does nothing, turning on writes `auto` (only
+  that line), turning off doesn't ask; the island shows "Rules changed".
+- Sounds: a new card → two sine notes, risky → two triangle notes, a
+  finished session → one bell, muted → none; the audio context is
+  suspended ~0.5 s after each. WebView2 lets an unclicked page play sound,
+  so no browser argument was needed.
+- Keyboard: a new card focuses its Deny; Tab skips an unarmed Allow and
+  stays inside the island; Enter on an armed Allow does nothing; Space on
+  Deny denies, Space on an armed Allow allows; the next card after a
+  decision focuses its Deny and re-arms; settings controls in order, focus
+  kept across re-renders; Esc closes settings and the list.
+- Found and fixed: a card queued behind the "Allowed / Denied" message
+  could arm while hidden (older than 5b); it now arms when it appears.
+- Idle CPU, 60 s, app + WebView2: hidden strip 78 ms (0.1%), idle pill
+  250 ms (0.4%, the blinks); no change from 5a.
+- Contrast: every text color ≥ 4.5:1 on island and raised (faint 5.04 /
+  4.52, risky badge 5.79); the "!" icon in a risk reason is a graphic
+  (3.36, over the 3:1 for icons).
+- Diff reread: no HTML sinks; every new command takes known values only
+  (size names, mode names, booleans); the hook status reads Claude Code's
+  settings file (≤ 1 MB) and returns only a word.
+
 Phase 5b is done when:
 
-- [ ] Settings state in the prototype, approved; then built to it (Size,
+- [x] Settings state in the prototype, approved; then built to it (Size,
   Sound, Observe / Auto, Wipe history, rules file path, hook status)
-- [ ] Size Small / Medium / Large, saved, applied at once (40% cap kept)
-- [ ] Sounds (needs you, risky, done), generated; mute saved; none while
+- [x] Size Small / Medium / Large, saved, applied at once (40% cap kept)
+- [x] Sounds (needs you, risky, done), generated; mute saved; none while
   paused; one at a time, repeats within 2 s dropped; idle CPU still ~0%
-- [ ] Observe / auto switch: confirm to turn on, `set_mode` checked write
+- [x] Observe / auto switch: confirm to turn on, `set_mode` checked write
 - [ ] Keyboard: open from the tray, Tab through settings and cards, Esc
   closes; Enter never approves; Space on Allow only when armed; a new card
   moves focus to its Deny; focus never taken from the terminal by a card
-- [ ] Contrast ≥ 4.5:1 everywhere (prototype first); screen reader order
-  checked by hand (Narrator)
+  (all checked over the debug port; the tray and real OS focus need a hand
+  check)
+- [ ] Contrast ≥ 4.5:1 everywhere (prototype first) [x measured]; screen
+  reader order checked by hand (Narrator) [needs Charan]
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
-  before every push
+  before every push (local green: 130 Rust + 36 frontend; gitleaks clean)
 
 ## Phase 5c — Island motion (after 5b)
 
@@ -1530,6 +1567,8 @@ Mac checks for Phase 9 (a person on a real Mac):
 - [ ] No Dock icon; tray icon in the menu bar; Pause greys it and changes the tooltip; Wipe history and Quit work
 - [ ] Island corners rounded with a shadow, nothing opaque around it; fonts look right
 - [ ] The island never takes keyboard focus; one click on Allow / Deny works
+- [ ] Tray "Open Bouncer" / "Settings…" give the island the keyboard (Tab, Esc); clicking elsewhere gives it back (5b `set_focusable` toggling)
+- [ ] Sounds play without clicking the island first (WKWebView autoplay); idle CPU stays ~0 after a sound
 - [ ] Island sits under the menu bar, can be dragged, comes back if dropped off screen, crosses monitors
 - [ ] Real Claude Code session: hooks installed with `bouncer install-hooks`, a Bash request allowed and one denied from the island, an unanswered one falls back to the terminal
 - [ ] Unsigned `.dmg` opens after "Open Anyway"; uninstall removes only our hook entries
@@ -1802,3 +1841,33 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   overlap, reduced motion, moods.
 - Not checked by hand yet (Charan): the feel of looking, squish and dizzy
   with a real mouse in the island; a real Claude Code session; macOS.
+
+### Phase 5b summary (2026-10-04)
+
+- Settings screen (prototype v0.8–v0.10 first): Size (100 / 112 / 125%,
+  Medium default), Sound, Auto-allow, Wipe history (confirm, armed), the
+  rules file path, hook status ("installed" / "not installed: run bouncer
+  install-hooks"; install stays in the CLI until the Phase 9 installer).
+  Opened from a cog in the session list or the tray ("Settings…").
+- Preferences in `preferences.json` next to `rules.toml`, read with the
+  rules file's checks, written atomically, known values only.
+- One island scale for everything, capped at 40% of the screen's width and
+  the work area's height; Settings compact enough for a 768-px screen.
+- Observe / auto switch: `rules::set_mode` rewrites only the mode line and
+  checks the read-back; turning auto on asks (focus on Cancel, Esc cancels,
+  Enter never, armed 600 ms).
+- Three generated sounds (needs you, risky, done), one at a time, repeats
+  within 2 s dropped, none while paused or muted; the audio context is
+  suspended after each.
+- Keyboard access only when opened on purpose (tray "Open Bouncer" /
+  "Settings…", the cog): Tab stays in the island, Enter never presses an
+  armed button, Space works once armed, a new card focuses its Deny, Esc
+  gives the keyboard back; losing focus makes the window non-focusable
+  again. Screen readers get one short sentence per event (a separate live
+  region) instead of the whole island.
+- Contrast fixed to ≥ 4.5:1 (faint text, line numbers, risky badge).
+- Fixed on the way: a queued card could arm behind the Allowed / Denied
+  message.
+- Tests: 130 Rust + 36 frontend, green locally.
+- Needs Charan by hand: tray items and real OS focus, Narrator reading
+  order, the sounds by ear, Settings on his screen.
