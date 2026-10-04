@@ -759,6 +759,7 @@ function autoRow(view: View): HTMLElement {
     }
   });
   sw.disabled = broken;
+  sw.dataset.key = "auto";
   const row = setRow(
     "Auto-allow",
     [auto ? "On · auto" : "Off · observe", sw],
@@ -776,6 +777,7 @@ function autoRow(view: View): HTMLElement {
     on.classList.add("small");
     const close = () => {
       confirmingAuto = false;
+      refocus = "auto";
       rerender();
     };
     cancel.addEventListener("click", close);
@@ -847,6 +849,7 @@ function renderSettings(view: View, state: BallState) {
   list.append(autoRow(view));
 
   const wipe = el("button", "btn deny small", "Wipe…");
+  wipe.dataset.key = "wipe";
   wipe.addEventListener("click", () => {
     wiping = true;
     wipeSince = performance.now();
@@ -862,6 +865,7 @@ function renderSettings(view: View, state: BallState) {
     del.classList.add("small");
     cancel.addEventListener("click", () => {
       wiping = false;
+      refocus = "wipe";
       if (current) render(current);
     });
     del.addEventListener("click", () => {
@@ -870,6 +874,7 @@ function renderSettings(view: View, state: BallState) {
         .catch(() => {})
         .finally(() => {
           wiping = false;
+          refocus = "wipe";
           if (current) render(current);
         });
     });
@@ -913,8 +918,13 @@ function render(view: View) {
   if (!document.hasFocus()) return;
   const card = view.queue[0];
   const target = card && card.id !== before ? `deny:${card.id}` : had;
-  if (target) findKey(target)?.focus({ preventScroll: true });
+  const next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
+  refocus = null;
+  next?.focus({ preventScroll: true });
 }
+
+/** Where focus goes when the focused control disappears (a confirm closed). */
+let refocus: string | null = null;
 
 /** What identifies a control across re-renders. */
 function focusKey(node: Element | null): string | null {
