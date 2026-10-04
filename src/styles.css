@@ -8,7 +8,7 @@
   --line: rgba(255, 255, 255, 0.08);
   --text: #eef0f4;
   --muted: #9aa1ad;
-  --faint: #6b7280;
+  --faint: #7b8290; /* 4.5:1 on raised */
   /* meaning */
   --sun: #ffce3a;
   --sun-deep: #f0a91c;
@@ -181,7 +181,7 @@ html.square .island {
 
 .badge.risk {
   background: var(--risk);
-  color: #fff;
+  color: var(--island);
 }
 
 .body {
@@ -829,7 +829,7 @@ pre.cmd {
 }
 
 .ln .n {
-  color: #4b5261;
+  color: var(--faint);
   text-align: right;
   padding-right: 10px;
   font-variant-numeric: tabular-nums;
