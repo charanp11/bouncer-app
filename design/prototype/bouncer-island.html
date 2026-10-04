@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Bouncer Island</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +15,7 @@
   --line: rgba(255, 255, 255, 0.08);
   --text: #eef0f4;
   --muted: #9aa1ad;
-  --faint: #6b7280;
+  --faint: #7b8290;     /* 4.5:1 on raised */
   /* meaning */
   --sun: #ffce3a;        /* brand: Bouncer himself */
   --sun-deep: #f0a91c;   /* his shading */
@@ -102,7 +103,7 @@ h1 .stamp { color: var(--sun); }
 .pill .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .pill .label b { color: var(--text); font-weight: 500; }
 .badge { font: 600 11px var(--ui); color: var(--island); background: var(--wait); border-radius: 999px; padding: 1px 7px; }
-.badge.risk { background: var(--risk); color: #fff; }
+.badge.risk { background: var(--risk); color: var(--island); }
 
 .body { padding: 0 var(--pad) var(--pad); display: grid; gap: var(--gap); max-height: calc(var(--open-max-h) - var(--pill-h)); overflow-y: auto; animation: rise var(--t-open) var(--spring); }
 @keyframes rise { from { opacity: 0; transform: translateY(-6px); } }
@@ -166,6 +167,29 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .stuck { font-size: 12.5px; color: var(--muted); background: var(--raised); border-radius: 10px; padding: 8px 10px; }
 .stuck b { color: var(--wait); font-weight: 500; }
 
+/* settings (Phase 5b) */
+.setlist { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-card); display: grid; }
+.setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 10px 12px; }
+.setrow + .setrow { border-top: 1px solid var(--line); }
+.setrow .name { font-weight: 500; }
+.setrow .hint { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.setrow .ctl { grid-row: 1; grid-column: 2; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.setrow pre.cmd { grid-column: 1 / -1; margin-top: 6px; user-select: all; }
+.seg { display: inline-flex; background: var(--island); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+.seg button { border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--ui); height: 26px; padding: 0 10px; border-radius: 7px; cursor: pointer; }
+.seg button[aria-checked="true"] { background: var(--text); color: var(--island); }
+.toggle { width: 38px; height: 22px; border-radius: 11px; border: 1px solid rgba(255,255,255,0.18); background: var(--island); position: relative; cursor: pointer; padding: 0; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 160ms ease-out; }
+.toggle[aria-checked="true"] { background: var(--ok); border-color: var(--ok); }
+.toggle[aria-checked="true"]::after { transform: translateX(16px); background: var(--island); }
+.seg button:focus-visible, .toggle:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
+.status { display: inline-flex; align-items: center; gap: 6px; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.confirm { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--island); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+.confirm b { color: var(--text); font-weight: 500; }
+.btn.small { height: 30px; font-size: 12.5px; }
+.iconbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; vertical-align: -3px; }
+
 /* later: drop, music, chat */
 .drop { border: 1.5px dashed rgba(255,206,58,0.6); border-radius: var(--r-card); padding: 18px 12px; text-align: center; color: var(--muted); display: grid; gap: 4px; justify-items: center; }
 .drop b { color: var(--text); font-weight: 500; }
@@ -218,7 +242,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .filebar .path { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .lines { margin: 0; padding: 8px 0; font: 12.5px/1.75 var(--mono); overflow: auto; max-height: 230px; }
 .ln { display: grid; grid-template-columns: 38px 16px minmax(0,1fr); white-space: pre; padding-right: 12px; }
-.ln .n { color: #4b5261; text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
+.ln .n { color: var(--faint); text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
 .ln .m { color: var(--faint); }
 .ln.del { background: rgba(239,90,82,.13); box-shadow: inset 2px 0 0 var(--risk); }
 .ln.del .m, .ln.del .n { color: #ff8f88; }
@@ -324,7 +348,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.6 · Oct 4 2026</div>
+    <div class="meta">design/prototype · v0.7 · Oct 4 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -343,6 +367,10 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <button class="chip" data-s="risky">Risky request</button>
       <button class="chip" data-s="auto">Auto-allowed</button>
       <button class="chip" data-s="away">Away summary</button>
+    </div>
+    <div class="group"><span class="label">Phase 5</span>
+      <button class="chip" data-s="settings">Settings</button>
+      <button class="chip" data-s="settingsauto">Settings · turn on auto</button>
     </div>
     <div class="group"><span class="label">Phase 6–8</span>
       <button class="chip" data-s="chat">Chat</button>
@@ -391,6 +419,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td><span class="sw" style="background:var(--raised)"></span>Raised (rows, cards)</td><td>#161A21</td></tr>
         <tr><td><span class="sw" style="background:var(--text)"></span>Text</td><td>#EEF0F4</td></tr>
         <tr><td><span class="sw" style="background:var(--muted)"></span>Muted text</td><td>#9AA1AD</td></tr>
+        <tr><td><span class="sw" style="background:var(--faint)"></span>Faint text</td><td>#7B8290</td></tr>
         <tr><td><span class="sw" style="background:var(--sun)"></span>Bouncer yellow</td><td>#FFCE3A</td></tr>
         <tr><td><span class="sw" style="background:var(--sun-deep)"></span>Bouncer shading</td><td>#F0A91C</td></tr>
         <tr><td><span class="sw" style="background:var(--wait)"></span>Needs you</td><td>#FF8A3D</td></tr>
@@ -598,7 +627,7 @@ const STATES = {
     }, notes: ["At least one session is working. Shows the most recent one.", "Bouncer jumps on a 900ms loop, squashing when he lands.", "With several busy sessions, the label rotates every 4s."] },
   sessions: { phase: "Phase 2", title: "Sessions", render() {
       island.className = "island open";
-      island.append(head("needs", "Bouncer", "· 4 sessions"));
+      island.append(withGear(head("needs", "Bouncer", "· 4 sessions")));
       const b = el("div", "body");
       b.append(sessions([S.b, S.a, S.c, S.d]));
       island.append(b);
@@ -682,6 +711,56 @@ const STATES = {
 };
 
 
+function withGear(h) {
+  const g = el("button", "iconbtn"); g.innerHTML = ICONS.gear; g.setAttribute("aria-label", "Settings");
+  g.addEventListener("click", (e) => { e.stopPropagation(); show("settings"); });
+  h.insertBefore(g, h.lastChild);
+  return h;
+}
+function setRow(name, ctl, hint) {
+  const r = el("div", "setrow");
+  r.append(el("div", "name", name));
+  const c = el("div", "ctl"); c.append(...ctl); r.append(c);
+  if (hint) r.append(el("div", "hint", hint));
+  return r;
+}
+function toggle(label, on, onClick) {
+  const t = el("button", "toggle"); t.setAttribute("role", "switch"); t.setAttribute("aria-checked", String(on)); t.setAttribute("aria-label", label);
+  if (onClick) t.addEventListener("click", onClick);
+  return t;
+}
+function settings(confirming) {
+  island.className = "island open";
+  island.append(head("idle", "Settings"));
+  const b = el("div", "body");
+  const list = el("div", "setlist");
+  const seg = el("div", "seg"); seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "Size");
+  ["Small", "Medium", "Large"].forEach((n) => { const x = el("button", "", n); x.setAttribute("role", "radio"); x.setAttribute("aria-checked", String(n === "Medium")); seg.append(x); });
+  list.append(setRow("Size", [seg], "Small 100% · Medium 125% · Large 150%. Applies at once."));
+  list.append(setRow("Sound", [el("span", "", "On"), toggle("Sound", true)], "Needs you, risky and done. Never while paused."));
+  const auto = setRow("Auto-allow", [el("span", "", "Off · observe"), toggle("Auto-allow", false, () => show("settingsauto"))],
+    "Observe: rules never answer for you; cards say what they would do.");
+  if (confirming) {
+    const c = el("div", "confirm");
+    const t = el("div"); t.append(el("b", "", "Turn on auto-allow? "), document.createTextNode("Requests your rules allow are approved without asking. Risky requests always ask. You can turn it off here any time."));
+    const row = el("div", "actions");
+    const cancel = el("button", "btn deny small", "Cancel"); cancel.addEventListener("click", () => show("settings"));
+    const on = el("button", "btn allow small"); on.append(el("span", "arm"), el("span", "", "Turn on auto-allow"));
+    on.lastChild.style.position = "relative"; on.disabled = true; setTimeout(() => { on.disabled = false; }, 600);
+    on.addEventListener("click", () => show("settings"));
+    row.append(cancel, on); c.append(t, row); auto.append(c);
+  }
+  list.append(auto);
+  const wipe = el("button", "btn deny small", "Wipe…"); wipe.style.padding = "0 12px";
+  list.append(setRow("Activity history", [wipe], "Kept on this computer for 30 days, secrets redacted. Wipe asks first."));
+  const rules = setRow("Rules file", [], null);
+  rules.append(el("pre", "cmd", "C:\\Users\\chara\\AppData\\Roaming\\Bouncer\\rules.toml"));
+  list.append(rules);
+  list.append(setRow("Claude Code hooks", [el("span", "status", "Installed")], "Not installed shows: run bouncer install-hooks"));
+  b.append(list);
+  island.append(b);
+}
+
 const ICONS = {
   home: '<svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>',
@@ -762,6 +841,10 @@ Object.assign(STATES, {
       d.append(rail("working", "run"), codePane(true));
       island.append(d);
     }, notes: ["Click a session row to open its detail. The island widens to 720.", "Left: Bouncer, the project, and every step with who allowed it (rule, you, or flagged).", "Right: the change being made, as a diff built from the hook's old and new text. The caret marks the line being written."] },
+  settings: { phase: "Phase 5b", title: "Settings", render() { settings(false); },
+    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Hooks show status only; install and uninstall stay in the bouncer command (Phase 9 installer)."] },
+  settingsauto: { phase: "Phase 5b", title: "Settings · turn on auto", render() { settings(true); },
+    notes: ["Turning auto-allow on asks first; its button arms after 600ms like Allow.", "Turning it off doesn't ask.", "Bouncer writes the mode into rules.toml itself, checked and atomic, and the island shows the change like any other."] },
   editask: { phase: "Phase 2 · design", title: "Approve an edit", render() {
       island.className = "island open wide";
       island.append(tabs("home"));
