@@ -13,6 +13,7 @@ fn main() {
         "wipe",
         "about",
         "set_mode",
+        "keyboard",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");

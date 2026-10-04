@@ -99,12 +99,20 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             subscribe, decide, always, expand, drag, fit, settings, set_prefs, wipe, about,
-            set_mode
+            set_mode, keyboard
         ])
-        .on_window_event(|window, event| {
-            if let (WindowEvent::Moved(_), Some(island)) = (event, window.try_state::<Island>()) {
-                let _ = island.moved.lock().unwrap().send(());
+        .on_window_event(|window, event| match event {
+            WindowEvent::Moved(_) => {
+                if let Some(island) = window.try_state::<Island>() {
+                    let _ = island.moved.lock().unwrap().send(());
+                }
             }
+            // Clicking anywhere else gives the keyboard back for good: the
+            // island can't be focused again until it's opened on purpose.
+            WindowEvent::Focused(false) => {
+                let _ = window.set_focusable(false);
+            }
+            _ => {}
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -183,11 +191,12 @@ const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal
 /// Tray menu: Pause / Resume, Wipe history and Quit. While paused the icon is greyed and
 /// every request goes to the terminal.
 fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open Bouncer", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
     let wipe = MenuItem::with_id(app, "wipe", "Wipe history", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Bouncer", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &pause, &wipe, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &settings, &pause, &wipe, &quit])?;
     let icon = app
         .default_window_icon()
         .ok_or_else(|| tauri::Error::AssetNotFound("app icon".into()))?;
@@ -199,11 +208,19 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
         .tooltip(TOOLTIP)
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
+            "open" => {
+                app.state::<Island>()
+                    .expanded
+                    .store(true, Ordering::Relaxed);
+                show(app, desk.view());
+                take_keyboard(app);
+            }
             "settings" => {
                 app.state::<Island>()
                     .settings
                     .store(true, Ordering::Relaxed);
                 show(app, desk.view());
+                take_keyboard(app);
             }
             "pause" => {
                 let now_paused = !desk.paused();
@@ -430,6 +447,34 @@ fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
             lay_out(&window, &handle.state::<Island>());
         }
     });
+}
+
+/// The island takes the keyboard only when the user opens it on purpose (the
+/// tray, or the gear); otherwise it is never focusable, so a card arriving
+/// can't take typing away from the terminal. Main thread only for the window.
+fn take_keyboard(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.set_focusable(true);
+            let _ = window.set_focus();
+        }
+    });
+}
+
+/// The page asks for the keyboard (the gear was clicked) or gives it back (Esc).
+#[tauri::command]
+fn keyboard(app: AppHandle, on: bool) {
+    if on {
+        take_keyboard(&app);
+    } else {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.set_focusable(false);
+            }
+        });
+    }
 }
 
 /// Opens or closes the settings screen (the gear, its ×, or Esc).
