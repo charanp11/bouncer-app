@@ -9,6 +9,7 @@ pub mod diff;
 pub mod event;
 pub mod hooks;
 pub mod ipc;
+pub mod prefs;
 pub mod redact;
 pub mod rules;
 pub mod shell;
