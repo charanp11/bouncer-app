@@ -119,8 +119,10 @@ export function squish(m: Motion, dizzy: boolean) {
   else m.sv -= SQUISH;
 }
 
-export function blink(m: Motion) {
-  if (m.mood !== "paused") m.blink = BLINK;
+export const BLINK_MS = BLINK * 1000;
+
+export function blink(m: Motion, open = false) {
+  m.blink = open || m.mood === "paused" ? 0 : BLINK;
 }
 
 /** Where the face looks, in units (clamped to LOOK_MAX). */
@@ -189,7 +191,8 @@ export function advance(m: Motion, dt: number) {
 
 const breathing = (m: Motion) => m.mood === "idle" && m.t < BREATHE * BREATHS;
 
-/** Whether another frame would change anything. */
+/** Whether another frame would change anything. A blink needs none: it is
+ * two plain repaints (shut, open), the cheapest thing that reads as one. */
 export function moving(m: Motion): boolean {
   if (["working", "needs", "risky", "dance"].includes(m.mood)) return true;
   return (
@@ -201,7 +204,6 @@ export function moving(m: Motion): boolean {
     Math.abs(m.sv) > 1e-2 ||
     m.look[0] !== m.target[0] ||
     m.look[1] !== m.target[1] ||
-    m.blink > 0 ||
     m.dizzy > 0
   );
 }
@@ -236,7 +238,6 @@ export function pose(m: Motion): Pose {
     tilt = 15 * fade;
   }
   const lift = Math.min(1, y / JUMP);
-  const b = m.blink > 0 ? Math.sin((Math.PI * (BLINK - m.blink)) / BLINK) : 0;
   return {
     y,
     sx,
@@ -245,7 +246,7 @@ export function pose(m: Motion): Pose {
     shadow: 1 - 0.45 * lift,
     shadowOpacity: 0.4 - 0.25 * lift,
     look: [m.look[0], m.look[1]],
-    lens: 1 - 0.8 * b,
+    lens: m.blink > 0 ? 0.2 : 1,
     tilt,
   };
 }

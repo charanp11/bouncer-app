@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { advance, lookAt, motion, moving, pose, setMood, squish, type Motion } from "./motion.ts";
+import { advance, blink, lookAt, motion, moving, pose, setMood, squish, type Motion } from "./motion.ts";
 
 /** Runs `seconds` at `hz` (jittered by up to ±50% when asked); returns the poses. */
 function run(m: Motion, seconds: number, hz: number, jitter = false) {
@@ -127,4 +127,17 @@ test("a stalled page doesn't make it jump further", () => {
   advance(m, 1e9);
   advance(m, -1);
   assert.ok(m.y >= 0 && m.y < 10 && Number.isFinite(m.v));
+});
+
+test("a blink shuts and opens the shades without asking for frames", () => {
+  const m = motion("idle");
+  run(m, 10, 60);
+  blink(m);
+  assert.equal(pose(m).lens, 0.2);
+  assert.equal(moving(m), false);
+  blink(m, true);
+  assert.equal(pose(m).lens, 1);
+  setMood(m, "paused");
+  blink(m);
+  assert.equal(pose(m).lens, 1);
 });
