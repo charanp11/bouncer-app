@@ -9,6 +9,7 @@ import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
 import { islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
+import { cue, play, type Heard } from "./sound.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -143,6 +144,8 @@ let greetUntil = -1;
 /** Cheering until; each session's last status, to see one finish. */
 let doneUntil = 0;
 let statuses = new Map<string, string>();
+/** What the sounds have already announced. */
+let heard: Heard | null = null;
 
 // One pending re-render (arm, toast, label rotation, clock). Cleared on every
 // render, so nothing runs while the island is hidden.
@@ -896,8 +899,12 @@ function render(view: View) {
   const now = performance.now();
 
   if (greetUntil < 0) greetUntil = now + GREET_MS;
-  if (finished(statuses, view.sessions)) doneUntil = now + DONE_MS;
+  const ended = finished(statuses, view.sessions);
+  if (ended) doneUntil = now + DONE_MS;
   statuses = new Map(view.sessions.map((s) => [s.id, s.status]));
+  const sound = cue(heard, view, ended);
+  heard = sound.heard;
+  if (sound.cue && view.prefs.sound) play(sound.cue);
   const done = now < doneUntil;
   if (done) later(doneUntil - now);
 
