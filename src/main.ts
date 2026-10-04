@@ -322,7 +322,10 @@ function gearButton(): HTMLElement {
   path.setAttribute("d", "M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4");
   svg.append(circle, path);
   button.append(svg);
-  button.addEventListener("click", () => invoke("settings", { open: true }));
+  button.addEventListener("click", () => {
+    invoke("settings", { open: true });
+    invoke("keyboard", { on: true });
+  });
   return button;
 }
 
@@ -347,9 +350,18 @@ function sessionRows(sessions: Session[]): HTMLElement {
       el("span", "time", ago(s.last_ms)),
       el("span", "step", stepText(s)),
     );
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    li.dataset.key = `row:${s.id}`;
     li.addEventListener("click", () => {
       detail = s.id;
       if (current) render(current);
+    });
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        li.click();
+      }
     });
     ul.append(li);
   }
@@ -386,6 +398,7 @@ function armed(label: string, since: number): HTMLButtonElement {
 /** Deny and Allow for a request; Allow arms ARM_MS after the card arrived. */
 function answerButtons(request: Request, allowLabel: string): HTMLButtonElement[] {
   const deny = el("button", "btn deny", "Deny");
+  deny.dataset.key = `deny:${request.id}`;
   const allow = armed(allowLabel, front.since);
   const buttons = [deny, allow];
   deny.addEventListener("click", () => decide(request, false, buttons));
@@ -891,7 +904,44 @@ function rulesBadge(view: View): Badge | undefined {
   return view.rules.error ? { text: "rules", risk: true } : undefined;
 }
 
+/** Keyboard focus survives the island being rebuilt: it goes back to the
+ * same control. A new card at the front takes it to its Deny (never Allow). */
 function render(view: View) {
+  const had = focusKey(document.activeElement);
+  const before = front.id;
+  draw(view);
+  if (!document.hasFocus()) return;
+  const card = view.queue[0];
+  const target = card && card.id !== before ? `deny:${card.id}` : had;
+  if (target) findKey(target)?.focus({ preventScroll: true });
+}
+
+/** What identifies a control across re-renders. */
+function focusKey(node: Element | null): string | null {
+  if (!(node instanceof HTMLElement) || !island.contains(node)) return null;
+  return node.dataset.key ?? `${node.tagName}|${node.className}|${node.getAttribute("aria-label") ?? node.textContent}`;
+}
+
+function findKey(key: string): HTMLElement | undefined {
+  return [...island.querySelectorAll<HTMLElement>("button, [tabindex]")].find((n) => focusKey(n) === key);
+}
+
+const announcer = document.getElementById("announce")!;
+
+/** A short sentence for screen readers when something happens. */
+function announce(kind: string, view: View) {
+  const card = view.queue[0];
+  const asking = view.sessions.find((s) => s.status === "needs you");
+  const finishedNow = view.sessions.find((s) => s.status === "idle");
+  let text = "";
+  if (kind === "risky" && card) text = `Risky: ${what(card.tool)} in ${folder(card.project)}. ${card.risk ?? ""}`;
+  else if (kind === "needs" && card) text = `Needs you: ${what(card.tool)} in ${folder(card.project)}.`;
+  else if (kind === "needs" && asking) text = `Needs you: ${folder(asking.project)} is asking in the terminal.`;
+  else if (kind === "done" && finishedNow) text = `${folder(finishedNow.project)} finished.`;
+  announcer.textContent = text;
+}
+
+function draw(view: View) {
   current = view;
   clearTimeout(timer);
   timerAt = 0;
@@ -905,6 +955,7 @@ function render(view: View) {
   const sound = cue(heard, view, ended);
   heard = sound.heard;
   if (sound.cue && view.prefs.sound) play(sound.cue);
+  if (sound.cue) announce(sound.cue, view);
   const done = now < doneUntil;
   if (done) later(doneUntil - now);
 
@@ -1021,6 +1072,44 @@ function render(view: View) {
   const n = view.sessions.length;
   island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", n > 0, badge));
 }
+
+// Enter never approves: not Allow, Allow edit, "Add rule and allow", "Turn
+// on auto-allow" or "Delete history" (all armed buttons). Space works once
+// armed; a disabled button can't be pressed at all.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key === "Enter" && e.target instanceof Element && e.target.closest(".btn.allow")) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  },
+  true,
+);
+
+// Tab stays inside the island (it wraps around), so the page never loses
+// focus to the window frame.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const all = [...island.querySelectorAll<HTMLElement>("button:not(:disabled), [tabindex='0']")];
+  if (!all.length) return;
+  const at = all.indexOf(document.activeElement as HTMLElement);
+  const next = e.shiftKey ? (at <= 0 ? all.length - 1 : at - 1) : at === -1 || at === all.length - 1 ? 0 : at + 1;
+  e.preventDefault();
+  all[next].focus();
+});
+
+// Esc gives the keyboard back: settings and the session list close; a card
+// stays (it can only be answered), but the keyboard goes back anyway.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (current?.settings) closeSettings();
+  if (current?.open && !current.queue.length) {
+    detail = null;
+    invoke("expand", { open: false });
+  }
+  invoke("keyboard", { on: false });
+});
 
 // The wake strip peeks the idle pill after PEEK_MS of hover.
 let peekTimer = 0;
