@@ -29,12 +29,12 @@
   --ui: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   /* island geometry (spec) */
-  --pill-w: 336px;
-  --pill-h: 42px;
+  --pill-w: 288px;
+  --pill-h: 36px;
   --open-w: 400px;
   --open-max-h: 520px;
   --detail-w: 720px;
-  --r-pill: 21px;
+  --r-pill: 18px;
   --r-open: 22px;
   --r-card: 14px;
   --pad: 14px;
@@ -44,6 +44,8 @@
   --t-open: 320ms;
   --t-close: 200ms;
   --arm: 600ms;
+  /* the whole island is drawn at this scale (spec: sizes are at 100%) */
+  --scale: 1.25;
 }
 * { box-sizing: border-box; }
 body { background: var(--page); color: var(--text); font-family: var(--ui); font-size: 14px; line-height: 1.5; }
@@ -90,13 +92,14 @@ h1 .stamp { color: var(--sun); }
   border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,0.45);
   transition: width var(--t-open) var(--spring), border-radius var(--t-open) var(--spring), top var(--t-open) var(--spring);
   overflow: hidden; font-size: 13px;
+  zoom: var(--scale);
 }
 .island.open { width: var(--open-w); border-radius: var(--r-open); }
 .island.hidden { top: -1px; width: 180px; min-height: 5px; height: 5px; border-radius: 0 0 6px 6px; background: rgba(255,206,58,0.45); border-color: transparent; box-shadow: none; }
 .island.hidden > * { display: none; }
 
 .pill { display: flex; align-items: center; gap: 10px; height: var(--pill-h); padding: 0 14px 0 10px; width: 100%; }
-.pill .label { font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.pill .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .pill .label b { color: var(--text); font-weight: 500; }
 .badge { font: 600 11px var(--ui); color: var(--island); background: var(--wait); border-radius: 999px; padding: 1px 7px; }
 .badge.risk { background: var(--risk); color: #fff; }
@@ -231,8 +234,8 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .askbar .btn { height: 30px; padding: 0 14px; }
 
 /* the character: Bouncer, a tiny bright ball in shades */
-.ball { width: 30px; height: 30px; flex: none; display: grid; place-items: center; --body: var(--sun); --body-deep: var(--sun-deep); }
-.ball svg { width: 30px; height: 30px; overflow: visible; }
+.ball { width: 26px; height: 26px; flex: none; display: grid; place-items: center; --body: var(--sun); --body-deep: var(--sun-deep); }
+.ball svg { width: 26px; height: 26px; overflow: visible; }
 .ball .jumper, .ball .shadow { transform-box: fill-box; transform-origin: 50% 100%; }
 .ball .body-c { fill: var(--body); }
 .ball .deep { fill: var(--body-deep); }
@@ -321,7 +324,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.5 · Oct 3 2026</div>
+    <div class="meta">design/prototype · v0.6 · Oct 4 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -365,8 +368,10 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <section>
       <h3>Sizes</h3>
       <table>
+        <tr><td>Island scale (all sizes below)</td><td>125%</td></tr>
+        <tr><td>Scale cap</td><td>island ≤ 40% of screen width, never &lt; 100%</td></tr>
         <tr><td>Wake strip (hidden)</td><td>180 × 5</td></tr>
-        <tr><td>Pill</td><td>336 × 42</td></tr>
+        <tr><td>Pill</td><td>288 × 36</td></tr>
         <tr><td>Open width</td><td>400</td></tr>
         <tr><td>Open max height</td><td>520, then scroll</td></tr>
         <tr><td>Session detail width</td><td>720 (left rail 196)</td></tr>
@@ -374,9 +379,9 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
         <tr><td>Gap from screen top</td><td>8</td></tr>
         <tr><td>Inner padding</td><td>14</td></tr>
         <tr><td>Gap between blocks</td><td>8</td></tr>
-        <tr><td>Radius: pill / open / card</td><td>21 / 22 / 14</td></tr>
+        <tr><td>Radius: pill / open / card</td><td>18 / 22 / 14</td></tr>
         <tr><td>Button height / radius</td><td>34 / 9</td></tr>
-        <tr><td>Character in island</td><td>30 × 30</td></tr>
+        <tr><td>Character in island</td><td>26 × 26</td></tr>
       </table>
     </section>
     <section>
@@ -399,8 +404,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <table>
         <tr><td>UI face</td><td>Segoe UI Variable*</td></tr>
         <tr><td>Command face</td><td>Cascadia Mono*</td></tr>
-        <tr><td>Pill label</td><td>14 · 400 / 500</td></tr>
-        <tr><td>Body / row name</td><td>13 · 400 / 500</td></tr>
+                <tr><td>Body / row name</td><td>13 · 400 / 500</td></tr>
         <tr><td>Step, meta</td><td>12 · 400</td></tr>
         <tr><td>Request title</td><td>14 · 500</td></tr>
         <tr><td>Command</td><td>12.5 mono · lh 1.5</td></tr>
