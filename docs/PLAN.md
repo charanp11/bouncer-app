@@ -1149,8 +1149,8 @@ Decisions (Charan, 2026-10-03):
    island focusable touches "Allow is never the default focus, Enter never
    approves"; it goes in with the settings screen that needs it.
    5b also adds **Size** to the settings screen (Charan): Small (100%) /
-   Medium (125%, default) / Large (150%), stored in Bouncer's own settings
-   and applied at once (`size.ts` `SCALE` becomes that setting).
+   Medium (default) / Large, stored in Bouncer's own settings and applied
+   at once (later lowered to 100 / 112 / 125%, 5b decision 6).
 7. **Island scale and a quieter greeting** (Charan, after the hand check):
    the whole island (pill, Bouncer, session list, cards, text) is drawn at
    one scale, 125% by default, so the prototype's proportions never change
@@ -1341,6 +1341,12 @@ Decisions (Charan, 2026-10-04):
    on a 768-px-tall screen its buttons are fully visible: the island is
    never taller than the work area, then it scrolls); in the confirm, focus
    goes to Cancel, Esc cancels, Enter never turns auto on (spec rule 11).
+6. **Sizes lowered** (Charan, after seeing 125% Settings): Small 100% /
+   Medium 112% (default) / Large 125%. Settings is compact on its own (one-
+   line hints, the rules path in 11-px wrapping mono, tighter rows), so at
+   Medium it fits a 768-px screen without scrolling (checked: 507-px window
+   on a 720-px work area, even with a 150-character dev path). Prototype
+   v0.9 first.
 
 Threats (5b):
 

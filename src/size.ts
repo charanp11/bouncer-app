@@ -4,7 +4,7 @@
 
 export type Size = "small" | "medium" | "large";
 
-export const SCALES: Record<Size, number> = { small: 1, medium: 1.25, large: 1.5 };
+export const SCALES: Record<Size, number> = { small: 1, medium: 1.12, large: 1.25 };
 /** Medium, the default (Charan). */
 export const SCALE = SCALES.medium;
 /** The island never takes more than this share of the screen's width. */

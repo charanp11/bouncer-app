@@ -748,13 +748,13 @@ function renderSettings(view: View, state: BallState) {
     b.addEventListener("click", () => savePrefs({ ...prefs, size }));
     seg.append(b);
   }
-  list.append(setRow("Size", [seg], "Small 100% · Medium 125% · Large 150%. Applies at once."));
+  list.append(setRow("Size", [seg], "100 · 112 · 125%. Applies at once."));
 
   list.append(
     setRow(
       "Sound",
       [el("span", "", prefs.sound ? "On" : "Off"), toggle("Sound", prefs.sound, () => savePrefs({ ...prefs, sound: !prefs.sound }))],
-      "Needs you, risky and done. Never while paused.",
+      "Needs you, risky, done. Not while paused.",
     ),
   );
 
@@ -764,7 +764,7 @@ function renderSettings(view: View, state: BallState) {
     wipeSince = performance.now();
     if (current) render(current);
   });
-  const history = setRow("Activity history", wiping ? [] : [wipe], "Kept on this computer for 30 days, secrets redacted. Wipe asks first.");
+  const history = setRow("Activity history", wiping ? [] : [wipe], "30 days, on this computer, redacted.");
   if (wiping) {
     const box = el("div", "confirm");
     const text = el("div");
@@ -802,7 +802,7 @@ function renderSettings(view: View, state: BallState) {
     setRow(
       "Claude Code hooks",
       [status],
-      hooks === "installed" ? "To remove: bouncer uninstall-hooks" : "To install: bouncer install-hooks",
+      hooks === "installed" ? "Remove: bouncer uninstall-hooks" : "Install: bouncer install-hooks",
     ),
   );
 
