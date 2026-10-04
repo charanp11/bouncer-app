@@ -319,7 +319,7 @@ function gearButton(): HTMLElement {
   circle.setAttribute("cy", "12");
   circle.setAttribute("r", "3");
   const path = document.createElementNS(SVG, "path");
-  path.setAttribute("d", "M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4");
+  path.setAttribute("d", "M10.32 5.00 L10.37 2.64 L13.63 2.64 L13.68 5.00 L15.76 5.86 L17.46 4.23 L19.77 6.54 L18.14 8.24 L19.00 10.32 L21.36 10.37 L21.36 13.63 L19.00 13.68 L18.14 15.76 L19.77 17.46 L17.46 19.77 L15.76 18.14 L13.68 19.00 L13.63 21.36 L10.37 21.36 L10.32 19.00 L8.24 18.14 L6.54 19.77 L4.23 17.46 L5.86 15.76 L5.00 13.68 L2.64 13.63 L2.64 10.37 L5.00 10.32 L5.86 8.24 L4.23 6.54 L6.54 4.23 L8.24 5.86Z");
   svg.append(circle, path);
   button.append(svg);
   button.addEventListener("click", () => {
