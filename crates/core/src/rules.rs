@@ -360,8 +360,10 @@ fn write_new(path: &Path, text: &str) -> io::Result<()> {
 }
 
 /// Replaces `path` atomically with a file only the user can write.
-fn replace(path: &Path, text: &str) -> io::Result<()> {
-    let tmp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
+pub(crate) fn replace(path: &Path, text: &str) -> io::Result<()> {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".tmp-{}", std::process::id()));
+    let tmp = path.with_file_name(name);
     write_new(&tmp, text)?;
     let result = fs::rename(&tmp, path);
     if result.is_err() {
@@ -371,7 +373,7 @@ fn replace(path: &Path, text: &str) -> io::Result<()> {
 }
 
 /// The file's text, if it is ours, private, at most `MAX_SIZE` and UTF-8.
-fn read(path: &Path) -> Result<String, String> {
+pub(crate) fn read(path: &Path) -> Result<String, String> {
     let name = path.display();
     trust::check(path).map_err(|e| format!("{name} ignored: {e}"))?;
     let mut bytes = Vec::new();
