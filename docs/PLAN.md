@@ -1148,12 +1148,20 @@ Decisions (Charan, 2026-10-03):
 6. **Keyboard access and screen reader order move to 5b**: making the
    island focusable touches "Allow is never the default focus, Enter never
    approves"; it goes in with the settings screen that needs it.
-7. **Bigger pill, quieter greeting** (Charan, after the hand check): pill
-   336 × 42 (radius 21), Bouncer 30 px in the island, pill text 14 px; the
-   rest of the island is unchanged. Prototype Build spec updated first
-   (v0.5). The greeting is just Bouncer, centred, no words: he drops in and
-   bounces three times, settled in 2.0 s (shown 2.5 s); never over a card,
-   and none at all with reduced motion.
+   5b also adds **Size** to the settings screen (Charan): Small (100%) /
+   Medium (125%, default) / Large (150%), stored in Bouncer's own settings
+   and applied at once (`size.ts` `SCALE` becomes that setting).
+7. **Island scale and a quieter greeting** (Charan, after the hand check):
+   the whole island (pill, Bouncer, session list, cards, text) is drawn at
+   one scale, 125% by default, so the prototype's proportions never change
+   (pill 360 × 45, open width 500, Bouncer ~33 px). It multiplies with
+   Windows display scaling. If a shape would pass 40% of its screen's width
+   it is drawn smaller, never under 100% (on a 1366-wide screen the 720-wide
+   session detail stays at 100%). Prototype Build spec first (v0.6). This
+   replaced a pill-only enlargement (336 × 42) tried the same day. The
+   greeting is just Bouncer, centred, no words: he drops in and bounces
+   three times, settled in 2.0 s (shown 2.5 s); never over a card, and none
+   at all with reduced motion.
 
 Motion design:
 
@@ -1240,7 +1248,7 @@ playground session in `default` permission mode):
   the cheer when a session finishes (not reported). `git status` ran
   without a request (Claude Code allows it on its own) and `hello.txt`
   already existed, so the first prompt raised no card.
-- Feedback: the pill (288 × 36, ball 26) feels small. Changed (decision 7); to re-check by hand.
+- Feedback: the pill and the whole island feel small. Changed (decision 7: one 125% island scale); to re-check by hand.
 - [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [x] `json_values` skips escaped quotes, with a run-time fake-secret test
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
