@@ -1317,27 +1317,49 @@ Findings:
    (text, copyable) and whether hooks are installed; install / uninstall
    stays in the `bouncer` CLI for the MVP.
 
+Decisions (Charan, 2026-10-04):
+
+1. **Keyboard on cards:** Tab order Deny, then Allow. Space on Allow works
+   only once it is armed; Enter never approves. If the card in front
+   changes while the island has focus, focus moves to the new card's Deny
+   and Allow re-arms for 600 ms. "Always allow…" stays reachable and keeps
+   its own confirm step (which arms too).
+2. **Settings screen:** Size, Sound, Observe / Auto, Wipe history, and the
+   rules file's location as plain copyable text. Hooks: status only
+   ("installed" / "not installed: run `bouncer install-hooks`"). Install /
+   uninstall stays in the CLI and moves to the Phase 9 installer; no button
+   writes `~/.claude/settings.json` in 5b.
+3. **Three sounds only:** needs you (a card, or a question in the
+   terminal), risky (different, sharper), done (soft). None for
+   auto-allowed or working, none while paused. One sound at a time;
+   a repeat within 2 s is dropped.
+4. **Contrast fixes as proposed** (faint `#7B8290`, line numbers use faint,
+   red badge text dark), prototype first.
+
 Threats (5b):
 
 | Threat | Fix |
 | --- | --- |
 | Auto mode switched on by accident | Turning auto on asks first (what auto means, risky still asks), and its confirm button arms like Allow (600 ms); turning it off doesn't ask |
 | The page writes arbitrary text into `rules.toml` | `set_mode` takes an enum only; the backend edits the file and checks it reads back as the same rules with the new mode |
-| Keyboard approves by accident | Allow is never focused automatically, Enter never approves (keydown blocked on Allow and "Add rule and allow"), Allow is disabled until armed; the card's arrival never moves focus |
+| Keyboard approves by accident | Allow is never focused automatically, Enter never approves (keydown blocked on Allow and "Add rule and allow"), Space only once armed; a new card in front while focused moves focus to its Deny and re-arms Allow; with no focus, a card's arrival never moves focus |
 | The island takes the keyboard from the terminal | Focusable only after the user opens it on purpose; non-focusable again on Esc / blur; card buttons keep working without focus |
 | `preferences.json` tampered or broken | Owner check as for `rules.toml`; only known values accepted, anything else → defaults |
-| Sound wakes the CPU / annoys | One short generated sound, context suspended after; mute saved; no sound while paused |
+| Sound wakes the CPU / annoys | Three short generated sounds, one at a time, repeats within 2 s dropped, context suspended after; mute saved; none while paused |
 | Unreadable text | All text ≥ 4.5:1 (fixes above); color is never the only signal (existing rule) |
 | Screen reader reads the island out of order | DOM order = reading order (head, card: who, what, reason, command, buttons); the card is announced once on arrival (`aria-live` polite, already on the island) |
 
 Phase 5b is done when:
 
-- [ ] Settings state in the prototype, approved; then built to it
+- [ ] Settings state in the prototype, approved; then built to it (Size,
+  Sound, Observe / Auto, Wipe history, rules file path, hook status)
 - [ ] Size Small / Medium / Large, saved, applied at once (40% cap kept)
-- [ ] Sound on card arrival, generated; mute saved; idle CPU still ~0%
+- [ ] Sounds (needs you, risky, done), generated; mute saved; none while
+  paused; one at a time, repeats within 2 s dropped; idle CPU still ~0%
 - [ ] Observe / auto switch: confirm to turn on, `set_mode` checked write
 - [ ] Keyboard: open from the tray, Tab through settings and cards, Esc
-  closes; Enter never approves; focus never taken by a card
+  closes; Enter never approves; Space on Allow only when armed; a new card
+  moves focus to its Deny; focus never taken from the terminal by a card
 - [ ] Contrast ≥ 4.5:1 everywhere (prototype first); screen reader order
   checked by hand (Narrator)
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
