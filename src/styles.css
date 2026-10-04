@@ -963,8 +963,8 @@ pre.cmd {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px 12px;
-  padding: 10px 12px;
+  gap: 1px 12px;
+  padding: 8px 12px;
 }
 
 .setrow + .setrow {
@@ -979,6 +979,9 @@ pre.cmd {
   grid-column: 1 / -1;
   font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .setrow .ctl {
@@ -993,7 +996,9 @@ pre.cmd {
 
 .setrow pre.cmd {
   grid-column: 1 / -1;
-  margin-top: 6px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
   user-select: all;
 }
 
