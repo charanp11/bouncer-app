@@ -21,14 +21,14 @@
   /* geometry */
   --strip-w: 180px;
   --strip-h: 5px;
-  --pill-w: 336px;
-  --pill-h: 42px;
+  --pill-w: 288px;
+  --pill-h: 36px;
   --open-w: 400px;
   --open-max-h: 520px;
   --detail-w: 720px;
   --rail-w: 196px;
   --code-max-h: 230px;
-  --r-pill: 21px;
+  --r-pill: 18px;
   --r-open: 22px;
   --r-card: 14px;
   --pad: 14px;
@@ -66,9 +66,12 @@ body {
 }
 
 /* The measured box: the island plus room for its shadow. */
+/* The whole island is drawn at one scale (prototype "Island scale"); every
+   size in this file is at 100%. main.ts sets --scale. */
 #stage {
   flex: none;
   padding: 0 var(--shadow-x) var(--shadow-b);
+  zoom: var(--scale, 1.25);
 }
 
 #stage.bare {
@@ -150,7 +153,6 @@ html.square .island {
 }
 
 .pill .label {
-  font-size: 14px;
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -936,8 +938,8 @@ pre.cmd {
 /* the character: Bouncer, a tiny bright ball in shades. Colors and which
    face shows live here; his motion is drawn by ball.ts. */
 .ball {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   flex: none;
   display: grid;
   place-items: center;
@@ -946,8 +948,8 @@ pre.cmd {
 }
 
 .ball svg {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   overflow: visible;
 }
 

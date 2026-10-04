@@ -8,6 +8,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
+import { islandScale, WIDTH } from "./size.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -542,6 +543,8 @@ function setShape(next: Shape) {
     shape = next;
   }
   island.classList.remove("hidden", "open", "wide");
+  // One scale for the whole island, kept under 40% of this screen's width.
+  document.documentElement.style.setProperty("--scale", String(islandScale(WIDTH[next], screen.availWidth)));
   if (next !== "pill") island.classList.add(next);
   stage.className = next === "hidden" ? "bare" : "";
 }
