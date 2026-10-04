@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character (5a merged as v0.5.0; 5b current; 5c next)**
+**Current phase: Phase 5 — Character (5a, 5b merged; 5c current; 5d next)**
 
 ## MVP scope
 
@@ -1446,7 +1446,7 @@ Phase 5b is done when:
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 130 Rust + 36 frontend; gitleaks clean)
 
-## Phase 5c — Island motion (after 5b)
+## Phase 5c — Island motion (current)
 
 Charan, 2026-10-04. Its own PR, all four stages, after 5b is merged.
 
@@ -1463,6 +1463,104 @@ Charan, 2026-10-04. Its own PR, all four stages, after 5b is merged.
 - **Reduced motion** turns all of it off.
 - Audit to settle: what "fully visible" means in the window-resize timing;
   where `+N −M` sits in the pill; MultiEdit; the activity-log field change.
+
+### Phase 5c audit (2026-10-04)
+
+Sources: the prototype (`.island` transitions, `.body` rise, Build spec
+"Motion"), `main.ts` (`setShape`, `report`, `front` / arm, peek),
+`styles.css`, `main.rs` (`fit`, `lay_out`, `place`), `code.rs` / `diff.rs`,
+`activity.rs` (`Entry`), `approvals.rs` (session step and code pane).
+
+What exists: width and corner radius move with a CSS transition (320 ms
+spring, 200 ms ease-out when closing); height jumps. While the width moves,
+the page reports a new size on every frame and `growUntil` keeps the larger
+one, so the window is resized ~20 times per change and grows *with* the
+island, not before it. `.body` and `.detail` replay the 6-px "rise" every
+time they're rebuilt: when a card arrives (an animated card arrival) and on
+every 30-s clock re-render. The hidden strip sits at the screen's top edge,
+every other state 8 px below it, so hidden → pill moves the window.
+
+Findings:
+
+1. **The prototype has no height morph, no window and no peek.** Drawn
+   first (v0.11): a "Phase 5c" row with "Play: wake, open, close" (strip →
+   peek → pill → sessions → ticker pill → strip), the ticker pill, "Show
+   window" (a dashed box for the OS window), "Slow ×4" (to see the order)
+   and "Reduced motion". Hovering the strip for 300 ms peeks the pill.
+2. **The morph is one Web Animation** on the island (width, height,
+   min-height, top, radius, color) from the box it had to the box it gets:
+   native, no dependency. Growing: 320 ms spring; closing: 200 ms ease-out
+   (spec). A change in the middle starts from where the island is.
+3. **Window order.** Growing: the page asks for the larger of the current
+   and new size, the island waits at its old box until the viewport is that
+   big (the page's `resize` event; 150 ms at most), then animates. Closing:
+   the island animates inside, then the page asks for the new size. Two
+   window resizes per change instead of one per frame. The spring
+   overshoots ≤ 3% of the change (the curve peaks at 1.03): at most ~7 px a
+   side for pill → wide, inside the 20 / 32 px shadow margin, so never cut.
+4. **Grows out of the top edge.** The 8-px gap moves inside the window
+   (top padding) and the window sits at the work area's top edge, so strip
+   and pill share the window's top and the morph is continuous, like the
+   prototype's `top: -1 → 8`. Cost: an 8-px transparent band above the
+   island that takes clicks (the shadow margin already does on three
+   sides). An island dragged elsewhere still hides to the top-centre strip
+   (as now); it grows from its own top edge at its spot.
+5. **A card is never animated in.** A card at the front (new, or the next
+   one after "Allowed / Denied") is drawn at full size at once: no morph,
+   no rise, one window resize. Nothing morphs while a card is in front, so
+   its buttons never move. **"Fully visible"** = the viewport holds the
+   whole island (2-px tolerance); the 600 ms arm starts then, not when the
+   card was drawn (today: drawn). Until then Allow is disabled with an empty
+   fill. The backend's own 600 ms counts from the request, earlier, so the
+   page stays the stricter one. If the window never gets big enough, Allow
+   never arms: fail safe (Deny and the terminal still work).
+6. **Rise only when growing**, never on a re-render or a card (fixes the
+   replay every 30 s).
+7. **`+N −M`.** `code::line_counts(tool, input)` with the code pane's own
+   `line_ops`: Edit old vs new; MultiEdit the sum over its edits; Write
+   `+N` only (the old file is never read, so no `−`); NotebookEdit and other
+   tools none; `replace_all` counts once (how many places needs the file).
+   The session view sends `lines: [added, removed | null]`; the activity log
+   gets two optional numbers `added`, `removed` (old day files still read;
+   missing = none). In the pill: after the label, before a badge, 12-px mono
+   tabular, `+N` green, `−M` (U+2212) red; the label shortens first, the
+   numbers are never cut; the signs are the words. Only on the working pill
+   for the session it shows; not in rows or the rail (not asked).
+8. **Huge edits** (found on the way): `line_ops` keeps an n × m table; a
+   10,000-line edit is a 400 MB table, and 5c would run it up to three times
+   per edit (code pane, ticker, log). Proposed: above 1,000,000 cells it
+   treats the edit as a whole replacement (all old lines `−`, all new `+`),
+   so the pane and the counts stay correct-ish and memory stays ≤ 4 MB.
+9. **Reduced motion:** no morph, no rise, the window resizes in one step
+   (as today); the arm still counts from fully visible. Read live from
+   `matchMedia`, so a change applies at once.
+10. **Hidden means hidden:** the animation ends; no frame loop, no timers.
+
+Threats (5c):
+
+| Threat | Fix |
+| --- | --- |
+| An animation hides or delays a card, or moves its buttons | A card's arrival is never animated; nothing morphs while a card is in front; the arm starts when the card is fully visible |
+| A click lands on Allow during a resize | Allow is disabled until 600 ms after the card is fully visible; the backend refuses an allow within 600 ms anyway |
+| Window and island disagree (cut-off island, clicks lost) | Window grows to the larger size before the island moves, shrinks only after it stops; overshoot fits the shadow margin |
+| Line counts carry agent text | `line_counts` returns two integers; the log stores numbers only (test) |
+| A huge edit eats memory in the app | `line_ops` table capped at 1,000,000 cells, then whole-replacement counts |
+| Motion sickness | Reduced motion: no morph, no rise, no overshoot |
+| Idle CPU | Web Animations run only during a change; settled or hidden, nothing runs |
+
+Phase 5c is done when:
+
+- [ ] Prototype v0.11 approved (morph, window order, peek, ticker, reduced motion)
+- [ ] Strip → pill → open → wide grow from the top edge with the 320 ms
+  spring, close with 200 ms ease-out; window grows first, shrinks last
+- [ ] A card appears at once; its arm counts from fully visible; nothing
+  morphs under a card (checked over the debug port, frame by frame)
+- [ ] `+N −M` on the pill for Edit / MultiEdit, `+N` for Write; two numbers
+  in the activity log, never the text; old log files still read
+- [ ] `line_ops` capped for huge edits
+- [ ] Reduced motion: all off; idle CPU still ~0%
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  before every push
 
 ## Phase 5d — Sound pack (after 5c)
 
