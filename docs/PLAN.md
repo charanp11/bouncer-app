@@ -1148,6 +1148,12 @@ Decisions (Charan, 2026-10-03):
 6. **Keyboard access and screen reader order move to 5b**: making the
    island focusable touches "Allow is never the default focus, Enter never
    approves"; it goes in with the settings screen that needs it.
+7. **Bigger pill, quieter greeting** (Charan, after the hand check): pill
+   336 × 42 (radius 21), Bouncer 30 px in the island, pill text 14 px; the
+   rest of the island is unchanged. Prototype Build spec updated first
+   (v0.5). The greeting is just Bouncer, centred, no words: he drops in and
+   bounces three times, settled in 2.0 s (shown 2.5 s); never over a card,
+   and none at all with reduced motion.
 
 Motion design:
 
@@ -1215,6 +1221,26 @@ WebView2's debug port, debug builds only):
   prototype's "Meet Bouncer": same shapes and colors.
 - Diff reread: no `innerHTML`, no `focus()`, ball text is static ("z", "!");
   the sheet page is dev-only (not in `dist`).
+
+Manual checks (Charan, 2026-10-03, Claude Code 2.1.289, Windows, debug app,
+playground session in `default` permission mode):
+
+- [x] Launch greeting (seen after a page reload; in dev the first load can
+  take up to ~40 s on a busy machine, so the greeting comes then)
+- [x] Working: jumps while Claude Code works
+- [x] Needs you: card with the hopping "!" (`curl … | head -40`); Deny
+  reached Claude Code ("Denied by PermissionRequest hook")
+- [x] Mouse: face follows the cursor and recentres, a click squashes without
+  opening the island, four clicks make him dizzy, the label opens the list
+- [x] Paused: grey, eyes shut, "z", doesn't look
+- [x] Reduced motion (Windows "Animation effects" off): no motion
+- [x] Idle: Task Manager shows Bouncer at 0%
+- Not seen live: risky (Claude Code rewrote `curl … | sh` into `curl … |
+  head -40`, which isn't risky; covered by the 2.1.288 fixture in the app),
+  the cheer when a session finishes (not reported). `git status` ran
+  without a request (Claude Code allows it on its own) and `hello.txt`
+  already existed, so the first prompt raised no card.
+- Feedback: the pill (288 × 36, ball 26) feels small. Changed (decision 7); to re-check by hand.
 - [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [x] `json_values` skips escaped quotes, with a run-time fake-secret test
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
