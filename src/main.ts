@@ -7,6 +7,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
+import { finished, greeting, mood } from "./mood.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -80,6 +81,9 @@ const RULE_TOAST_MS = 1600;
 const ROTATE_MS = 4000;
 const PEEK_MS = 300;
 const CLOCK_MS = 30_000;
+/** The launch greeting, and the cheer when a session finishes. */
+const GREET_MS = 2500;
+const DONE_MS = 2800;
 const OPEN_MS = 320;
 const CLOSE_MS = 200;
 const AGENTS: Record<string, string> = { "claude-code": "Claude Code" };
@@ -126,6 +130,11 @@ let flashSeen: Seen = { n: 0, from: 0 };
 /** The wake strip is being hovered: show the idle pill. */
 let peek = false;
 let dragged = false;
+/** Greeting until (set on the first view); 0 once a card has shown. */
+let greetUntil = -1;
+/** Cheering until; each session's last status, to see one finish. */
+let doneUntil = 0;
+let statuses = new Map<string, string>();
 
 // One pending re-render (arm, toast, label rotation, clock). Cleared on every
 // render, so nothing runs while the island is hidden.
@@ -240,14 +249,6 @@ function draggable(node: HTMLElement) {
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", stop);
   });
-}
-
-function mood(view: View): BallState {
-  if (view.paused) return "paused";
-  if (view.queue[0]?.risk) return "risky";
-  if (view.queue.length || view.sessions.some((s) => s.status === "needs you")) return "needs";
-  if (view.sessions.some((s) => s.status === "working")) return "working";
-  return "idle";
 }
 
 // ---- pieces ----------------------------------------------------------------
@@ -519,7 +520,7 @@ function rail(session: Session | undefined, project: string, agent: string, stat
     if (how) li.append(el("span", `tag ${TAG[how] ?? ""}`, how));
     steps.append(li);
   });
-  who.append(ball(state, true), proj, el("div", "agent", `${AGENTS[agent] ?? agent}${age}`), steps);
+  who.append(ball(state, "big"), proj, el("div", "agent", `${AGENTS[agent] ?? agent}${age}`), steps);
   return who;
 }
 
@@ -657,6 +658,12 @@ function render(view: View) {
   document.documentElement.classList.toggle("square", !view.rounded);
   const now = performance.now();
 
+  if (greetUntil < 0) greetUntil = now + GREET_MS;
+  if (finished(statuses, view.sessions)) doneUntil = now + DONE_MS;
+  statuses = new Map(view.sessions.map((s) => [s.id, s.status]));
+  const done = now < doneUntil;
+  if (done) later(doneUntil - now);
+
   if (toast && now >= toast.until) toast = null;
   if (toast) {
     renderApproval(view, toast.request, toast.ok);
@@ -667,7 +674,15 @@ function render(view: View) {
   const first = view.queue[0];
   if (first) {
     if (first.id !== front.id) front = { id: first.id, since: now };
+    greetUntil = 0;
     renderApproval(view, first);
+    return;
+  }
+
+  if (greeting(view, now, greetUntil)) {
+    setShape("pill");
+    island.replaceChildren(pill("greet", "Bouncer", " · at the door", false));
+    later(greetUntil - now);
     return;
   }
 
@@ -712,7 +727,7 @@ function render(view: View) {
       detail = null;
       invoke("expand", { open: false });
     };
-    island.replaceChildren(head(mood(view), "Bouncer", `· ${plural(view.sessions.length, "session")}`, close), body);
+    island.replaceChildren(head(mood(view, done), "Bouncer", `· ${plural(view.sessions.length, "session")}`, close), body);
     later(CLOCK_MS);
     return;
   }
@@ -741,12 +756,12 @@ function render(view: View) {
   if (working.length) {
     // Several busy sessions: the label rotates every ROTATE_MS.
     const s = working[Math.floor(Date.now() / ROTATE_MS) % working.length];
-    island.replaceChildren(pill("working", folder(s.project), ` · ${s.step}`, true, badge));
+    island.replaceChildren(pill(mood(view, done), folder(s.project), ` · ${s.step}`, true, badge));
     if (working.length > 1) later(ROTATE_MS - (Date.now() % ROTATE_MS));
     return;
   }
   const n = view.sessions.length;
-  island.replaceChildren(pill("idle", n ? plural(n, "session") : "No sessions", " · all quiet", n > 0, badge));
+  island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", n > 0, badge));
 }
 
 // The wake strip peeks the idle pill after PEEK_MS of hover.
