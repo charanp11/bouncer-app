@@ -1250,8 +1250,10 @@ playground session in `default` permission mode):
   already existed, so the first prompt raised no card.
 - Feedback: the pill and the whole island feel small. Changed (decision 7: one 125% island scale).
 - [x] Re-check (Charan, 2026-10-04): the session list at 125% and the
-  word-free greeting (Bouncer alone, centred in the pill) look good. Not
-  re-checked at 125%: an approval card, the session detail.
+  word-free greeting (Bouncer alone, centred in the pill) look good.
+- [x] Approval card at 125% (Charan, 2026-10-04, a real Write request):
+  same proportions as the prototype, Bouncer clear of the card, Allow armed,
+  the path wraps in its box. Not re-checked at 125%: the session detail.
 - [x] An approval card is never covered, moved, delayed or unfocused (tests + by hand)
 - [x] `json_values` skips escaped quotes, with a run-time fake-secret test
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked before every push (local green, gitleaks clean; CI on the PR)
