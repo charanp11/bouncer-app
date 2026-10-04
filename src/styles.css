@@ -935,6 +935,171 @@ pre.cmd {
   grid-column: 1 / -1;
 }
 
+/* settings (prototype "Settings") */
+.head .buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.iconbtn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  vertical-align: -3px;
+}
+
+.setlist {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  display: grid;
+}
+
+.setrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 10px 12px;
+}
+
+.setrow + .setrow {
+  border-top: 1px solid var(--line);
+}
+
+.setrow .name {
+  font-weight: 500;
+}
+
+.setrow .hint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.setrow .ctl {
+  grid-row: 1;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.setrow pre.cmd {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  user-select: all;
+}
+
+.seg {
+  display: inline-flex;
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 2px;
+}
+
+.seg button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--ui);
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.seg button[aria-checked="true"] {
+  background: var(--text);
+  color: var(--island);
+}
+
+.toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--island);
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 160ms ease-out;
+}
+
+.toggle[aria-checked="true"] {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.toggle[aria-checked="true"]::after {
+  transform: translateX(16px);
+  background: var(--island);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.status.off::before {
+  background: transparent;
+  border: 1.5px solid var(--wait);
+}
+
+.confirm {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--island);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.confirm b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.btn.small {
+  height: 30px;
+  font-size: 12.5px;
+}
+
+.setrow .btn.small {
+  padding: 0 12px;
+}
+
 /* the character: Bouncer, a tiny bright ball in shades. Colors and which
    face shows live here; his motion is drawn by ball.ts. */
 .ball {
