@@ -13,7 +13,7 @@ use bouncer_core::away::{self, Away};
 use bouncer_core::hooks;
 use bouncer_core::ipc::{self, Handler, Server};
 use bouncer_core::prefs::{self, Prefs, Size};
-use bouncer_core::rules;
+use bouncer_core::rules::{self, Mode};
 use serde_json::{Value, json};
 use tauri::image::Image;
 use tauri::ipc::Channel;
@@ -98,7 +98,8 @@ fn main() {
     clear_webview_args(!cfg!(debug_assertions));
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            subscribe, decide, always, expand, drag, fit, settings, set_prefs, wipe, about
+            subscribe, decide, always, expand, drag, fit, settings, set_prefs, wipe, about,
+            set_mode
         ])
         .on_window_event(|window, event| {
             if let (WindowEvent::Moved(_), Some(island)) = (event, window.try_state::<Island>()) {
@@ -456,6 +457,18 @@ fn set_prefs(
     *island.prefs.lock().unwrap() = new;
     show(&app, island.desk.view());
     Ok(())
+}
+
+/// The observe / auto switch. Takes a mode name only, never file text; the
+/// page asks before turning auto on.
+#[tauri::command]
+fn set_mode(island: State<'_, Island>, mode: String) -> Result<(), String> {
+    let mode = match mode.as_str() {
+        "auto" => Mode::Auto,
+        "observe" => Mode::Observe,
+        _ => return Err("unknown mode".into()),
+    };
+    island.desk.set_mode(mode).map_err(str::to_owned)
 }
 
 /// "Wipe history" from the settings screen (after its confirm step).

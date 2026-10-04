@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "The island window: our own commands only, nothing else.",
   "windows": ["main"],
-  "permissions": ["allow-subscribe", "allow-decide", "allow-always", "allow-expand", "allow-drag", "allow-fit", "allow-settings", "allow-set-prefs", "allow-wipe", "allow-about"]
+  "permissions": ["allow-subscribe", "allow-decide", "allow-always", "allow-expand", "allow-drag", "allow-fit", "allow-settings", "allow-set-prefs", "allow-wipe", "allow-about", "allow-set-mode"]
 }

@@ -314,6 +314,56 @@ pub fn add(path: &Path, rule: &Rule) -> Result<(), String> {
     replace(path, &new_text).map_err(|e| format!("can't save {}: {e}", path.display()))
 }
 
+/// Sets the file's mode. Only the top-level `mode = ...` line is rewritten
+/// (or one is added above the first table); the result must read back as the
+/// same rules with only the mode changed. Written to a temp file and renamed.
+pub fn set_mode(path: &Path, mode: Mode) -> Result<(), String> {
+    let text = read(path)?;
+    let old = parse(&text)?;
+    let value = match mode {
+        Mode::Auto => "auto",
+        Mode::Observe => "observe",
+    };
+    let new_line = format!("mode = \"{value}\"");
+    let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
+    let tables = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    let is_mode = |l: &String| {
+        l.trim_start()
+            .strip_prefix("mode")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    };
+    match lines[..tables].iter().position(is_mode) {
+        Some(i) => {
+            let end = if lines[i].ends_with("\r\n") {
+                "\r\n"
+            } else if lines[i].ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            lines[i] = new_line + end;
+        }
+        None => {
+            if let Some(last) = lines.last_mut().filter(|l| !l.ends_with('\n')) {
+                last.push('\n');
+            }
+            lines.insert(tables, new_line + "\n");
+        }
+    }
+    let new_text = lines.concat();
+    let new = parse(&new_text).map_err(|e| format!("can't change the mode: {e}"))?;
+    if new.mode != mode || new.allow != old.allow {
+        return Err("can't change the mode: the file wouldn't read back as expected".into());
+    }
+    if new_text == text {
+        return Ok(());
+    }
+    replace(path, &new_text).map_err(|e| format!("can't save {}: {e}", path.display()))
+}
+
 fn create_if_missing(path: &Path) -> io::Result<()> {
     if fs::symlink_metadata(path).is_ok() {
         return Ok(());
@@ -964,6 +1014,53 @@ pub(crate) mod tests {
         assert!(load(&path).error.unwrap().ends_with("it isn't UTF-8 text"));
         fs::write(&path, "mode = \"auto\"\n").unwrap();
         assert_eq!(load(&path).rules.mode, Mode::Auto);
+    }
+
+    #[test]
+    fn set_mode_changes_only_the_mode_line() {
+        let path = temp_dir("set-mode").join("rules.toml");
+        assert_eq!(load(&path).error, None);
+        let before = read(&path).unwrap();
+        set_mode(&path, Mode::Auto).unwrap();
+        let after = read(&path).unwrap();
+        assert_eq!(load(&path).rules.mode, Mode::Auto);
+        assert_eq!(load(&path).rules.allow, parse(&before).unwrap().allow);
+        let changed: Vec<_> = before
+            .lines()
+            .zip(after.lines())
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert_eq!(changed, [(r#"mode = "observe""#, r#"mode = "auto""#)]);
+        set_mode(&path, Mode::Observe).unwrap();
+        assert_eq!(read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn set_mode_adds_a_missing_line_and_keeps_tables_and_line_endings() {
+        let path = temp_dir("set-mode-add").join("rules.toml");
+        replace(&path, "# mine\r\n[[allow]]\r\ncommand = \"ls\"\r\n").unwrap();
+        set_mode(&path, Mode::Auto).unwrap();
+        assert_eq!(
+            read(&path).unwrap(),
+            "# mine\r\nmode = \"auto\"\n[[allow]]\r\ncommand = \"ls\"\r\n"
+        );
+        let rules = load(&path).rules;
+        assert_eq!((rules.mode, rules.allow.len()), (Mode::Auto, 1));
+        replace(&path, "mode = \"observe\"\r\n").unwrap();
+        set_mode(&path, Mode::Auto).unwrap();
+        assert_eq!(read(&path).unwrap(), "mode = \"auto\"\r\n");
+        replace(&path, "# only a comment").unwrap();
+        set_mode(&path, Mode::Auto).unwrap();
+        assert_eq!(read(&path).unwrap(), "# only a comment\nmode = \"auto\"\n");
+    }
+
+    #[test]
+    fn set_mode_refuses_a_broken_file_and_leaves_it() {
+        let path = temp_dir("set-mode-broken").join("rules.toml");
+        let broken = "mode = \"auto\"\n[[allow]]\nnope = 1\n";
+        replace(&path, broken).unwrap();
+        assert!(set_mode(&path, Mode::Observe).is_err());
+        assert_eq!(read(&path).unwrap(), broken);
     }
 
     #[test]

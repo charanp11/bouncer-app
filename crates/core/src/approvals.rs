@@ -606,6 +606,19 @@ impl Desk {
         result
     }
 
+    /// The settings switch: writes `mode` into the rules file (checked,
+    /// atomic) and reloads it, so the island shows the change like any edit.
+    pub fn set_mode(&self, mode: Mode) -> Result<(), &'static str> {
+        let path = self.lock().rules.path.clone().ok_or("no rules file")?;
+        if let Err(e) = rules::set_mode(&path, mode) {
+            eprintln!("Bouncer: {e}");
+            return Err("couldn't change the mode");
+        }
+        self.lock().reload(true);
+        self.publish();
+        Ok(())
+    }
+
     /// Checks the rules file for changes; the island hears about any.
     pub fn reload_rules(&self) {
         if self.lock().reload(false) {
@@ -1155,6 +1168,18 @@ mod tests {
         assert_eq!(view["queue"][0]["offer"], json!(null));
         desk.decide(&id, false).unwrap();
         assert_eq!(a.join().unwrap(), Some(Decision::Deny));
+    }
+
+    #[test]
+    fn set_mode_writes_the_file_and_the_island_shows_it() {
+        let (desk, path) = desk_with_rules("set-mode", "mode = \"observe\"\n");
+        desk.set_mode(Mode::Auto).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mode = \"auto\"\n");
+        let view = desk.view();
+        assert_eq!(view["rules"]["mode"], "auto");
+        assert_eq!(view["rules"]["notice"]["text"], "Rules changed: mode auto");
+        desk.set_mode(Mode::Observe).unwrap();
+        assert_eq!(desk.view()["rules"]["mode"], "observe");
     }
 
     #[test]
