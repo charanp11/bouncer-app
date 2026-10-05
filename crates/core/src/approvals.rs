@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::activity::{self, Entry, Log};
 use crate::away::{self, Summary};
 use crate::check::{self, Context, sentence};
-use crate::code::code_view;
+use crate::code::{code_view, line_counts};
 use crate::event::Event;
 use crate::ipc::Decision;
 use crate::rules::{self, Loaded, Mode, Rule, Rules};
@@ -68,6 +68,8 @@ struct Session {
     history: VecDeque<(String, &'static str)>,
     /// The code pane for the current tool call, if it has one.
     code: Option<Value>,
+    /// Lines the current edit adds and removes (numbers only), for the pill.
+    lines: Option<(usize, Option<usize>)>,
 }
 
 struct Pending {
@@ -139,6 +141,7 @@ impl State {
                     last: SystemTime::now(),
                     history: VecDeque::new(),
                     code: None,
+                    lines: None,
                 });
                 self.sessions.len() - 1
             }
@@ -159,6 +162,7 @@ impl State {
             "PreToolUse" | "PermissionRequest" => {
                 session.step = step(event);
                 session.code = code_view(event.tool.as_deref(), event.input.as_ref());
+                session.lines = line_counts(event.tool.as_deref(), event.input.as_ref());
                 let how = match event.kind.as_str() {
                     "PreToolUse" => "",
                     _ if paused => "asked in terminal",
@@ -175,8 +179,14 @@ impl State {
                     }
                 }
             }
-            "UserPromptSubmit" => session.step = "Thinking".into(),
-            "Stop" => session.step = "Idle".into(),
+            "UserPromptSubmit" => {
+                session.step = "Thinking".into();
+                session.lines = None;
+            }
+            "Stop" => {
+                session.step = "Idle".into();
+                session.lines = None;
+            }
             _ => {}
         }
         session.status = match event.kind.as_str() {
@@ -693,6 +703,7 @@ impl Desk {
                     "last_ms": epoch_ms(s.last),
                     "history": s.history.iter().map(|(label, how)| json!({ "label": visible(label), "how": how })).collect::<Vec<_>>(),
                     "code": s.code,
+                    "lines": s.lines.map(|(added, removed)| json!([added, removed])),
                 })
             })
             .collect();
@@ -1103,6 +1114,27 @@ mod tests {
         assert_eq!(desk.view()["sessions"][0]["step"], "Idle");
         desk.handle(event("a", "UserPromptSubmit", ""));
         assert_eq!(desk.view()["sessions"][0]["step"], "Thinking");
+    }
+
+    #[test]
+    fn sessions_carry_the_current_edits_line_counts() {
+        let desk = desk(WAIT);
+        let lines = || desk.view()["sessions"][0]["lines"].clone();
+        let mut e = event("a", "PreToolUse", "");
+        e.tool = Some("Edit".into());
+        e.input =
+            Some(json!({ "file_path": "/p/a.rs", "old_string": "a\nb", "new_string": "a\nB\nc" }));
+        desk.handle(e.clone());
+        assert_eq!(lines(), json!([2, 1]));
+        e.tool = Some("Write".into());
+        e.input = Some(json!({ "file_path": "/p/b.rs", "content": "x\ny" }));
+        desk.handle(e.clone());
+        assert_eq!(lines(), json!([2, null]));
+        desk.handle(event("a", "PreToolUse", "ls"));
+        assert_eq!(lines(), Value::Null);
+        desk.handle(e);
+        desk.handle(event("a", "Stop", ""));
+        assert_eq!(lines(), Value::Null);
     }
 
     #[test]
