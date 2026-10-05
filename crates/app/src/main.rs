@@ -323,7 +323,9 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     let top_centre = if hidden {
         screen_top(0.0)
     } else {
-        anchor.or_else(|| screen_top(8.0))
+        // The 8-px gap from the top is inside a transparent window (the
+        // page's top padding), so the strip and the island share its top edge.
+        anchor.or_else(|| screen_top(if ROUNDED { 0.0 } else { 8.0 }))
     };
     let Some(at) = top_centre else { return };
     let scale = window.scale_factor().unwrap_or(1.0);
