@@ -121,6 +121,37 @@ fn diff(old: &str, new: &str) -> Vec<Line> {
         .collect()
 }
 
+/// Lines added and removed by an edit, for the pill's `+N −M`: Edit old vs
+/// new text, MultiEdit the sum over its edits, Write `+N` only (the old file
+/// is never read, so removed is `None`). Other tools: `None`. Numbers only;
+/// `replace_all` counts once (how many places would need the file).
+pub fn line_counts(tool: Option<&str>, input: Option<&Value>) -> Option<(usize, Option<usize>)> {
+    let input = input?;
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_owned);
+    let pairs = match tool? {
+        "Edit" => vec![(text(input, "old_string")?, text(input, "new_string")?)],
+        "MultiEdit" => input
+            .get("edits")?
+            .as_array()?
+            .iter()
+            .map(|e| Some((text(e, "old_string")?, text(e, "new_string")?)))
+            .collect::<Option<Vec<_>>>()?,
+        "Write" => return Some((text(input, "content")?.lines().count(), None)),
+        _ => return None,
+    };
+    let (mut add, mut del) = (0, 0);
+    for (old, new) in &pairs {
+        for (mark, _) in line_ops(old, new) {
+            match mark {
+                '+' => add += 1,
+                '-' => del += 1,
+                _ => {}
+            }
+        }
+    }
+    Some((add, Some(del)))
+}
+
 fn added(text: &str) -> Vec<Line> {
     text.lines()
         .enumerate()
@@ -263,5 +294,29 @@ mod tests {
         let v = code_view(Some("Edit"), Some(&input)).unwrap();
         assert_eq!(v["file"], r"a\u{202E}txt.rs");
         assert_eq!(v["lines"][0]["text"], r"x\u{001B}[31m");
+    }
+
+    #[test]
+    fn counts_lines_added_and_removed() {
+        let edit =
+            json!({ "file_path": "/p/a.rs", "old_string": "a\nb\nc", "new_string": "a\nB\nc\nd" });
+        assert_eq!(line_counts(Some("Edit"), Some(&edit)), Some((2, Some(1))));
+        let multi = json!({ "file_path": "/p/a.rs", "edits": [
+            { "old_string": "a", "new_string": "b" },
+            { "old_string": "c\nd", "new_string": "" }
+        ]});
+        assert_eq!(
+            line_counts(Some("MultiEdit"), Some(&multi)),
+            Some((1, Some(3)))
+        );
+        // Write: the old file is never read, so nothing is "removed".
+        let write = json!({ "file_path": "/p/new.py", "content": "a\nb\nc\n" });
+        assert_eq!(line_counts(Some("Write"), Some(&write)), Some((3, None)));
+        let bash = json!({ "command": "ls" });
+        assert_eq!(line_counts(Some("Bash"), Some(&bash)), None);
+        assert_eq!(
+            line_counts(Some("Edit"), Some(&json!({ "old_string": 1 }))),
+            None
+        );
     }
 }
