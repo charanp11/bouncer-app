@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::approvals::step;
+use crate::code::line_counts;
 use crate::event::Event;
 use crate::redact::redact;
 use crate::rules::{create_private_dir, trust};
@@ -43,6 +44,10 @@ pub struct Entry {
     /// Full path, edit tools only.
     pub file: Option<String>,
     pub how: Option<String>,
+    /// Lines an edit adds and removes (numbers only, never the text);
+    /// `removed` is `None` for Write, whose old file is never read.
+    pub added: Option<u64>,
+    pub removed: Option<u64>,
 }
 
 impl Entry {
@@ -59,6 +64,7 @@ impl Entry {
                     .or_else(|| input.get("notebook_path"))?;
                 path.as_str().map(str::to_owned)
             });
+        let lines = line_counts(event.tool.as_deref(), event.input.as_ref());
         Entry {
             t: ms(event.time),
             session: event.session.clone(),
@@ -72,6 +78,8 @@ impl Entry {
             },
             file,
             how: None,
+            added: lines.map(|(a, _)| a as u64),
+            removed: lines.and_then(|(_, r)| r).map(|r| r as u64),
         }
     }
 
@@ -99,6 +107,8 @@ impl Entry {
             "label": cut(&self.label, MAX_LABEL),
             "file": self.file.as_deref().map(|f| cut(f, MAX_FILE)),
             "how": self.how,
+            "added": self.added,
+            "removed": self.removed,
         })
         .to_string();
         line.push('\n');
@@ -117,6 +127,8 @@ impl Entry {
             label: text("label")?,
             file: text("file"),
             how: text("how"),
+            added: v.get("added").and_then(Value::as_u64),
+            removed: v.get("removed").and_then(Value::as_u64),
         })
     }
 }
@@ -338,6 +350,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn edits_log_line_counts_never_their_text() {
+        let e = event(
+            "PreToolUse",
+            Some("Edit"),
+            json!({ "file_path": "/p/a.rs", "old_string": "old body", "new_string": "new body\nmore" }),
+            1,
+        );
+        let line = Entry::of(&e).line();
+        assert!(!line.contains("body") && !line.contains("more"));
+        let parsed = Entry::parse(&line).unwrap();
+        assert_eq!((parsed.added, parsed.removed), (Some(2), Some(1)));
+        let e = event(
+            "PreToolUse",
+            Some("Write"),
+            json!({ "file_path": "/p/b", "content": "x" }),
+            1,
+        );
+        let parsed = Entry::parse(&Entry::of(&e).line()).unwrap();
+        assert_eq!((parsed.added, parsed.removed), (Some(1), None));
+        // A line written before 5c (no counts) still reads.
+        let old = r#"{"t":1,"session":"s","project":"/p","kind":"PreToolUse","tool":"Edit","label":"Editing a.rs","file":"/p/a.rs","how":null}"#;
+        let parsed = Entry::parse(old).unwrap();
+        assert_eq!((parsed.added, parsed.removed), (None, None));
+    }
+
+    #[test]
     fn only_the_listed_fields_are_stored() {
         let content = "super secret file body";
         let e = event(
@@ -361,7 +399,8 @@ pub(crate) mod tests {
         assert_eq!(
             keys,
             [
-                "t", "session", "project", "kind", "tool", "label", "file", "how"
+                "t", "session", "project", "kind", "tool", "label", "file", "how", "added",
+                "removed"
             ]
         );
         // Only the first line of a command, cut to MAX_LABEL.
