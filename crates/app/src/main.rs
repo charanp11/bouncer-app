@@ -1,6 +1,8 @@
 // No console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod region;
+
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +39,9 @@ struct Island {
     placed: Mutex<Option<PhysicalPosition<i32>>>,
     /// The size the page last asked for (it measures its own content).
     size: Mutex<LogicalSize<f64>>,
+    /// The largest page this screen and Size can show (the page works it
+    /// out): the fixed window the island's region sits in, on Windows.
+    frame: Mutex<LogicalSize<f64>>,
     /// Told about every window move; see `settle_after_moves`.
     moved: Mutex<mpsc::Sender<()>>,
     /// The settings screen is open (gear or tray); a card still comes first.
@@ -60,7 +65,7 @@ fn settle_after_moves(app: AppHandle) -> mpsc::Sender<()> {
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || {
                 if let Some(window) = handle.get_webview_window("main") {
-                    keep_on_screen(&window.as_ref().window());
+                    keep_on_screen(&window, &handle.state::<Island>());
                 }
             });
         }
@@ -131,6 +136,7 @@ fn main() {
                 anchor: Mutex::new(None),
                 placed: Mutex::new(None),
                 size: Mutex::new(LogicalSize::new(320.0, 44.0)),
+                frame: Mutex::new(LogicalSize::new(320.0, 44.0)),
                 moved: Mutex::new(settle_after_moves(app.handle().clone())),
                 settings: AtomicBool::new(false),
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
@@ -296,6 +302,8 @@ fn show(app: &AppHandle, mut view: Value) {
 /// Sizes the window to what the page asked for and places it: hanging from
 /// the user's spot (or the top centre at first), kept inside the work area.
 /// While hidden it is the wake strip at the very top centre of the screen.
+/// On Windows the window is the fixed frame and only its region follows the
+/// page (`region`); if that fails, the window is sized to the page as before.
 /// Main thread only.
 fn lay_out(window: &WebviewWindow, island: &Island) {
     let mut anchor = island.anchor.lock().unwrap();
@@ -310,7 +318,7 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
         *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
     }
     let logical = *island.size.lock().unwrap();
-    let _ = window.set_size(logical);
+    let frame = *island.frame.lock().unwrap();
     let screen_top = |gap: f64| {
         // Top centre of the primary monitor's work area.
         let monitor = window.primary_monitor().ok()??;
@@ -327,18 +335,43 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
         // page's top padding), so the strip and the island share its top edge.
         anchor.or_else(|| screen_top(if ROUNDED { 0.0 } else { 8.0 }))
     };
-    let Some(at) = top_centre else { return };
+    let Some(at) = top_centre else {
+        let _ = window.set_size(logical);
+        return;
+    };
     let scale = window.scale_factor().unwrap_or(1.0);
-    let size = (
-        (logical.width * scale) as i32,
-        (logical.height * scale) as i32,
-    );
-    let pos = match work_area(&window.as_ref().window(), at) {
+    let physical = |s: LogicalSize<f64>| ((s.width * scale) as i32, (s.height * scale) as i32);
+    let size = physical(logical);
+    let area = work_area(&window.as_ref().window(), at);
+    let pos = match area {
         Some(area) => place((at.x, at.y), size, area),
         None => (at.x - size.0 / 2, at.y),
     };
+    let framed = area.filter(|_| ROUNDED).and_then(|((ax, ay), (aw, ah))| {
+        let page = region::Rect {
+            x: pos.0,
+            y: pos.1,
+            w: size.0,
+            h: size.1,
+        };
+        let area = region::Rect {
+            x: ax,
+            y: ay,
+            w: aw,
+            h: ah,
+        };
+        let (frame, shown) = region::frame_around(page, physical(frame), area);
+        region::apply(window, frame, shown).then_some((frame.x, frame.y))
+    });
+    let pos = framed.unwrap_or_else(|| {
+        // No region: the window is exactly the page again, so nothing
+        // invisible is left catching clicks.
+        region::clear(window);
+        let _ = window.set_size(logical);
+        let _ = window.set_position(PhysicalPosition::new(pos.0, pos.1));
+        pos
+    });
     let pos = PhysicalPosition::new(pos.0, pos.1);
-    let _ = window.set_position(pos);
     *placed = Some(pos);
     // The anchor stays where the user put it; only this placement is clamped.
     if !hidden {
@@ -367,21 +400,21 @@ fn work_area<R: tauri::Runtime>(
 /// A drag that leaves the island's centre under the taskbar or off every
 /// screen pushes it back inside the work area, so it can always be reached.
 /// Straddling two monitors is fine, so it can be dragged across them.
-fn keep_on_screen<R: tauri::Runtime>(window: &tauri::Window<R>) {
+/// The island's centre is judged, not the window's (the window can be the
+/// larger frame). Main thread only.
+fn keep_on_screen(window: &WebviewWindow, island: &Island) {
     let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
         return;
     };
-    let size = (size.width as i32, size.height as i32);
-    let centre = PhysicalPosition::new(pos.x + size.0 / 2, pos.y + size.1 / 2);
-    let Some(area) = work_area(window, centre) else {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let height = (island.size.lock().unwrap().height * scale) as i32;
+    let centre = PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y + height / 2);
+    let Some(area) = work_area(&window.as_ref().window(), centre) else {
         return;
     };
-    if contains(area, (centre.x, centre.y)) {
-        return;
-    }
-    let inside = place((pos.x + size.0 / 2, pos.y), size, area);
-    if inside != (pos.x, pos.y) {
-        let _ = window.set_position(PhysicalPosition::new(inside.0, inside.1));
+    if !contains(area, (centre.x, centre.y)) {
+        // Takes the dragged spot as the anchor and places the island inside.
+        lay_out(window, island);
     }
 }
 
@@ -431,15 +464,36 @@ fn drag(app: AppHandle) {
     }
 }
 
-/// The page reports the size of its content; the window follows it.
+/// The page reports the size of its content (and the largest it can need,
+/// `frame`); the window follows it. A sync command runs on the main thread,
+/// so the window is in place when the page's call returns.
 #[tauri::command]
-fn fit(app: AppHandle, island: State<'_, Island>, width: f64, height: f64) {
+fn fit(
+    app: AppHandle,
+    island: State<'_, Island>,
+    width: f64,
+    height: f64,
+    frame_width: Option<f64>,
+    frame_height: Option<f64>,
+) {
     if !(width.is_finite() && height.is_finite()) {
         return;
     }
-    *island.size.lock().unwrap() = LogicalSize::new(
+    let size = LogicalSize::new(
         width.clamp(MIN_SIZE.0, MAX_SIZE.0),
         height.clamp(MIN_SIZE.1, MAX_SIZE.1),
+    );
+    let frame = (frame_width.unwrap_or(0.0), frame_height.unwrap_or(0.0));
+    let frame = if frame.0.is_finite() && frame.1.is_finite() {
+        frame
+    } else {
+        (0.0, 0.0)
+    };
+    *island.size.lock().unwrap() = size;
+    // Never smaller than the page, never past the size limit.
+    *island.frame.lock().unwrap() = LogicalSize::new(
+        frame.0.clamp(size.width, MAX_SIZE.0),
+        frame.1.clamp(size.height, MAX_SIZE.1),
     );
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
