@@ -175,7 +175,7 @@ html.square .island {
 }
 
 /* The ticker: lines the current edit adds / removes (numbers only). */
-.lines {
+.ticker {
   flex: none;
   display: inline-flex;
   gap: 6px;
@@ -183,11 +183,11 @@ html.square .island {
   font-variant-numeric: tabular-nums;
 }
 
-.lines .add {
+.ticker .add {
   color: var(--ok);
 }
 
-.lines .del {
+.ticker .del {
   color: #ff8f88;
 }
 

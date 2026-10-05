@@ -299,7 +299,7 @@ function pill(
 
 /** `+N −M`: numbers only; the label shortens first, these are never cut. */
 function ticker([added, removed]: [number, number | null]): HTMLElement {
-  const t = el("span", "lines");
+  const t = el("span", "ticker");
   t.append(el("span", "add", `+${added}`));
   if (removed !== null) t.append(el("span", "del", `−${removed}`));
   return t;
