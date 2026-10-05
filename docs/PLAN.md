@@ -1640,6 +1640,68 @@ below; on the pill → Bouncer).
 - Prove with `WindowFromPoint` that clicks outside the island reach the
   window underneath.
 
+### Island window region audit (2026-10-05)
+
+Sources: `main.rs` (`fit`, `lay_out`, `place`, `keep_on_screen`, drag),
+`main.ts` (`report`, `settle`, `armIfVisible`), `size.ts`, tauri 2.12.1 /
+tauri-runtime-wry 2.12.1 / tauri-macros 2.7.1 sources.
+
+What exists: the page reports its box (island + shadow margin + top gap) and
+the window is resized and moved to exactly that box, so every width change
+moves the window's left edge (the one-frame jump).
+
+Findings:
+
+1. **The frame.** The window gets one size that fits every view at the
+   current Size and screen: the widest and tallest page (pill, open, wide,
+   each at its own scale), computed by the page in `size.ts` and sent with
+   the box. The box is drawn top-centred in it (as now), so only the region
+   changes between views; the window moves only when the Size, the screen,
+   hidden ↔ a dragged spot, or a drag changes it. With the island at its
+   usual top-centre spot, hiding to the strip doesn't move it either.
+2. **Region = the box**, in window pixels, top-centred. The frame is
+   centred on the box and never passes the work area (the box's own
+   monitor), so it can't straddle monitors with another DPI. Near a screen
+   edge the frame narrows (then a width change there can still jump once).
+3. **"Fully visible" needs a new signal**: the viewport is the frame now,
+   always bigger than the card. `fit` is a sync command, so it runs on the
+   main thread, and `run_on_main_thread` runs inline there
+   (tauri-runtime-wry `send_user_message`): when the page's `fit` call
+   returns, the region is set. The page keeps the last confirmed size; the
+   arm starts when it holds the card (and the viewport does), and a grow
+   morph starts when its `fit` returns (150 ms at most, as now).
+4. **One small `unsafe` module** (`crates/app/src/region.rs`, Windows only):
+   `SetWindowPos`, `CreateRectRgn`, `SetWindowRgn`, `DeleteObject`, declared
+   from `user32` / `gdi32` (system libraries, no new crate). The geometry is
+   a plain function next to it, tested.
+5. **Fail safe:** if the handle or any call fails, the window goes back to
+   exactly the box (today's resizing) and any region is removed, so a big
+   invisible window never catches clicks. A refused region is freed.
+6. **Drag:** the user drags the frame; the anchor is still its top centre.
+   "Out of reach" is judged from the box's centre, not the frame's.
+7. macOS: unchanged (resizes to the box) until it's tested there.
+
+Threats:
+
+| Threat | Fix |
+| --- | --- |
+| A big invisible window catches clicks | Region = the box; any failure → window back to the box, region removed |
+| A card shows (or arms) clipped by an old region | Arm starts only after the `fit` holding the card has returned (region set) |
+| The frame crosses monitors (DPI change) | Frame kept inside the box's work area |
+| Leaked GDI region | Freed when `SetWindowRgn` refuses it (the system owns it otherwise) |
+| `unsafe` misuse | One module; only our own window handle, on the main thread; no pointers but the handle |
+
+Done when:
+
+- [ ] Opening and closing (pill ↔ open ↔ wide) never move the window; filmed
+  and measured: no one-frame jump
+- [ ] `WindowFromPoint`: outside the island → the window underneath; on the
+  island → Bouncer
+- [ ] A test that the region always holds the card's buttons
+- [ ] Forced failure falls back to box-sized resizing (test + by hand)
+- [ ] Arm still counts from fully visible; idle CPU ~0%
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+
 ## Phase 5d — Sound pack (after 5c)
 
 Charan, 2026-10-04. Its own PR, all four stages, after 5c is merged. 5b
