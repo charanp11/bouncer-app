@@ -111,8 +111,8 @@ h1 .stamp { color: var(--sun); }
 .badge { font: 600 11px var(--ui); color: var(--island); background: var(--wait); border-radius: 999px; padding: 1px 7px; }
 .badge.risk { background: var(--risk); color: var(--island); }
 /* the ticker: lines added / removed by the current edit (numbers only) */
-.lines { flex: none; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; display: inline-flex; gap: 6px; }
-.lines .add { color: var(--ok); } .lines .del { color: #ff8f88; }
+.ticker { flex: none; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; display: inline-flex; gap: 6px; }
+.ticker .add { color: var(--ok); } .ticker .del { color: #ff8f88; }
 
 .body { padding: 0 var(--pad) var(--pad); display: grid; gap: var(--gap); max-height: calc(var(--open-max-h) - var(--pill-h)); overflow-y: auto; }
 
@@ -538,7 +538,7 @@ function pill(state, labelParts, badge, lines) {
   labelParts.forEach(([text, strong]) => l.append(strong ? el("b", "", text) : document.createTextNode(text)));
   p.append(l);
   if (lines) { // numbers only, from the hook's own text
-    const n = el("span", "lines");
+    const n = el("span", "ticker");
     n.append(el("span", "add", "+" + lines.add));
     if (lines.del !== undefined) n.append(el("span", "del", "\u2212" + lines.del));
     p.append(n);
