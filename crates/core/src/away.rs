@@ -246,6 +246,8 @@ mod tests {
             label: label.into(),
             file: None,
             how: None,
+            added: None,
+            removed: None,
         }
     }
 
@@ -309,6 +311,8 @@ mod tests {
                 label: label.into(),
                 file: (!file.is_empty()).then(|| file.into()),
                 how: (!how.is_empty()).then(|| how.into()),
+                added: None,
+                removed: None,
             })
             .collect()
     }
