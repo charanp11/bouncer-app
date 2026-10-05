@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character (5a, 5b merged; 5c in review; 5d next)**
+**Current phase: Phase 5 — Character (5a, 5b, 5c merged; island window region in review; 5d next)**
 
 ## MVP scope
 
@@ -1691,16 +1691,44 @@ Threats:
 | Leaked GDI region | Freed when `SetWindowRgn` refuses it (the system owns it otherwise) |
 | `unsafe` misuse | One module; only our own window handle, on the main thread; no pointers but the handle |
 
+Verify (2026-10-05, Windows 1366 × 768 at 100%, debug build in a scratch
+target beside Charan's dev app, private test pipe; window and region read
+with `GetWindowRect` / `GetWindowRgnBox`, clicks checked with
+`WindowFromPoint`, nothing clicked):
+
+- Strip, pill and open list: the window stayed at 303,0 760 × 628 for all
+  three; only the region changed (204 × 6, 370 × 88, 495 × 164).
+- Clicks: inside the region → Bouncer; 15 px left of it and 15 px below it
+  → the window underneath, in every view.
+- A drag (the frame moved to mid-screen): the island followed, and the frame
+  shrank to the work area (760 × 470).
+- Filmed three opens and three closes at that spot and tracked Bouncer's x
+  in every frame: no frame jumps off and back (the same check catches 5c's
+  jump, 156 → 218 → 156).
+- A card: drawn in one frame with Allow waiting; the arm started when the
+  `fit` showing it returned (one frame later), armed 602 ms after. Deny,
+  Allow once and Always allow… all lie inside the region on screen.
+- Fallback (`BOUNCER_NO_REGION=1`, debug only): no region, the window is
+  exactly the island's box again (368 × 88, 493 × 164); a click just
+  outside it reaches the window underneath.
+- Idle CPU, settled idle pill, app + WebView2, 60 s: region on 1.28% /
+  1.41%, region off 1.38%: the region adds nothing. (Higher than 5c's
+  single 30-s 0.26% on a busier machine: Charan's dev app ran alongside.)
+- Diff reread: the only `unsafe` is `region::win` (four Windows calls on our
+  own handle, main thread); a refused region is freed; every failure path
+  clears the region and sizes the window to the box.
+
 Done when:
 
-- [ ] Opening and closing (pill ↔ open ↔ wide) never move the window; filmed
+- [x] Opening and closing (pill ↔ open ↔ wide) never move the window; filmed
   and measured: no one-frame jump
-- [ ] `WindowFromPoint`: outside the island → the window underneath; on the
+- [x] `WindowFromPoint`: outside the island → the window underneath; on the
   island → Bouncer
-- [ ] A test that the region always holds the card's buttons
-- [ ] Forced failure falls back to box-sized resizing (test + by hand)
-- [ ] Arm still counts from fully visible; idle CPU ~0%
+- [x] A test that the region always holds the card's buttons
+- [x] Forced failure falls back to box-sized resizing (test + by hand)
+- [x] Arm still counts from fully visible; idle CPU unchanged by the region
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local green: 142 Rust + 42 frontend)
 
 ## Phase 5d — Sound pack (after 5c)
 
