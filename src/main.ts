@@ -391,14 +391,16 @@ function sessionRows(sessions: Session[]): HTMLElement {
   return ul;
 }
 
+// The "Allowed / Denied" message shows from the press: the backend's new
+// view (card gone) can arrive before its answer, and must not flash the pill.
 function decide(request: Request, allow: boolean, buttons: HTMLButtonElement[]) {
   for (const b of buttons) b.disabled = true;
+  const shown = { request, ok: allow, until: performance.now() + TOAST_MS };
+  toast = shown;
   invoke("decide", { id: request.id, allow })
-    .then(() => {
-      toast = { request, ok: allow, until: performance.now() + TOAST_MS };
-    })
     .catch(() => {
       // Refused (too soon, or already answered): show the current state again.
+      if (toast === shown) toast = null;
     })
     .finally(() => current && render(current));
 }
@@ -467,17 +469,15 @@ function alwaysPreview(request: Request, offer: string, mode: string): HTMLEleme
   });
   add.addEventListener("click", () => {
     for (const b of buttons) b.disabled = true;
+    const what = file ? "This file" : "This command";
+    const text =
+      mode === "auto" ? `Rule added. ${what} is auto-allowed from now on.` : "Rule added. In observe mode it still asks.";
+    const shown = { request, ok: true, until: performance.now() + RULE_TOAST_MS, text };
+    toast = shown;
     invoke("always", { id: request.id })
-      .then(() => {
-        const what = file ? "This file" : "This command";
-        const text =
-          mode === "auto"
-            ? `Rule added. ${what} is auto-allowed from now on.`
-            : "Rule added. In observe mode it still asks.";
-        toast = { request, ok: true, until: performance.now() + RULE_TOAST_MS, text };
-      })
       .catch(() => {
         // Refused (too soon, already answered, or the file couldn't be saved).
+        if (toast === shown) toast = null;
       })
       .finally(() => {
         always = { id: "", since: 0 };
