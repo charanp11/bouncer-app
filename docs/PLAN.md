@@ -1548,9 +1548,13 @@ Threats (5c):
 | Motion sickness | Reduced motion: no morph, no rise, no overshoot |
 | Idle CPU | Web Animations run only during a change; settled or hidden, nothing runs |
 
+Decisions (Charan, 2026-10-04): prototype v0.11 approved, and all three
+proposals: (1) the 8-px gap goes inside the window; (2) the line counts as
+in finding 7; (3) `line_ops` capped at 1,000,000 cells.
+
 Phase 5c is done when:
 
-- [ ] Prototype v0.11 approved (morph, window order, peek, ticker, reduced motion)
+- [x] Prototype v0.11 approved (morph, window order, peek, ticker, reduced motion)
 - [ ] Strip → pill → open → wide grow from the top edge with the 320 ms
   spring, close with 200 ms ease-out; window grows first, shrinks last
 - [ ] A card appears at once; its arm counts from fully visible; nothing
@@ -1567,15 +1571,37 @@ Phase 5c is done when:
 Charan, 2026-10-04. Its own PR, all four stages, after 5c is merged. 5b
 ships the first three sounds (needs you, risky, done) as they are.
 
-- **All sounds generated in code (Web Audio), no files**, nothing copied
-  from Coucou or anywhere else.
-- **A unique sound for each:** launch greeting; new session started; needs
-  you (card or question); risky request; you allowed; you denied; "Always
-  allow" rule added; auto-allowed (very subtle, off by default); session
-  done; a tool failed / error; welcome back (away summary); poke (click on
-  Bouncer); dizzy; paused; resumed; auto-allow turned on; history wiped.
-- **Settings:** volume, a "Sound style" choice (Soft / Playful / Retro) and
-  per-sound on / off.
+- **Theme: Bouncer is a club bouncer.** Sounds are funny and still say what
+  happened (Charan, 2026-10-04).
+- **All generated in code (Web Audio), no files**, each under ~1 s, nothing
+  copied from Coucou or anywhere else.
+- **Starting set** (Playful style):
+
+  | Event | Sound |
+  | --- | --- |
+  | Launch | "yo!" whistle |
+  | New session | door chime |
+  | Needs you (card or question) | knock-knock + rising "ahem?" |
+  | Risky request | record scratch + low buzzer |
+  | Allowed | velvet rope "pop" + ding |
+  | Denied | door slam "bonk" |
+  | "Always allow" rule added | VIP stamp "ka-chunk" |
+  | Auto-allowed | tiny click (off by default) |
+  | Session done | mini "ta-da!" |
+  | A tool failed / error | sad trombone |
+  | Welcome back (away summary) | rising "heyyy" |
+  | Poke (click on Bouncer) | boing |
+  | Dizzy | cartoon whirl |
+  | Paused | snore "zzz" |
+  | Resumed | "bip-bip!" |
+  | Auto-allow turned on | "cha-ching" |
+  | History wiped | eraser whoosh |
+
+- **Styles:** Playful (default); Soft and Retro are calmer versions of the
+  same ideas (same rhythm and contour, gentler timbre / chiptune).
+- **Risky and needs you stay clearly different from the fun ones** (lower,
+  harsher, insistent), so they're never ignored, in every style.
+- **Settings:** volume, the style choice and per-sound on / off.
 - **Rules:** never more than one sound at a time; a repeat within 2 s is
   dropped; frequent events stay quiet by default; nothing while paused;
   idle CPU ~0% (the audio context suspended between sounds).
