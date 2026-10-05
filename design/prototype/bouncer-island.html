@@ -357,7 +357,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.11 · Oct 4 2026</div>
+    <div class="meta">design/prototype · v0.12 · Oct 5 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -462,6 +462,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <section>
       <h3>Motion</h3>
       <table>
+        <tr><td>Peek (hover the strip)</td><td>200ms</td></tr>
         <tr><td>Open (spring)</td><td>320ms</td></tr>
         <tr><td>Spring curve</td><td>.2 .9 .25 1.12</td></tr>
         <tr><td>Close</td><td>200ms ease-out</td></tr>
@@ -645,7 +646,7 @@ const REQ = {
 
 const STATES = {
   hidden: { phase: "Phase 2", title: "Hidden", render() { island.className = "island hidden"; },
-    notes: ["Shown when no agent session is running.", "Only a 5px yellow wake strip at the top center. Hover it for 300ms: the idle pill grows out of the top edge (try it). Leave, and it shrinks back.", "No timers or animation run in this state."] },
+    notes: ["Shown when no agent session is running.", "Only a 5px yellow wake strip at the top center. Hover it for 200ms: the idle pill grows out of the top edge (try it). Leave, and it shrinks back.", "No timers or animation run in this state."] },
   idle: { phase: "Phase 2", title: "Idle pill", render() {
       island.className = "island";
       island.append(pill("idle", [["2 sessions", true], [" · all quiet"]]));
@@ -990,11 +991,11 @@ document.querySelector("[data-play]").addEventListener("click", () => {
   let t = 0;
   playing = steps.map(([st, wait]) => { t += wait * slow; return setTimeout(() => show(st), t); });
 });
-// Hovering the wake strip for 300ms peeks the idle pill; leaving hides it again.
+// Hovering the wake strip for 200ms peeks the idle pill; leaving hides it again.
 let peekTimer = 0, peeking = false;
 island.addEventListener("mouseenter", () => {
   if (current !== "hidden") return;
-  peekTimer = setTimeout(() => { peeking = true; show("idle"); }, 300);
+  peekTimer = setTimeout(() => { peeking = true; show("idle"); }, 200);
 });
 island.addEventListener("mouseleave", () => {
   clearTimeout(peekTimer);

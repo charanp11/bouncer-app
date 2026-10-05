@@ -90,7 +90,8 @@ const TOAST_MS = 1400;
 /** "Rule added." stays a little longer (as the prototype). */
 const RULE_TOAST_MS = 1600;
 const ROTATE_MS = 4000;
-const PEEK_MS = 300;
+/** Hover on the wake strip before the pill peeks (Charan, 2026-10-05). */
+const PEEK_MS = 200;
 const CLOCK_MS = 30_000;
 /** The launch greeting, and the cheer when a session finishes. */
 const GREET_MS = 2500;
