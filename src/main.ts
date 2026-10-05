@@ -9,7 +9,7 @@ import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
 import { holds, plan, type Size } from "./morph.ts";
-import { islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
+import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { cue, play, type Heard } from "./sound.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
@@ -1212,6 +1212,11 @@ function stopMorph() {
 
 const sizeOf = (r: DOMRect): Size => ({ w: r.width, h: r.height });
 const viewport = (): Size => ({ w: innerWidth, h: innerHeight });
+/** The page size the backend has put on screen (the window, or on Windows
+ * the region of the fixed frame): set when its `fit` call returns. */
+let shown: Size = { w: 0, h: 0 };
+/** `page` is fully on screen: the viewport and the shown size both hold it. */
+const visible = (page: Size) => holds(viewport(), page) && holds(shown, page);
 
 function settle(before: Box, still: boolean) {
   const after = snapshot();
@@ -1242,7 +1247,7 @@ function settle(before: Box, still: boolean) {
     },
     () => {},
   );
-  if (grow && !holds(viewport(), hold)) {
+  if (grow && !visible(hold)) {
     run.pause();
     rise?.pause();
     waiting = () => {
@@ -1260,16 +1265,18 @@ function settle(before: Box, still: boolean) {
 /** A card drawn but not fully visible yet starts its arm once the window
  * holds the whole page. */
 function armIfVisible() {
-  if (!cardUp || front.since !== 0 || !holds(viewport(), sizeOf(stage.getBoundingClientRect()))) return;
+  if (!cardUp || front.since !== 0 || !visible(sizeOf(stage.getBoundingClientRect()))) return;
   front.since = performance.now();
   for (const b of island.querySelectorAll(".btn.allow.waiting")) b.classList.remove("waiting");
   later(ARM_MS);
 }
 
-addEventListener("resize", () => {
-  if (waiting && hold && holds(viewport(), hold)) waiting();
+/** The window (or region) changed: a waiting grow may start, a card may arm. */
+function onShown() {
+  if (waiting && hold && visible(hold)) waiting();
   armIfVisible();
-});
+}
+addEventListener("resize", onShown);
 
 // The window is sized to the page (the island plus room for its shadow and
 // the top gap), or held while the island morphs.
@@ -1279,11 +1286,19 @@ function report() {
   const r = stage.getBoundingClientRect();
   const w = hold ? hold.w : Math.ceil(r.width);
   const h = hold ? hold.h : Math.ceil(r.height);
-  if (w !== lastW || h !== lastH) {
-    lastW = w;
-    lastH = h;
-    invoke("fit", { width: w, height: h });
-  }
+  if (w === lastW && h === lastH) return;
+  lastW = w;
+  lastH = h;
+  // The largest page this screen and Size can need: on Windows the window
+  // stays that size and only its region follows the island.
+  const frame = frameSize(screen.availWidth, screen.availHeight, scaleOf(current?.prefs?.size));
+  invoke("fit", { width: w, height: h, frameWidth: frame.w, frameHeight: frame.h })
+    .then(() => {
+      // `fit` runs on the main thread: the window is in place now.
+      if (w === lastW && h === lastH) shown = { w, h };
+      onShown();
+    })
+    .catch(() => {});
 }
 new ResizeObserver(report).observe(stage);
 

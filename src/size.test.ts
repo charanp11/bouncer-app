@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
+import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 
 test("the scale unless the island would pass 40% of the screen, never under 100%", () => {
   assert.equal(islandScale(WIDTH.pill, 1366), 1.12);
@@ -28,4 +28,15 @@ test("the open island is never taller than the work area", () => {
   assert.equal(openMaxHeight(1400, 1.25), 520);
   assert.ok((openMaxHeight(720, 1.5) + 8 + 32) * 1.5 <= 720 + 1e-9);
   assert.equal(openMaxHeight(0, 1.25), 520);
+});
+
+test("the frame fits every view and the work area", () => {
+  // Charan's screen: 1366 × 768, 720 px of work area, Medium.
+  const f = frameSize(1366, 720, 1.12);
+  assert.equal(f.w, 760); // the wide view at 100% (720 + 2 × 20)
+  assert.ok(f.w >= (400 + 40) * 1.12 && f.w >= (288 + 40) * 1.12);
+  assert.ok(f.h <= 720 && f.h >= 600);
+  const big = frameSize(2560, 1400, 1.25);
+  assert.equal(big.w, Math.ceil(760 * 1.25));
+  assert.equal(big.h, Math.ceil((8 + 520 + 32) * 1.25));
 });
