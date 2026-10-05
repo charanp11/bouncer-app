@@ -1583,6 +1583,21 @@ frame over WebView2's debug port; the OS focus was never taken):
 - Diff reread: no HTML sinks; the ticker is two numbers rendered with
   `textContent`; the log gains two integers; `line_ops` capped.
 
+Manual checks (Charan, 2026-10-05, Claude Code 2.1.289, Windows):
+
+- [x] A Write card appears at once; Allow's fill starts once it's fully
+  shown; Deny shows "Denied" at once (no pill flash), then the island shrinks
+- [x] "Always allow…" opens its preview with nothing moving
+- [x] Tray "Open Bouncer" with a card up: the ring is on Deny at once
+- Found: hovering the wake strip with no session made it flicker between
+  strip and pill (the × too). Cause: with the gap inside the window, a mouse
+  resting on the strip is in the gap above the peeked pill, which counted as
+  leaving the island. Fixed: the peek ends when the mouse leaves the window
+  (reproduced and re-checked over the debug port).
+- Found: in Session detail the diff lines sat side by side in narrow green
+  columns: the ticker's `.lines` class clashed with the code pane's. Fixed
+  (renamed `.ticker`, prototype too); checked in the real window.
+
 Phase 5c is done when:
 
 - [x] Prototype v0.11 approved (morph, window order, peek, ticker, reduced motion)
