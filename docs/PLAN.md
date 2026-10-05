@@ -1570,7 +1570,7 @@ frame over WebView2's debug port; the OS focus was never taken):
   whole time, as designed.
 - "Always allow…" with a card up: no morph; its button arms in 600 ms.
 - Ticker: Edit `+3 −1`, Write `+4` only, Bash none; with a long file name
-  the label shortens and the numbers stay whole (screenshot in the PR).
+  the label shortens and the numbers stay whole (screenshot to Charan).
 - Reduced motion (emulated): open and close in one step, no animation.
 - Hidden: no animations, the window is the strip. The pill's window sits at
   the work area's top (0) with the island 9 px down inside it (8 × 112%).
