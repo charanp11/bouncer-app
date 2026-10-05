@@ -1,11 +1,19 @@
 //! Line diff shared by the settings-file preview and the island's code view.
 
+/// Largest LCS table (cells) built; above it an edit is a whole replacement,
+/// so a huge edit can't eat the app's memory (4 MB at most).
+const MAX_CELLS: usize = 1_000_000;
+
 /// `old` → `new` as line operations: `' '` kept, `'-'` removed, `'+'` added.
 pub fn line_ops<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
     let a: Vec<&str> = old.lines().collect();
     let b: Vec<&str> = new.lines().collect();
-    // ponytail: O(n·m) LCS table; fine for settings files and single edits of a
-    // few thousand lines. Myers' diff if huge edits ever show up.
+    if (a.len() + 1).saturating_mul(b.len() + 1) > MAX_CELLS {
+        let removed = a.iter().map(|l| ('-', *l));
+        return removed.chain(b.iter().map(|l| ('+', *l))).collect();
+    }
+    // ponytail: O(n·m) LCS table, capped at MAX_CELLS; Myers' diff if huge
+    // edits ever need a real diff.
     let mut lcs = vec![vec![0u32; b.len() + 1]; a.len() + 1];
     for i in (0..a.len()).rev() {
         for j in (0..b.len()).rev() {
@@ -45,5 +53,21 @@ mod tests {
         );
         assert_eq!(line_ops("", "x"), [('+', "x")]);
         assert_eq!(line_ops("x", ""), [('-', "x")]);
+    }
+
+    #[test]
+    fn a_huge_edit_is_a_whole_replacement() {
+        let old = "same\n".repeat(1500);
+        let new = format!("{old}extra");
+        let ops = line_ops(&old, &new);
+        assert_eq!(ops.iter().filter(|o| o.0 == '-').count(), 1500);
+        assert_eq!(ops.iter().filter(|o| o.0 == '+').count(), 1501);
+        // Just under the cap it is still a real diff.
+        let old = "same\n".repeat(900);
+        let new = format!("{old}extra");
+        assert_eq!(
+            line_ops(&old, &new).iter().filter(|o| o.0 != ' ').count(),
+            1
+        );
     }
 }
