@@ -1597,6 +1597,17 @@ Manual checks (Charan, 2026-10-05, Claude Code 2.1.289, Windows):
 - Found: in Session detail the diff lines sat side by side in narrow green
   columns: the ticker's `.lines` class clashed with the code pane's. Fixed
   (renamed `.ticker`, prototype too); checked in the real window.
+- [x] Strip hover (after the fix), drag, reduced motion; the ticker shows
+  on the pill (with every edit needing a card, the card covers it: seen with
+  "accept edits")
+- Asked (Charan): react faster on hover. Decision: the pill peeks after
+  **200 ms** (was 300; prototype v0.12 first).
+- Found: closing (and opening) shows the pill ~60 px to the side, cut off,
+  for one frame. Filmed and measured (Bouncer's x in every frame): when the
+  window moves, WebView2 shows its old picture at the new spot for a frame.
+  Moving and resizing in one native `SetWindowPos` call didn't help. Known
+  limit of 5c. Decision (Charan): merge 5c as is; fix it in its own small
+  PR right after, before 5d (see "Island window region" below).
 
 Phase 5c is done when:
 
@@ -1611,6 +1622,23 @@ Phase 5c is done when:
 - [x] Reduced motion: all off; idle CPU still ~0%
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 137 Rust + 41 frontend; gitleaks clean)
+
+## Island window region (after 5c, before 5d)
+
+Charan, 2026-10-05. Its own small PR. Fixes 5c's one-frame jump: on
+Windows the window stops moving while the island shows; it keeps one fixed
+size and a window region (`SetWindowRgn`) marks the island's part. Outside
+the region nothing is drawn and clicks reach the window underneath (tested
+by hand on the test window with `WindowFromPoint`: outside → the window
+below; on the pill → Bouncer).
+
+- Windows only; macOS keeps resizing until it's tested there.
+- The `unsafe` Windows calls live in one small module.
+- Fail safe: if any region call fails, fall back to today's resizing; never
+  leave a big invisible window catching clicks.
+- A test that the region always contains the card's buttons.
+- Prove with `WindowFromPoint` that clicks outside the island reach the
+  window underneath.
 
 ## Phase 5d — Sound pack (after 5c)
 
@@ -2122,3 +2150,7 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Tests: 137 Rust + 41 frontend, green locally.
 - Needs Charan by hand: the feel of the motion on his screen (and peek on
   hover with a real mouse); macOS.
+- After review (Charan): fixed the strip flicker on hover and the code
+  pane's lines laid out side by side; peek delay 200 ms. Known: a one-frame
+  sideways jump when the island's width changes, fixed next in "Island
+  window region".
