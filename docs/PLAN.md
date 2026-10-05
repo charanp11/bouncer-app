@@ -1718,6 +1718,16 @@ with `GetWindowRect` / `GetWindowRgnBox`, clicks checked with
   own handle, main thread); a refused region is freed; every failure path
   clears the region and sizes the window to the box.
 
+Manual checks (Charan, 2026-10-05, Claude Code 2.1.289, Windows):
+
+- [x] Open / close and session detail: no flicker or jump
+- [x] Clicks right next to and below the island reach what's underneath
+- [x] Drag the island, open / close there
+- [x] Strip hover (200 ms); a card arrives and arms as before
+- Asked: a minimize / maximize / close set next to the island. They're the
+  terminal's own caption buttons behind it (Bouncer's window has no
+  decorations); visible in the 5c screenshots too.
+
 Done when:
 
 - [x] Opening and closing (pill ↔ open ↔ wide) never move the window; filmed
