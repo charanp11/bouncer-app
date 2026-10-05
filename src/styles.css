@@ -36,6 +36,8 @@
   /* room around the island for its shadow (transparent window only) */
   --shadow-x: 20px;
   --shadow-b: 32px;
+  /* gap from the screen top, inside the window (transparent window only) */
+  --top-gap: 8px;
   /* motion */
   --spring: cubic-bezier(0.2, 0.9, 0.25, 1.12);
   --t-open: 320ms;
@@ -70,7 +72,7 @@ body {
    size in this file is at 100%. main.ts sets --scale. */
 #stage {
   flex: none;
-  padding: 0 var(--shadow-x) var(--shadow-b);
+  padding: var(--top-gap) var(--shadow-x) var(--shadow-b);
   zoom: var(--scale, 1.25);
 }
 
@@ -92,17 +94,10 @@ button {
   border-radius: var(--r-pill);
   border: 1px solid var(--line);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  transition:
-    width var(--t-open) var(--spring),
-    border-radius var(--t-open) var(--spring);
+  /* No CSS transition: main.ts morphs the island with one Web Animation, so
+     the window can grow before it and shrink after it. */
   overflow: hidden;
   font-size: 13px;
-}
-
-.island.closing {
-  transition:
-    width var(--t-close) ease-out,
-    border-radius var(--t-close) ease-out;
 }
 
 .island.open {
@@ -179,6 +174,23 @@ html.square .island {
   padding: 1px 7px;
 }
 
+/* The ticker: lines the current edit adds / removes (numbers only). */
+.lines {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  font: 500 12px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.lines .add {
+  color: var(--ok);
+}
+
+.lines .del {
+  color: #ff8f88;
+}
+
 .badge.risk {
   background: var(--risk);
   color: var(--island);
@@ -190,14 +202,6 @@ html.square .island {
   gap: var(--gap);
   max-height: calc(var(--open-max-h) - var(--pill-h));
   overflow-y: auto;
-  animation: rise var(--t-open) var(--spring);
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
 }
 
 .head {
@@ -415,6 +419,11 @@ pre.cmd {
   animation: arm var(--arm) linear forwards;
 }
 
+/* Not fully visible yet: the arm hasn't started. */
+.btn.allow.waiting .arm {
+  animation: none;
+}
+
 .btn.allow .label {
   position: relative;
 }
@@ -614,7 +623,6 @@ pre.cmd {
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
   gap: 10px;
   padding: 0 10px 10px;
-  animation: rise var(--t-open) var(--spring);
 }
 
 .who {

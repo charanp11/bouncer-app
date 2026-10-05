@@ -8,6 +8,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { ball, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
+import { holds, plan, type Size } from "./morph.ts";
 import { islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { cue, play, type Heard } from "./sound.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
@@ -35,6 +36,8 @@ type Session = {
   last_ms: number;
   history: Step[];
   code: Code | null;
+  /** Lines the current edit adds and removes (removed is null for Write). */
+  lines: [number, number | null] | null;
 };
 type Request = {
   id: string;
@@ -125,8 +128,11 @@ const stage = document.getElementById("stage")!;
 const island = document.getElementById("island")!;
 
 let current: View | null = null;
-/** The request shown at the front, and when it got there (for the arm delay). */
+/** The request shown at the front, and since when it has been fully
+ * visible (for the arm delay); 0 = not fully visible yet. */
 let front = { id: "", since: 0 };
+/** An answerable card is drawn (not the "Allowed / Denied" message). */
+let cardUp = false;
 /** Shown for TOAST_MS after a decision, in place of the request. */
 let toast: { request: Request; ok: boolean; until: number; text?: string } | null = null;
 /** Session shown in Session detail. */
@@ -267,11 +273,19 @@ function draggable(node: HTMLElement) {
 
 type Badge = { text: string; risk: boolean };
 
-function pill(state: BallState, strong: string, rest: string, clickable = true, badge?: Badge): HTMLElement {
+function pill(
+  state: BallState,
+  strong: string,
+  rest: string,
+  clickable = true,
+  badge?: Badge,
+  lines?: Session["lines"],
+): HTMLElement {
   const p = el("div", "pill");
   const label = el("span", "label");
   label.append(el("b", "", strong), rest);
   p.append(ball(state), label);
+  if (lines) p.append(ticker(lines));
   if (badge) p.append(el("span", `badge${badge.risk ? " risk" : ""}`, badge.text));
   if (clickable) {
     p.setAttribute("role", "button");
@@ -281,6 +295,14 @@ function pill(state: BallState, strong: string, rest: string, clickable = true, 
     draggable(p);
   }
   return p;
+}
+
+/** `+N −M`: numbers only; the label shortens first, these are never cut. */
+function ticker([added, removed]: [number, number | null]): HTMLElement {
+  const t = el("span", "lines");
+  t.append(el("span", "add", `+${added}`));
+  if (removed !== null) t.append(el("span", "del", `−${removed}`));
+  return t;
 }
 
 function closeButton(onClick: () => void): HTMLElement {
@@ -381,13 +403,17 @@ function decide(request: Request, allow: boolean, buttons: HTMLButtonElement[]) 
     .finally(() => current && render(current));
 }
 
-/** An Allow-style button that stays disabled until ARM_MS after `since`. */
+/** An Allow-style button that stays disabled until ARM_MS after `since`
+ * (0: not fully visible yet, so the arm hasn't started). */
 function armed(label: string, since: number): HTMLButtonElement {
   const button = el("button", "btn allow");
   const fill = el("span", "arm");
   button.append(fill, el("span", "label", label));
   const waited = performance.now() - since;
-  if (waited < ARM_MS) {
+  if (since === 0) {
+    button.disabled = true;
+    button.classList.add("waiting");
+  } else if (waited < ARM_MS) {
     button.disabled = true;
     // Keep the fill continuous across re-renders.
     fill.style.animationDelay = `${-waited}ms`;
@@ -578,21 +604,9 @@ function rail(session: Session | undefined, project: string, agent: string, stat
 // ---- states ----------------------------------------------------------------
 
 type Shape = "hidden" | "pill" | "open" | "wide";
-let shape: Shape = "hidden";
-let growUntil = 0;
 
 function setShape(next: Shape) {
-  const order = { hidden: 0, pill: 1, open: 2, wide: 3 };
-  if (next !== shape) {
-    const closing = order[next] < order[shape];
-    island.classList.toggle("closing", closing);
-    // While the width animates, the window keeps the larger of old and new.
-    growUntil = performance.now() + (closing ? CLOSE_MS : OPEN_MS) + 40;
-    setTimeout(report, (closing ? CLOSE_MS : OPEN_MS) + 60);
-    shape = next;
-  }
   island.classList.remove("hidden", "open", "wide");
-  // One scale for the whole island, kept under 40% of this screen's width.
   // One scale for the whole island (the Size preference), kept under 40% of
   // this screen's width; the open island never passes the work area's height.
   const scale = islandScale(WIDTH[next], screen.availWidth, scaleOf(current?.prefs?.size));
@@ -608,6 +622,7 @@ function renderApproval(view: View, request: Request, done?: boolean) {
   // (The wide edit view has no "Always allow", as in the prototype.)
   const edit = EDITS.has(request.tool ?? "") && !request.risk;
   const session = view.sessions.find((s) => s.id === request.session);
+  cardUp = done === undefined;
   if (edit && request.code) {
     setShape("wide");
     const bar = el("div", "bar");
@@ -911,11 +926,18 @@ function rulesBadge(view: View): Badge | undefined {
 }
 
 /** Keyboard focus survives the island being rebuilt: it goes back to the
- * same control. A new card at the front takes it to its Deny (never Allow). */
+ * same control. A new card at the front takes it to its Deny (never Allow).
+ * The island morphs from the box it had to the one it gets (motion below). */
 function render(view: View) {
   const had = focusKey(document.activeElement);
   const before = front.id;
+  const box = snapshot();
+  const cardBefore = cardUp;
+  const first = current === null;
+  stopMorph();
   draw(view);
+  settle(box, first || cardBefore || cardUp || REDUCED.matches || !view.rounded);
+  armIfVisible();
   if (!document.hasFocus()) return;
   const card = view.queue[0];
   const target = card && card.id !== before ? `deny:${card.id}` : had;
@@ -954,6 +976,7 @@ function announce(kind: string, view: View) {
 
 function draw(view: View) {
   current = view;
+  cardUp = false;
   clearTimeout(timer);
   timerAt = 0;
   document.documentElement.classList.toggle("square", !view.rounded);
@@ -982,7 +1005,7 @@ function draw(view: View) {
 
   const first = view.queue[0];
   if (first) {
-    if (first.id !== front.id) front = { id: first.id, since: now };
+    if (first.id !== front.id) front = { id: first.id, since: 0 };
     greetUntil = 0;
     renderApproval(view, first);
     return;
@@ -1076,7 +1099,7 @@ function draw(view: View) {
   if (working.length) {
     // Several busy sessions: the label rotates every ROTATE_MS.
     const s = working[Math.floor(Date.now() / ROTATE_MS) % working.length];
-    island.replaceChildren(pill(mood(view, done), folder(s.project), ` · ${s.step}`, true, badge));
+    island.replaceChildren(pill(mood(view, done), folder(s.project), ` · ${s.step}`, true, badge, s.lines));
     if (working.length > 1) later(ROTATE_MS - (Date.now() % ROTATE_MS));
     return;
   }
@@ -1146,18 +1169,112 @@ island.addEventListener("mouseleave", () => {
   }
 });
 
-// The window is sized to the island (plus room for its shadow). While the
-// width animates it keeps the larger size, then settles.
+// ---- motion ----------------------------------------------------------------
+// One Web Animation morphs the island (prototype v0.11). Growing: the window
+// is asked for the bigger size first and the island waits at its old box
+// until the viewport holds it (WAIT_MS at most), then springs open. Closing:
+// the island shrinks inside the window, then the window follows. A card is
+// never animated, and its arm starts once it's fully visible.
+
+/** What the morph animates; the rest of the box follows from the content. */
+const MORPHED = ["width", "height", "minHeight", "borderRadius", "backgroundColor", "borderColor", "boxShadow"] as const;
+const SPRING = "cubic-bezier(0.2, 0.9, 0.25, 1.12)";
+/** Longest wait for the window to grow before the island moves anyway. */
+const WAIT_MS = 150;
+let morph: Animation | null = null;
+let rise: Animation | null = null;
+/** The window size held while the island morphs (null: fit the page). */
+let hold: Size | null = null;
+/** Starts a morph waiting for the window to grow. */
+let waiting: (() => void) | null = null;
+let waitTimer = 0;
+
+type Box = { rect: DOMRect; kf: Keyframe };
+
+/** The island as it is right now (mid-morph included). */
+function snapshot(): Box {
+  const cs = getComputedStyle(island);
+  const kf: Keyframe = {};
+  for (const k of MORPHED) kf[k] = cs[k];
+  return { rect: island.getBoundingClientRect(), kf };
+}
+
+function stopMorph() {
+  morph?.cancel();
+  rise?.cancel();
+  morph = rise = waiting = null;
+  clearTimeout(waitTimer);
+}
+
+const sizeOf = (r: DOMRect): Size => ({ w: r.width, h: r.height });
+const viewport = (): Size => ({ w: innerWidth, h: innerHeight });
+
+function settle(before: Box, still: boolean) {
+  const after = snapshot();
+  const page = stage.getBoundingClientRect();
+  const p = plan(sizeOf(before.rect), sizeOf(after.rect), sizeOf(page), { w: lastW, h: lastH }, still);
+  if (p.kind === "still") {
+    hold = null;
+    report();
+    return;
+  }
+  hold = p.hold;
+  report();
+  const grow = p.kind === "grow";
+  // From the hidden strip (no top gap) to the pill (8 px down), or back.
+  const scale = parseFloat(document.documentElement.style.getPropertyValue("--scale")) || 1;
+  const dy = (before.rect.top - after.rect.top) / scale;
+  const timing = { duration: grow ? OPEN_MS : CLOSE_MS, easing: grow ? SPRING : "ease-out" };
+  const run = island.animate([{ ...before.kf, transform: `translateY(${dy}px)` }, { ...after.kf, transform: "none" }], timing);
+  const content = grow ? island.querySelector(".body, .detail") : null;
+  rise = content?.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], timing) ?? null;
+  morph = run;
+  run.finished.then(
+    () => {
+      if (morph !== run) return;
+      morph = rise = null;
+      hold = null;
+      report();
+    },
+    () => {},
+  );
+  if (grow && !holds(viewport(), hold)) {
+    run.pause();
+    rise?.pause();
+    waiting = () => {
+      waiting = null;
+      clearTimeout(waitTimer);
+      if (morph === run) {
+        run.play();
+        rise?.play();
+      }
+    };
+    waitTimer = setTimeout(() => waiting?.(), WAIT_MS);
+  }
+}
+
+/** A card drawn but not fully visible yet starts its arm once the window
+ * holds the whole page. */
+function armIfVisible() {
+  if (!cardUp || front.since !== 0 || !holds(viewport(), sizeOf(stage.getBoundingClientRect()))) return;
+  front.since = performance.now();
+  for (const b of island.querySelectorAll(".btn.allow.waiting")) b.classList.remove("waiting");
+  later(ARM_MS);
+}
+
+addEventListener("resize", () => {
+  if (waiting && hold && holds(viewport(), hold)) waiting();
+  armIfVisible();
+});
+
+// The window is sized to the page (the island plus room for its shadow and
+// the top gap), or held while the island morphs.
 let lastW = 0;
 let lastH = 0;
 function report() {
   const r = stage.getBoundingClientRect();
-  let w = Math.ceil(r.width);
-  let h = Math.ceil(r.height);
-  if (performance.now() < growUntil) {
-    w = Math.max(w, lastW);
-    h = Math.max(h, lastH);
-  }
+  const w = hold ? hold.w : Math.ceil(r.width);
+  const h = hold ? hold.h : Math.ceil(r.height);
   if (w !== lastW || h !== lastH) {
     lastW = w;
     lastH = h;
