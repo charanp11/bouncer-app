@@ -1152,16 +1152,19 @@ document.addEventListener("keydown", (e) => {
   invoke("keyboard", { on: false });
 });
 
-// The wake strip peeks the idle pill after PEEK_MS of hover.
+// The wake strip peeks the idle pill after PEEK_MS of hover. The peek ends
+// when the mouse leaves the window, not the island: a mouse resting at the
+// screen's top edge is then in the window's top gap, above the pill.
 let peekTimer = 0;
 island.addEventListener("mouseenter", () => {
-  if (!current?.hidden) return;
+  if (!current?.hidden || peek) return;
+  clearTimeout(peekTimer);
   peekTimer = setTimeout(() => {
     peek = true;
     if (current) render(current);
   }, PEEK_MS);
 });
-island.addEventListener("mouseleave", () => {
+document.documentElement.addEventListener("mouseleave", () => {
   clearTimeout(peekTimer);
   if (peek) {
     peek = false;
