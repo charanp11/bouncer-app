@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character (5a, 5b merged; 5c current; 5d next)**
+**Current phase: Phase 5 — Character (5a, 5b merged; 5c in review; 5d next)**
 
 ## MVP scope
 
@@ -1552,19 +1552,50 @@ Decisions (Charan, 2026-10-04): prototype v0.11 approved, and all three
 proposals: (1) the 8-px gap goes inside the window; (2) the line counts as
 in finding 7; (3) `line_ops` capped at 1,000,000 cells.
 
+Verify (2026-10-04, Windows 1366 × 768 at 100%, debug app built to a
+scratch target and run beside Charan's own dev instance, fixtures through the
+relay on a private test pipe, scratch `BOUNCER_RULES`; page sampled every
+frame over WebView2's debug port; the OS focus was never taken):
+
+- Strip → pill (a session starts): the window grew to 368 × 88 while the
+  island was still the 5-px strip, then the island sprang open (top 0 → 9,
+  peak 3 px over) and settled in ~330 ms; nothing left running.
+- Pill → open: window 493 × 164 first, then the spring (peak 4 px over,
+  inside the shadow margin). Open → pill: 200 ms ease-out inside the held
+  window, then the window shrank.
+- A card: drawn at full size in one frame, no animation; Allow stayed
+  disabled with an empty fill until the window held it, the fill started
+  then, and Allow was armed 617 ms after fully visible. Once (the first
+  card after launch) the window took ~2 s to grow: Allow kept waiting the
+  whole time, as designed.
+- "Always allow…" with a card up: no morph; its button arms in 600 ms.
+- Ticker: Edit `+3 −1`, Write `+4` only, Bash none; with a long file name
+  the label shortens and the numbers stay whole (screenshot in the PR).
+- Reduced motion (emulated): open and close in one step, no animation.
+- Hidden: no animations, the window is the strip. The pill's window sits at
+  the work area's top (0) with the island 9 px down inside it (8 × 112%).
+- Idle CPU, settled idle pill, app + WebView2: 78 ms in 30 s (0.26%).
+- Found and fixed: on Deny, the backend's next view (card gone) arrived
+  before `decide` answered, so the pill flashed and the island grew back
+  for "Denied" (a one-frame flash before 5c, a visible bounce with the
+  morph). The message now shows from the press and is dropped if the
+  backend refuses.
+- Diff reread: no HTML sinks; the ticker is two numbers rendered with
+  `textContent`; the log gains two integers; `line_ops` capped.
+
 Phase 5c is done when:
 
 - [x] Prototype v0.11 approved (morph, window order, peek, ticker, reduced motion)
-- [ ] Strip → pill → open → wide grow from the top edge with the 320 ms
+- [x] Strip → pill → open → wide grow from the top edge with the 320 ms
   spring, close with 200 ms ease-out; window grows first, shrinks last
-- [ ] A card appears at once; its arm counts from fully visible; nothing
+- [x] A card appears at once; its arm counts from fully visible; nothing
   morphs under a card (checked over the debug port, frame by frame)
-- [ ] `+N −M` on the pill for Edit / MultiEdit, `+N` for Write; two numbers
+- [x] `+N −M` on the pill for Edit / MultiEdit, `+N` for Write; two numbers
   in the activity log, never the text; old log files still read
-- [ ] `line_ops` capped for huge edits
-- [ ] Reduced motion: all off; idle CPU still ~0%
+- [x] `line_ops` capped for huge edits
+- [x] Reduced motion: all off; idle CPU still ~0%
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
-  before every push
+  before every push (local green: 137 Rust + 41 frontend; gitleaks clean)
 
 ## Phase 5d — Sound pack (after 5c)
 
@@ -2051,3 +2082,28 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Tests: 133 Rust + 36 frontend, green locally.
 - Needs Charan by hand: tray items and real OS focus, Narrator reading
   order, the sounds by ear, Settings on his screen.
+
+### Phase 5c summary (2026-10-04)
+
+- Prototype v0.11 first (approved): the morph, the window order, peek on
+  hover, the ticker, a "Show window" / "Slow ×4" / "Reduced motion" demo.
+- The island morphs with one Web Animation (width, height, radius, color,
+  and the 8-px drop from the strip): 320 ms spring growing, 200 ms ease-out
+  closing. Growing, the window is asked for the bigger size first and the
+  island waits (150 ms at most); closing, the window shrinks after. Two
+  window resizes per change instead of one per frame. The 8-px top gap is
+  inside the window now, so the island grows out of the screen's top edge.
+- A card is never animated, nothing morphs while one is in front, and its
+  600 ms arm starts when the window holds the whole card (was: when drawn).
+  The content "rise" plays only when growing (it replayed on every
+  re-render, cards included).
+- `+N −M` on the working pill (Edit, MultiEdit summed; Write `+N`); the
+  activity log stores the two numbers, never the text.
+- `line_ops` treats an edit over 1,000,000 table cells as a whole
+  replacement (memory ≤ 4 MB).
+- Reduced motion: no morph, no rise, one-step resize.
+- Fixed on the way: the pill flashed between a decision and its "Allowed /
+  Denied" message.
+- Tests: 137 Rust + 41 frontend, green locally.
+- Needs Charan by hand: the feel of the motion on his screen (and peek on
+  hover with a real mouse); macOS.
