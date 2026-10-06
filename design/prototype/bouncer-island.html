@@ -190,6 +190,13 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .toggle { width: 38px; height: 22px; border-radius: 11px; border: 1px solid rgba(255,255,255,0.18); background: var(--island); position: relative; cursor: pointer; padding: 0; }
 .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 160ms ease-out; }
 .toggle[aria-checked="true"] { background: var(--ok); border-color: var(--ok); }
+.setrow input.vol { accent-color: var(--sun); width: 120px; }
+.setrow details.which { grid-column: 1 / -1; margin-top: 4px; }
+.setrow details.which summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.setrow details.which summary:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; border-radius: 4px; }
+.soundlist { display: grid; gap: 2px; margin-top: 6px; }
+.soundlist div { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.soundlist .toggle { transform: scale(.85); }
 .toggle[aria-checked="true"]::after { transform: translateX(16px); background: var(--island); }
 .seg button:focus-visible, .toggle:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
 .status { display: inline-flex; align-items: center; gap: 6px; }
@@ -354,14 +361,16 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
 .sb-tools label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .sb-tools input[type=range] { accent-color: var(--sun); width: 140px; }
 .sb { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
-.sb-row { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(190px, 1.15fr)) minmax(120px, .8fr); gap: 10px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+.sb-row { display: grid; grid-template-columns: minmax(180px, 1.1fr) repeat(2, minmax(200px, 1.15fr)) minmax(140px, 1fr); gap: 10px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
 .sb-row:first-child { border-top: 0; }
 .sb-head { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
 .sb-head .chip { text-transform: none; letter-spacing: 0; font-size: 12px; padding: 2px 10px; margin-left: 6px; }
 .sb-name b { display: block; font-weight: 500; }
 .sb-name span { color: var(--muted); font-size: 12.5px; }
 .sb-name .sb-tag { display: inline-block; font: 600 10.5px var(--ui); border-radius: 999px; padding: 0 7px; margin: 3px 4px 0 0; color: var(--island); background: var(--wait); }
-.sb-name .sb-tag.off { background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
+.sb-name .sb-tag.on { background: var(--ok); }
+.sb-name .sb-pick { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+.sb-name .sb-pick input { accent-color: var(--sun); margin: 0; }
 .sb-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .sb-cell .chip { font-size: 12px; padding: 3px 9px; }
 .sb-cell .sb-play { font-family: var(--mono); min-width: 70px; }
@@ -372,7 +381,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
 .sb-note:focus-visible, .sb-tools input:focus-visible { outline: 2px solid var(--sun); outline-offset: 1px; }
 #sb-out { width: 100%; font: 12px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 a.chip { text-decoration: none; }
-@media (max-width: 1000px) {
+@media (max-width: 860px) {
   .sb-row { grid-template-columns: minmax(0, 1fr); }
   .sb-head { display: none; }
   .sb-cell::before { content: attr(data-style); width: 56px; color: var(--faint); font-size: 12px; }
@@ -389,7 +398,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.13 · Oct 6 2026</div>
+    <div class="meta">design/prototype · v0.14 · Oct 6 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -445,7 +454,7 @@ a.chip { text-decoration: none; }
 
   <h2 class="sec" id="sounds">Sound pack</h2>
   <section class="board" aria-label="Sound pack: listen and pick">
-    <p class="lede">Phase 5d. Bouncer is a club bouncer: each sound is a little joke that still says what happened. All 17 are made in code (oscillators and filtered noise, no files), each under 1&nbsp;s. One recipe per sound; the style changes only the timbre: <b>Playful</b> as written, <b>Soft</b> rounder and quieter, <b>Retro</b> chiptune with stepped pitch. Needs you and risky (orange tag) stay lower and harsher in every style. Loudness is evened out per sound. Press &#9654; to hear one, mark it Keep or Change (and say what to change); picks stay in this browser until you copy them.</p>
+    <p class="lede">Phase 5d. Bouncer is a club bouncer: each sound is a little joke that still says what happened. All 17 are made in code (oscillators and filtered noise, no files), each under 1&nbsp;s. One recipe per sound; the style changes only the timbre: <b>Soft</b> (the default) rounder and 3&nbsp;dB quieter, <b>Playful</b> as written. Needs you and risky (orange tag) keep their buzz in Soft, losing only the harsh top, and play 5&nbsp;dB above the other Soft sounds: less harsh, never easy to miss. Green tags are on by default; the rest start off and can be turned on one by one in Settings. History wiped has three options (A, B, C): pick one with “Use this one”. Press &#9654; to hear one, mark it Keep or Change (and say what to change); picks stay in this browser until you copy them.</p>
     <div class="sb-tools">
       <label>Volume <input type="range" id="sb-vol" min="0" max="100" value="50"></label>
       <button class="chip" id="sb-copy">Copy my picks</button>
@@ -818,7 +827,25 @@ function settings(confirming) {
   const seg = el("div", "seg"); seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "Size");
   ["Small", "Medium", "Large"].forEach((n) => { const x = el("button", "", n); x.setAttribute("role", "radio"); x.setAttribute("aria-checked", String(n === "Medium")); seg.append(x); });
   list.append(setRow("Size", [seg], "100 · 112 · 125%. Applies at once."));
-  list.append(setRow("Sound", [el("span", "", "On"), toggle("Sound", true)], "Needs you, risky, done. Not while paused."));
+  list.append(setRow("Sound", [el("span", "", "On"), toggle("Sound", true)], "All sounds. Never while paused."));
+  const style = el("div", "seg"); style.setAttribute("role", "radiogroup"); style.setAttribute("aria-label", "Sound style");
+  ["Soft", "Playful"].forEach((n) => { const x = el("button", "", n); x.setAttribute("role", "radio"); x.setAttribute("aria-checked", String(n === "Soft")); style.append(x); });
+  list.append(setRow("Sound style", [style], "Soft is calmer. Needs you and risky always stand out."));
+  const vol = el("input", "vol"); vol.type = "range"; vol.min = "0"; vol.max = "100"; vol.value = "50"; vol.setAttribute("aria-label", "Volume");
+  const pct = el("span", "", "50%"); vol.addEventListener("input", () => { pct.textContent = vol.value + "%"; });
+  list.append(setRow("Volume", [vol, pct], null));
+  // Which sounds: one switch each; the picked wipe sound is "History wiped".
+  const which = el("details", "which"), sum = el("summary"), sl = el("div", "soundlist");
+  const rows = SOUNDS.filter(([, , , , f = {}]) => !f.wipe).map(([, name, , , f = {}]) => [name, !!f.on]);
+  rows.push(["History wiped", false]);
+  const count = () => { sum.textContent = `Which sounds \u00b7 ${sl.querySelectorAll('[aria-checked="true"]').length} of ${rows.length} on`; };
+  for (const [name, on] of rows) {
+    const r = el("div"); r.append(el("span", "", name));
+    r.append(toggle(name, on, (e) => { const t = e.currentTarget; t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true")); count(); }));
+    sl.append(r);
+  }
+  count(); which.append(sum, sl);
+  const sounds = setRow("Sounds", [], null); sounds.append(which); list.append(sounds);
   const auto = setRow("Auto-allow", [el("span", "", "Off · observe"), toggle("Auto-allow", false, () => show("settingsauto"))],
     "Observe: cards say what rules would do.");
   if (confirming) {
@@ -929,7 +956,7 @@ Object.assign(STATES, {
       island.append(d);
     }, notes: ["Click a session row to open its detail. The island widens to 720.", "Left: Bouncer, the project, and every step with who allowed it (rule, you, or flagged).", "Right: the change being made, as a diff built from the hook's old and new text. The caret marks the line being written."] },
   settings: { phase: "Phase 5b", title: "Settings", render() { settings(false); },
-    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Hooks show status only; install and uninstall stay in the bouncer command (Phase 9 installer)."] },
+    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Hooks show status only; install and uninstall stay in the bouncer command (Phase 9 installer).", "Phase 5d: Sound style (Soft default, Playful), Volume, and Which sounds: one switch per sound. On by default: launch, needs you, risky, done, tool failed, welcome back."] },
   settingsauto: { phase: "Phase 5b", title: "Settings · turn on auto", render() { settings(true); },
     notes: ["Turning auto-allow on asks first; its button arms after 600ms like Allow.", "The confirm scrolls fully into view (Settings scrolls inside the island). Focus goes to Cancel; Esc cancels; Enter never turns auto on.", "Turning it off doesn't ask.", "Bouncer writes the mode into rules.toml itself, checked and atomic, and the island shows the change like any other."] },
   editask: { phase: "Phase 2 · design", title: "Approve an edit", render() {
@@ -1059,32 +1086,34 @@ for (const [st, name, what] of CAST) {
   const cap = el("figcaption"); cap.append(el("b", "", name), document.createTextNode(what));
   f.append(b, cap); cast.append(f);
 }
-// ---- Sound pack (Phase 5d): every sound made in code, in three styles ----
+// ---- Sound pack (Phase 5d): every sound made in code, in two styles ----
 // A sound is a list of parts, written once. T: a tone, N: filtered noise;
 // times in seconds. f: pitch points (Hz) spread evenly over the part;
 // fl: [filter type, from Hz, to Hz, Q]; vib: [rate Hz, depth cents], fade:
-// the vibrato dies away; hold: sustains, then releases (else it rings out);
-// alarm: stays harsh in every style. The style only changes the timbre
-// (voice()), never timing or pitch contour.
+// the vibrato dies away; trem: [rate Hz, depth 0-1] (a flutter in the
+// level); hold: sustains, then releases (else it rings out); alarm: grabs
+// attention in every style. The style only changes the timbre (voice()),
+// never timing or pitch contour.
 const T = (t, d, f, o = {}) => ({ k: "T", t, d, f: [].concat(f), w: "triangle", v: 1, ...o });
 const N = (t, d, o = {}) => ({ k: "N", t, d, v: 1, ...o });
-const knock = (t) => [T(t, .07, [190, 90], { w: "sine", v: 1.2, alarm: 1 }), N(t, .03, { fl: ["bandpass", 900, 900, 1.5], v: .5 })];
+const knock = (t) => [T(t, .07, [190, 90], { w: "sine", v: 1.2, alarm: 1 }), N(t, .03, { fl: ["bandpass", 900, 900, 1.5], v: .5, alarm: 1 })];
 const bell = (t, d, f, v) => [T(t, d, f, { w: "sine", v }), T(t, d * .35, f * 2.76, { w: "sine", v: v * .16 })];
-// [id, event, what it is, parts, flags]
+// [id, event, what it is, parts, flags]. on: on by default (Charan,
+// 2026-10-06); everything else starts off and is turned on per sound.
 const SOUNDS = [
   ["launch", "Launch", "“yo!” whistle", [
     T(0, .15, [196, 262], { w: "sawtooth", fl: ["bandpass", 650, 950, 3], v: 1.6, hold: 1 }),
     T(.21, .34, [1400, 2500], { w: "sine", vib: [7, 40], v: .7 }),
-    N(.21, .1, { fl: ["highpass", 5000, 5000, .7], v: .15 })]],
+    N(.21, .1, { fl: ["highpass", 5000, 5000, .7], v: .15 })], { on: 1 }],
   ["session", "New session", "door chime", [...bell(0, .55, 659.25, .9), ...bell(.3, .7, 523.25, .9)]],
   ["needs", "Needs you", "knock-knock + rising “ahem?”", [...knock(0), ...knock(.14),
     T(.34, .09, [200, 185], { w: "sawtooth", fl: ["lowpass", 1400, 1400, 1], v: .8, hold: 1, alarm: 1 }),
-    T(.47, .3, [175, 330], { w: "sawtooth", fl: ["lowpass", 1400, 2400, 1], v: .8, hold: 1, vib: [6, 25], alarm: 1 })], { alarm: 1 }],
+    T(.47, .3, [175, 330], { w: "sawtooth", fl: ["lowpass", 1400, 2400, 1], v: .8, hold: 1, vib: [6, 25], alarm: 1 })], { on: 1, alarm: 1 }],
   ["risky", "Risky request", "record scratch + low buzzer", [
-    N(0, .09, { fl: ["bandpass", 3200, 700, 4], v: 1.4 }), N(.09, .08, { fl: ["bandpass", 700, 2600, 4], v: 1.4 }),
+    N(0, .09, { fl: ["bandpass", 3200, 700, 4], v: 1.4, alarm: 1 }), N(.09, .08, { fl: ["bandpass", 700, 2600, 4], v: 1.4, alarm: 1 }),
     T(0, .17, [520, 180, 420], { w: "sawtooth", fl: ["lowpass", 2500, 2500, 1], v: .35, alarm: 1 }),
     T(.22, .42, 98, { w: "sawtooth", fl: ["lowpass", 1600, 1600, 1], v: .9, hold: 1, alarm: 1 }),
-    T(.22, .42, 104, { w: "square", fl: ["lowpass", 1600, 1600, 1], v: .6, hold: 1, alarm: 1 })], { alarm: 1 }],
+    T(.22, .42, 104, { w: "square", fl: ["lowpass", 1600, 1600, 1], v: .6, hold: 1, alarm: 1 })], { on: 1, alarm: 1 }],
   ["allowed", "Allowed", "velvet rope “pop” + ding", [
     T(0, .05, [260, 900], { w: "sine", v: 1 }), N(0, .02, { fl: ["highpass", 2500, 2500, .7], v: .35 }),
     ...bell(.07, .45, 1567.98, .6)]],
@@ -1095,16 +1124,16 @@ const SOUNDS = [
     N(0, .03, { fl: ["highpass", 2500, 2500, .7], v: .6 }), T(0, .05, [1000, 520], { w: "square", fl: ["lowpass", 3000, 3000, 1], v: .35 }),
     N(.13, .08, { fl: ["lowpass", 1200, 400, 1], v: 1.2 }), T(.13, .18, [170, 60], { w: "sine", v: 1.3 })]],
   ["auto", "Auto-allowed", "tiny click", [
-    T(0, .025, [2200, 1800], { w: "sine", v: .4 }), N(0, .012, { fl: ["highpass", 4000, 4000, .7], v: .2 })], { off: 1, quiet: 1 }],
+    T(0, .025, [2200, 1800], { w: "sine", v: .4 }), N(0, .012, { fl: ["highpass", 4000, 4000, .7], v: .2 })], { quiet: 1 }],
   ["done", "Session done", "mini “ta-da!”", [
     T(0, .09, 392, { w: "sawtooth", fl: ["lowpass", 2200, 2200, 1], v: .5, hold: 1 }),
-    ...[523.25, 659.25, 783.99].map((f) => T(.13, .5, f, { w: "sawtooth", fl: ["lowpass", 2600, 1200, 1], v: .35, hold: 1, vib: [5.5, 12] }))]],
+    ...[523.25, 659.25, 783.99].map((f) => T(.13, .5, f, { w: "sawtooth", fl: ["lowpass", 2600, 1200, 1], v: .35, hold: 1, vib: [5.5, 12] }))], { on: 1 }],
   ["fail", "A tool failed", "sad trombone", [
     ...[[0, 293.66], [.2, 277.18], [.4, 261.63]].map(([t, f]) => T(t, .18, f, { w: "sawtooth", fl: ["lowpass", 500, 1300, 1.5], v: .6, hold: 1 })),
-    T(.6, .4, [246.94, 233.08], { w: "sawtooth", fl: ["lowpass", 500, 1300, 2], v: .6, hold: 1, vib: [5, 35] })], { off: 1 }],
+    T(.6, .4, [246.94, 233.08], { w: "sawtooth", fl: ["lowpass", 500, 1300, 2], v: .6, hold: 1, vib: [5, 35] })], { on: 1 }],
   ["back", "Welcome back", "rising “heyyy”", [
     N(0, .07, { fl: ["bandpass", 1800, 1800, 1], v: .35 }),
-    T(.05, .5, [185, 330], { w: "sawtooth", fl: ["bandpass", 900, 1500, 1.2], v: 1.4, hold: 1, vib: [6, 30] })]],
+    T(.05, .5, [185, 330], { w: "sawtooth", fl: ["bandpass", 900, 1500, 1.2], v: 1.4, hold: 1, vib: [6, 30] })], { on: 1 }],
   ["poke", "Poke (click on Bouncer)", "boing", [T(0, .4, [160, 420], { w: "triangle", v: 1, vib: [16, 350], fade: 1 })]],
   ["dizzy", "Dizzy", "cartoon whirl", [T(0, .75, [500, 1050, 520, 1100, 600], { w: "sine", v: .7, vib: [11, 60], hold: 1 })]],
   ["paused", "Paused", "snore “zzz”", [
@@ -1118,74 +1147,75 @@ const SOUNDS = [
     N(0, .07, { fl: ["highpass", 3500, 3500, .7], v: .6 }), N(.05, .05, { fl: ["bandpass", 2500, 2500, 2], v: .5 }),
     ...[2093, 2637.02, 3135.96].map((f) => T(.13, .55, f, { w: "sine", v: .3 })),
     N(.13, .2, { fl: ["highpass", 7000, 7000, .7], v: .2 })]],
-  ["wiped", "History wiped", "eraser whoosh", [
-    ...[0, .08, .16].map((t, i) => N(t, .07, { fl: ["bandpass", i % 2 ? 1700 : 1200, i % 2 ? 1300 : 1600, 3], v: .8, hold: 1 })),
-    N(.26, .38, { fl: ["bandpass", 3200, 450, 1.4], v: 1, a: .12 })]],
+  // History wiped: three options, Charan picks one (each under 0.6 s).
+  ["wipeA", "History wiped · A", "paper shredder “brrrt”", [
+    T(0, .44, [78, 74, 58], { w: "sawtooth", fl: ["lowpass", 900, 600, 1], v: 1.1, hold: 1, trem: [26, .7] }),
+    N(0, .44, { fl: ["bandpass", 2200, 1500, 1.2], v: .7, hold: 1, trem: [26, .9] }),
+    N(.46, .05, { fl: ["highpass", 2500, 2500, .7], v: .3 })], { wipe: 1 }],
+  ["wipeB", "History wiped · B", "eraser squeak + soft “poof”", [
+    T(0, .1, [1800, 2300, 1900], { w: "sine", v: .45, vib: [32, 45], hold: 1 }),
+    T(.13, .1, [1900, 2400, 1800], { w: "sine", v: .45, vib: [32, 45], hold: 1 }),
+    N(.28, .26, { fl: ["lowpass", 1400, 300, .7], v: 1.2, a: .03 })], { wipe: 1 }],
+  ["wipeC", "History wiped · C", "quick broom “swish”", [
+    N(0, .2, { fl: ["bandpass", 900, 3000, 1.6], v: 1, a: .08 }),
+    N(.23, .25, { fl: ["bandpass", 1300, 3600, 1.6], v: 1.1, a: .09 })], { wipe: 1 }],
 ];
-const STYLES = [["playful", "Playful"], ["soft", "Soft"], ["retro", "Retro"]];
+const STYLES = [["soft", "Soft"], ["playful", "Playful"]];
 
-/** The part as this style plays it: same times and pitches, other timbre. */
+/** The part as this style plays it: same times and pitches, other timbre.
+ * Soft rounds everything off; alarm parts keep their buzz (same wave),
+ * losing only the harsh top, so they still grab attention. */
 function voice(p, style) {
   const q = { ...p, a: p.a ?? .004 };
-  if (style === "soft") {
-    q.a = Math.max(q.a, .02);
-    q.v = p.v * (p.k === "N" ? .5 : .85);
-    if (p.k === "N") q.fl = [p.fl[0], p.fl[1] * .6, p.fl[2] * .6, Math.min(p.fl[3], 1)];
-    else if (p.alarm) { // keeps its edge, just rounder
-      const top = Math.min(p.fl?.[2] ?? 1400, 1400);
+  if (style !== "soft") return q;
+  if (p.alarm) {
+    q.a = Math.max(q.a, .008);
+    if (p.k === "T") {
+      const top = Math.min(p.fl?.[2] ?? 2200, 2200);
       q.w = p.w === "sine" ? "triangle" : p.w;
       q.fl = ["lowpass", top, top, .7];
-    } else { q.w = "sine"; q.fl = null; }
-    if (p.vib) q.vib = [p.vib[0], p.vib[1] * (p.fade ? 1 : .5)];
+    } else q.fl = [p.fl[0], p.fl[1] * .85, p.fl[2] * .85, p.fl[3]];
+    return q;
   }
-  if (style === "retro") {
-    q.a = .002; q.steps = true;
-    if (p.k === "T") {
-      q.w = (p.w === "sine" || p.w === "triangle") && Math.max(...p.f) < 400 ? "triangle" : "pulse";
-      q.v = p.v * (q.w === "pulse" ? .5 : 1);
-      q.fl = null;
-    }
-  }
+  q.a = Math.max(q.a, .02);
+  q.v = p.v * (p.k === "N" ? .5 : .85);
+  if (p.k === "N") q.fl = [p.fl[0], p.fl[1] * .6, p.fl[2] * .6, Math.min(p.fl[3], 1)];
+  else { q.w = "sine"; q.fl = null; }
+  if (p.vib) q.vib = [p.vib[0], p.vib[1] * (p.fade ? 1 : .5)];
+  if (p.trem) q.trem = [p.trem[0], p.trem[1] * .6];
   return q;
 }
 
-const perCtx = new WeakMap();
-/** White noise, crunchy noise (held 8 samples, for Retro) and a 25% pulse wave, per context. */
-function kit(c) {
-  if (perCtx.has(c)) return perCtx.get(c);
-  const noise = (hold) => {
+const noiseOf = new WeakMap();
+/** One second of white noise, per context. */
+function noise(c) {
+  if (!noiseOf.has(c)) {
     const b = c.createBuffer(1, c.sampleRate, c.sampleRate), d = b.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = i % hold ? d[i - 1] : Math.random() * 2 - 1;
-    return b;
-  };
-  const n = 32, re = new Float32Array(n), im = new Float32Array(n);
-  for (let k = 1; k < n; k++) re[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * .25);
-  const kt = { white: noise(1), crunch: noise(8), pulse: c.createPeriodicWave(re, im) };
-  perCtx.set(c, kt);
-  return kt;
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    noiseOf.set(c, b);
+  }
+  return noiseOf.get(c);
 }
 
-const semi = (f) => 440 * 2 ** (Math.round(12 * Math.log2(f / 440)) / 12);
-/** Pitch (or a filter) along its points; Retro steps it 30 times a second. */
-function glide(param, pts, t0, d, steps, round) {
+/** A value along its points, gliding evenly over `d`. */
+function glide(param, pts, t0, d) {
   param.setValueAtTime(pts[0], t0);
-  if (pts.length < 2) return;
-  if (steps) {
-    const n = Math.max(1, Math.round(d * 30));
-    for (let i = 0; i <= n; i++) {
-      const s = (i / n) * (pts.length - 1), j = Math.min(Math.floor(s), pts.length - 2);
-      const f = pts[j] * (pts[j + 1] / pts[j]) ** (s - j);
-      param.setValueAtTime(round ? semi(f) : f, t0 + (d * i) / n);
-    }
-    return;
-  }
   pts.slice(1).forEach((f, i) => param.exponentialRampToValueAtTime(f, t0 + (d * (i + 1)) / (pts.length - 1)));
+}
+
+/** An LFO from `s` to `e` added to `param` (rate Hz, depth in the param's unit). */
+function lfo(c, param, rate, depth, s, e, fade) {
+  const o = c.createOscillator(), g = c.createGain();
+  o.frequency.value = rate;
+  g.gain.setValueAtTime(depth, s);
+  if (fade) g.gain.linearRampToValueAtTime(0, e);
+  o.connect(g).connect(param);
+  o.start(s); o.stop(e + .02);
 }
 
 const LEVEL = .2;
 /** Schedules `parts` in `style` on context `c` into `dest` from `t0`; returns the end time. */
 function render(c, dest, parts, style, t0) {
-  const kt = kit(c);
   let end = t0;
   for (const raw of parts) {
     const p = voice(raw, style), s = t0 + p.t, e = s + p.d, a = Math.min(p.a, p.d * .5);
@@ -1197,26 +1227,25 @@ function render(c, dest, parts, style, t0) {
     let src;
     if (p.k === "T") {
       src = c.createOscillator();
-      if (p.w === "pulse") src.setPeriodicWave(kt.pulse); else src.type = p.w;
-      glide(src.frequency, p.f, s, p.d, p.steps, true);
-      if (p.vib) {
-        const lfo = c.createOscillator(), depth = c.createGain();
-        lfo.frequency.value = p.vib[0];
-        depth.gain.setValueAtTime(p.vib[1], s);
-        if (p.fade) depth.gain.linearRampToValueAtTime(0, e);
-        lfo.connect(depth).connect(src.detune);
-        lfo.start(s); lfo.stop(e + .02);
-      }
+      src.type = p.w;
+      glide(src.frequency, p.f, s, p.d);
+      if (p.vib) lfo(c, src.detune, p.vib[0], p.vib[1], s, e, p.fade);
     } else {
       src = c.createBufferSource();
-      src.buffer = p.steps ? kt.crunch : kt.white;
+      src.buffer = noise(c);
     }
     let out = src;
     if (p.fl) {
       const f = c.createBiquadFilter();
       f.type = p.fl[0]; f.Q.value = p.fl[3];
-      glide(f.frequency, [p.fl[1], p.fl[2]], s, p.d, p.steps, false);
+      glide(f.frequency, [p.fl[1], p.fl[2]], s, p.d);
       out = out.connect(f);
+    }
+    if (p.trem) { // the level flutters between 1 - depth and 1
+      const t = c.createGain();
+      t.gain.value = 1 - p.trem[1] / 2;
+      lfo(c, t.gain, p.trem[0], p.trem[1] / 2, s, e);
+      out = out.connect(t);
     }
     out.connect(g).connect(dest);
     src.start(s); src.stop(e + .02);
@@ -1226,9 +1255,10 @@ function render(c, dest, parts, style, t0) {
 }
 
 // Loudness: each sound in each style is rendered offline once, then played
-// at the gain that brings it to the same RMS (alarms 2 dB louder, the
-// tiny click 6 dB quieter), peaks
-// capped so 100% volume never clips. `len` is how long it really sounds.
+// at the gain that brings it to one RMS. Alarms sit 2 dB above that in both
+// styles; the rest of Soft sits 3 dB below (so in Soft the alarms stand out
+// by 5 dB); the tiny click 6 dB below. Peaks capped so 100% never clips.
+// `len` is how long it really sounds.
 const RATE = 44100, TARGET = .07, measured = {};
 async function measure(id, parts, style, flags) {
   const c = new OfflineAudioContext(1, RATE * 1.3, RATE);
@@ -1238,7 +1268,8 @@ async function measure(id, parts, style, flags) {
   for (let i = 0; i < x.length; i++) peak = Math.max(peak, Math.abs(x[i]));
   for (let i = 0; i < x.length; i++) { if (Math.abs(x[i]) > peak * .001) last = i; sum += x[i] * x[i]; }
   const rms = Math.sqrt(sum / (last + 1));
-  measured[id + "." + style] = { gain: Math.min((TARGET * (flags.alarm ? 1.26 : flags.quiet ? .5 : 1)) / rms, .45 / peak), len: (last + 1) / RATE, rms, peak };
+  const db = flags.alarm ? 2 : (flags.quiet ? -6 : 0) + (style === "soft" ? -3 : 0);
+  measured[id + "." + style] = { gain: Math.min((TARGET * 10 ** (db / 20)) / rms, .45 / peak), len: (last + 1) / RATE, rms, peak };
 }
 
 let actx = null, bus = null, hush = 0, run = [], volume = .5, playingBtn = null;
@@ -1263,15 +1294,17 @@ function playSound(id, style, btn) {
   } catch { /* no audio device */ }
 }
 
-// Picks: keep / change per sound per style, and a note per sound. Kept in
-// this browser only, copied out as plain text.
+// Picks: keep / change per sound per style, a note per sound, and which
+// wipe sound. Kept in this browser only, copied out as plain text.
 const PICKS_KEY = "bouncer-sound-picks";
 let picks = {};
 try { picks = JSON.parse(localStorage.getItem(PICKS_KEY)) || {}; } catch { picks = {}; }
 function countPicks() {
-  const marks = Object.entries(picks).filter(([k, v]) => !k.endsWith(".note") && v);
-  const change = marks.filter(([, v]) => v === "change").length;
-  document.getElementById("sb-count").textContent = `${marks.length} of ${SOUNDS.length * STYLES.length} picked · ${change} to change`;
+  const marks = SOUNDS.flatMap(([id]) => STYLES.map(([s]) => picks[`${id}.${s}`])).filter(Boolean);
+  const change = marks.filter((v) => v === "change").length;
+  const wipe = SOUNDS.find(([id]) => id === picks.wipe);
+  document.getElementById("sb-count").textContent =
+    `${marks.length} of ${SOUNDS.length * STYLES.length} picked · ${change} to change · wipe: ${wipe ? wipe[1].slice(-1) : "not picked"}`;
 }
 function savePicks() {
   try { localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); } catch { /* private window: picks last this visit */ }
@@ -1288,7 +1321,7 @@ for (const [style, name] of STYLES) {
     run.forEach(clearTimeout);
     run = SOUNDS.map(([id], i) => setTimeout(() => playSound(id, style, document.querySelector(`[data-p="${id}.${style}"]`)), i * 1150));
   });
-  h.append(document.createTextNode(name), all);
+  h.append(document.createTextNode(style === "soft" ? `${name} (default)` : name), all);
   sbHead.append(h);
 }
 sbHead.append(el("div", "", "What to change"));
@@ -1296,8 +1329,15 @@ sb.append(sbHead);
 for (const [id, name, what, , flags = {}] of SOUNDS) {
   const row = el("div", "sb-row"), n = el("div", "sb-name");
   n.append(el("b", "", name), el("span", "", what), el("br"));
-  if (flags.alarm) n.append(el("span", "sb-tag", "alarm: harsh in every style"));
-  if (flags.off) n.append(el("span", "sb-tag off", "off by default"));
+  if (flags.alarm) n.append(el("span", "sb-tag", "alarm: grabs attention"));
+  if (flags.on) n.append(el("span", "sb-tag on", "on by default"));
+  if (flags.wipe) {
+    const pick = el("label", "sb-pick"), radio = el("input");
+    radio.type = "radio"; radio.name = "sb-wipe"; radio.checked = picks.wipe === id;
+    radio.addEventListener("change", () => { picks.wipe = id; savePicks(); });
+    pick.append(radio, document.createTextNode(" Use this one"));
+    n.append(pick);
+  }
   row.append(n);
   for (const [style, sname] of STYLES) {
     const key = `${id}.${style}`, cell = el("div", "sb-cell");
@@ -1335,6 +1375,8 @@ document.getElementById("sb-copy").addEventListener("click", () => {
     const note = (picks[id + ".note"] || "").trim();
     return `${name}: ${each}${note ? ` — ${note}` : ""}`;
   });
+  const wipe = SOUNDS.find(([id]) => id === picks.wipe);
+  lines.push(`History wiped, use: ${wipe ? `${wipe[1].slice(-1)} (${wipe[2]})` : "not picked"}`);
   const out = document.getElementById("sb-out");
   out.hidden = false;
   out.value = lines.join("\n");
