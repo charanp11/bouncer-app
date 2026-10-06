@@ -1857,6 +1857,9 @@ Done when:
 
 - [ ] Listen-and-pick board in the prototype: 17 sounds × 3 styles, each
   playable, keep / change per cell; every sound a keep (Charan)
+  (board built, prototype v0.13, 2026-10-06: all 51 render offline, each
+  ≤ 1.00 s, loudness evened to one RMS, alarms +2 dB, the click −6 dB;
+  waiting for Charan's picks)
 - [ ] Charan's calls: `PostToolUseFailure` (tool failed), launch "yo!"
 - [ ] The app plays the picked pack: style, volume, per-sound on / off in
   Settings, saved in `preferences.json`
