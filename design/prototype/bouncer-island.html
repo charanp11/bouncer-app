@@ -346,6 +346,38 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .rules b { color: var(--text); font-weight: 500; }
 h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin: 8px 0 -8px; }
 
+/* sound pack board (Phase 5d): listen and pick */
+.board { display: grid; gap: 14px; }
+.board .lede { max-width: 80ch; }
+.board .lede b { color: var(--text); font-weight: 500; }
+.sb-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.sb-tools label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.sb-tools input[type=range] { accent-color: var(--sun); width: 140px; }
+.sb { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.sb-row { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(190px, 1.15fr)) minmax(120px, .8fr); gap: 10px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+.sb-row:first-child { border-top: 0; }
+.sb-head { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+.sb-head .chip { text-transform: none; letter-spacing: 0; font-size: 12px; padding: 2px 10px; margin-left: 6px; }
+.sb-name b { display: block; font-weight: 500; }
+.sb-name span { color: var(--muted); font-size: 12.5px; }
+.sb-name .sb-tag { display: inline-block; font: 600 10.5px var(--ui); border-radius: 999px; padding: 0 7px; margin: 3px 4px 0 0; color: var(--island); background: var(--wait); }
+.sb-name .sb-tag.off { background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
+.sb-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.sb-cell .chip { font-size: 12px; padding: 3px 9px; }
+.sb-cell .sb-play { font-family: var(--mono); min-width: 70px; }
+.sb-cell .sb-play.on { color: var(--island); background: var(--ok); border-color: var(--ok); }
+.sb-cell .chip.keep[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); }
+.sb-cell .chip.change[aria-pressed="true"] { background: var(--wait); border-color: var(--wait); }
+.sb-note { width: 100%; font: 12.5px var(--ui); color: var(--text); background: var(--island); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+.sb-note:focus-visible, .sb-tools input:focus-visible { outline: 2px solid var(--sun); outline-offset: 1px; }
+#sb-out { width: 100%; font: 12px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+a.chip { text-decoration: none; }
+@media (max-width: 1000px) {
+  .sb-row { grid-template-columns: minmax(0, 1fr); }
+  .sb-head { display: none; }
+  .sb-cell::before { content: attr(data-style); width: 56px; color: var(--faint); font-size: 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -357,7 +389,7 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.12 · Oct 5 2026</div>
+    <div class="meta">design/prototype · v0.13 · Oct 6 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -380,6 +412,9 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
     <div class="group"><span class="label">Phase 5</span>
       <button class="chip" data-s="settings">Settings</button>
       <button class="chip" data-s="settingsauto">Settings · turn on auto</button>
+    </div>
+    <div class="group"><span class="label">Phase 5d</span>
+      <a class="chip" href="#sounds">Sound pack: listen and pick &darr;</a>
     </div>
     <div class="group"><span class="label">Phase 5c</span>
       <button class="chip" data-play>&#9654; Play: wake, open, close</button>
@@ -407,6 +442,18 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
 
   <h2 class="sec">Meet Bouncer</h2>
   <div class="cast" id="cast"></div>
+
+  <h2 class="sec" id="sounds">Sound pack</h2>
+  <section class="board" aria-label="Sound pack: listen and pick">
+    <p class="lede">Phase 5d. Bouncer is a club bouncer: each sound is a little joke that still says what happened. All 17 are made in code (oscillators and filtered noise, no files), each under 1&nbsp;s. One recipe per sound; the style changes only the timbre: <b>Playful</b> as written, <b>Soft</b> rounder and quieter, <b>Retro</b> chiptune with stepped pitch. Needs you and risky (orange tag) stay lower and harsher in every style. Loudness is evened out per sound. Press &#9654; to hear one, mark it Keep or Change (and say what to change); picks stay in this browser until you copy them.</p>
+    <div class="sb-tools">
+      <label>Volume <input type="range" id="sb-vol" min="0" max="100" value="50"></label>
+      <button class="chip" id="sb-copy">Copy my picks</button>
+      <span class="meta" id="sb-count" aria-live="polite"></span>
+    </div>
+    <div class="sb" id="sb"></div>
+    <textarea id="sb-out" rows="8" readonly hidden aria-label="Your picks"></textarea>
+  </section>
 
   <h2 class="sec">Build spec</h2>
   <div class="spec">
@@ -1012,5 +1059,295 @@ for (const [st, name, what] of CAST) {
   const cap = el("figcaption"); cap.append(el("b", "", name), document.createTextNode(what));
   f.append(b, cap); cast.append(f);
 }
+// ---- Sound pack (Phase 5d): every sound made in code, in three styles ----
+// A sound is a list of parts, written once. T: a tone, N: filtered noise;
+// times in seconds. f: pitch points (Hz) spread evenly over the part;
+// fl: [filter type, from Hz, to Hz, Q]; vib: [rate Hz, depth cents], fade:
+// the vibrato dies away; hold: sustains, then releases (else it rings out);
+// alarm: stays harsh in every style. The style only changes the timbre
+// (voice()), never timing or pitch contour.
+const T = (t, d, f, o = {}) => ({ k: "T", t, d, f: [].concat(f), w: "triangle", v: 1, ...o });
+const N = (t, d, o = {}) => ({ k: "N", t, d, v: 1, ...o });
+const knock = (t) => [T(t, .07, [190, 90], { w: "sine", v: 1.2, alarm: 1 }), N(t, .03, { fl: ["bandpass", 900, 900, 1.5], v: .5 })];
+const bell = (t, d, f, v) => [T(t, d, f, { w: "sine", v }), T(t, d * .35, f * 2.76, { w: "sine", v: v * .16 })];
+// [id, event, what it is, parts, flags]
+const SOUNDS = [
+  ["launch", "Launch", "“yo!” whistle", [
+    T(0, .15, [196, 262], { w: "sawtooth", fl: ["bandpass", 650, 950, 3], v: 1.6, hold: 1 }),
+    T(.21, .34, [1400, 2500], { w: "sine", vib: [7, 40], v: .7 }),
+    N(.21, .1, { fl: ["highpass", 5000, 5000, .7], v: .15 })]],
+  ["session", "New session", "door chime", [...bell(0, .55, 659.25, .9), ...bell(.3, .7, 523.25, .9)]],
+  ["needs", "Needs you", "knock-knock + rising “ahem?”", [...knock(0), ...knock(.14),
+    T(.34, .09, [200, 185], { w: "sawtooth", fl: ["lowpass", 1400, 1400, 1], v: .8, hold: 1, alarm: 1 }),
+    T(.47, .3, [175, 330], { w: "sawtooth", fl: ["lowpass", 1400, 2400, 1], v: .8, hold: 1, vib: [6, 25], alarm: 1 })], { alarm: 1 }],
+  ["risky", "Risky request", "record scratch + low buzzer", [
+    N(0, .09, { fl: ["bandpass", 3200, 700, 4], v: 1.4 }), N(.09, .08, { fl: ["bandpass", 700, 2600, 4], v: 1.4 }),
+    T(0, .17, [520, 180, 420], { w: "sawtooth", fl: ["lowpass", 2500, 2500, 1], v: .35, alarm: 1 }),
+    T(.22, .42, 98, { w: "sawtooth", fl: ["lowpass", 1600, 1600, 1], v: .9, hold: 1, alarm: 1 }),
+    T(.22, .42, 104, { w: "square", fl: ["lowpass", 1600, 1600, 1], v: .6, hold: 1, alarm: 1 })], { alarm: 1 }],
+  ["allowed", "Allowed", "velvet rope “pop” + ding", [
+    T(0, .05, [260, 900], { w: "sine", v: 1 }), N(0, .02, { fl: ["highpass", 2500, 2500, .7], v: .35 }),
+    ...bell(.07, .45, 1567.98, .6)]],
+  ["denied", "Denied", "door slam “bonk”", [
+    N(0, .14, { fl: ["lowpass", 900, 250, 1], v: 1.4 }), T(0, .22, [130, 45], { w: "sine", v: 1.3 }),
+    T(.06, .2, [360, 170], { w: "triangle", v: .8 })]],
+  ["vip", "“Always allow” rule added", "VIP stamp “ka-chunk”", [
+    N(0, .03, { fl: ["highpass", 2500, 2500, .7], v: .6 }), T(0, .05, [1000, 520], { w: "square", fl: ["lowpass", 3000, 3000, 1], v: .35 }),
+    N(.13, .08, { fl: ["lowpass", 1200, 400, 1], v: 1.2 }), T(.13, .18, [170, 60], { w: "sine", v: 1.3 })]],
+  ["auto", "Auto-allowed", "tiny click", [
+    T(0, .025, [2200, 1800], { w: "sine", v: .4 }), N(0, .012, { fl: ["highpass", 4000, 4000, .7], v: .2 })], { off: 1, quiet: 1 }],
+  ["done", "Session done", "mini “ta-da!”", [
+    T(0, .09, 392, { w: "sawtooth", fl: ["lowpass", 2200, 2200, 1], v: .5, hold: 1 }),
+    ...[523.25, 659.25, 783.99].map((f) => T(.13, .5, f, { w: "sawtooth", fl: ["lowpass", 2600, 1200, 1], v: .35, hold: 1, vib: [5.5, 12] }))]],
+  ["fail", "A tool failed", "sad trombone", [
+    ...[[0, 293.66], [.2, 277.18], [.4, 261.63]].map(([t, f]) => T(t, .18, f, { w: "sawtooth", fl: ["lowpass", 500, 1300, 1.5], v: .6, hold: 1 })),
+    T(.6, .4, [246.94, 233.08], { w: "sawtooth", fl: ["lowpass", 500, 1300, 2], v: .6, hold: 1, vib: [5, 35] })], { off: 1 }],
+  ["back", "Welcome back", "rising “heyyy”", [
+    N(0, .07, { fl: ["bandpass", 1800, 1800, 1], v: .35 }),
+    T(.05, .5, [185, 330], { w: "sawtooth", fl: ["bandpass", 900, 1500, 1.2], v: 1.4, hold: 1, vib: [6, 30] })]],
+  ["poke", "Poke (click on Bouncer)", "boing", [T(0, .4, [160, 420], { w: "triangle", v: 1, vib: [16, 350], fade: 1 })]],
+  ["dizzy", "Dizzy", "cartoon whirl", [T(0, .75, [500, 1050, 520, 1100, 600], { w: "sine", v: .7, vib: [11, 60], hold: 1 })]],
+  ["paused", "Paused", "snore “zzz”", [
+    T(0, .42, [62, 78], { w: "sawtooth", fl: ["lowpass", 380, 520, 2], v: 1.6, hold: 1, vib: [24, 40] }),
+    N(0, .42, { fl: ["lowpass", 700, 700, 1], v: .3, hold: 1 }),
+    T(.5, .4, [1100, 700], { w: "sine", v: .35, hold: 1 })]],
+  ["resumed", "Resumed", "“bip-bip!”", [
+    T(0, .06, 1318.51, { w: "square", fl: ["lowpass", 4000, 4000, 1], v: .4 }),
+    T(.1, .08, 1760, { w: "square", fl: ["lowpass", 4000, 4000, 1], v: .4 })]],
+  ["autoon", "Auto-allow turned on", "“cha-ching”", [
+    N(0, .07, { fl: ["highpass", 3500, 3500, .7], v: .6 }), N(.05, .05, { fl: ["bandpass", 2500, 2500, 2], v: .5 }),
+    ...[2093, 2637.02, 3135.96].map((f) => T(.13, .55, f, { w: "sine", v: .3 })),
+    N(.13, .2, { fl: ["highpass", 7000, 7000, .7], v: .2 })]],
+  ["wiped", "History wiped", "eraser whoosh", [
+    ...[0, .08, .16].map((t, i) => N(t, .07, { fl: ["bandpass", i % 2 ? 1700 : 1200, i % 2 ? 1300 : 1600, 3], v: .8, hold: 1 })),
+    N(.26, .38, { fl: ["bandpass", 3200, 450, 1.4], v: 1, a: .12 })]],
+];
+const STYLES = [["playful", "Playful"], ["soft", "Soft"], ["retro", "Retro"]];
+
+/** The part as this style plays it: same times and pitches, other timbre. */
+function voice(p, style) {
+  const q = { ...p, a: p.a ?? .004 };
+  if (style === "soft") {
+    q.a = Math.max(q.a, .02);
+    q.v = p.v * (p.k === "N" ? .5 : .85);
+    if (p.k === "N") q.fl = [p.fl[0], p.fl[1] * .6, p.fl[2] * .6, Math.min(p.fl[3], 1)];
+    else if (p.alarm) { // keeps its edge, just rounder
+      const top = Math.min(p.fl?.[2] ?? 1400, 1400);
+      q.w = p.w === "sine" ? "triangle" : p.w;
+      q.fl = ["lowpass", top, top, .7];
+    } else { q.w = "sine"; q.fl = null; }
+    if (p.vib) q.vib = [p.vib[0], p.vib[1] * (p.fade ? 1 : .5)];
+  }
+  if (style === "retro") {
+    q.a = .002; q.steps = true;
+    if (p.k === "T") {
+      q.w = (p.w === "sine" || p.w === "triangle") && Math.max(...p.f) < 400 ? "triangle" : "pulse";
+      q.v = p.v * (q.w === "pulse" ? .5 : 1);
+      q.fl = null;
+    }
+  }
+  return q;
+}
+
+const perCtx = new WeakMap();
+/** White noise, crunchy noise (held 8 samples, for Retro) and a 25% pulse wave, per context. */
+function kit(c) {
+  if (perCtx.has(c)) return perCtx.get(c);
+  const noise = (hold) => {
+    const b = c.createBuffer(1, c.sampleRate, c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = i % hold ? d[i - 1] : Math.random() * 2 - 1;
+    return b;
+  };
+  const n = 32, re = new Float32Array(n), im = new Float32Array(n);
+  for (let k = 1; k < n; k++) re[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * .25);
+  const kt = { white: noise(1), crunch: noise(8), pulse: c.createPeriodicWave(re, im) };
+  perCtx.set(c, kt);
+  return kt;
+}
+
+const semi = (f) => 440 * 2 ** (Math.round(12 * Math.log2(f / 440)) / 12);
+/** Pitch (or a filter) along its points; Retro steps it 30 times a second. */
+function glide(param, pts, t0, d, steps, round) {
+  param.setValueAtTime(pts[0], t0);
+  if (pts.length < 2) return;
+  if (steps) {
+    const n = Math.max(1, Math.round(d * 30));
+    for (let i = 0; i <= n; i++) {
+      const s = (i / n) * (pts.length - 1), j = Math.min(Math.floor(s), pts.length - 2);
+      const f = pts[j] * (pts[j + 1] / pts[j]) ** (s - j);
+      param.setValueAtTime(round ? semi(f) : f, t0 + (d * i) / n);
+    }
+    return;
+  }
+  pts.slice(1).forEach((f, i) => param.exponentialRampToValueAtTime(f, t0 + (d * (i + 1)) / (pts.length - 1)));
+}
+
+const LEVEL = .2;
+/** Schedules `parts` in `style` on context `c` into `dest` from `t0`; returns the end time. */
+function render(c, dest, parts, style, t0) {
+  const kt = kit(c);
+  let end = t0;
+  for (const raw of parts) {
+    const p = voice(raw, style), s = t0 + p.t, e = s + p.d, a = Math.min(p.a, p.d * .5);
+    const g = c.createGain(), level = LEVEL * p.v;
+    g.gain.setValueAtTime(0, s);
+    g.gain.linearRampToValueAtTime(level, s + a);
+    if (p.hold) { g.gain.setValueAtTime(level, Math.max(s + a, s + p.d * .7)); g.gain.linearRampToValueAtTime(0, e); }
+    else g.gain.exponentialRampToValueAtTime(.0001, e);
+    let src;
+    if (p.k === "T") {
+      src = c.createOscillator();
+      if (p.w === "pulse") src.setPeriodicWave(kt.pulse); else src.type = p.w;
+      glide(src.frequency, p.f, s, p.d, p.steps, true);
+      if (p.vib) {
+        const lfo = c.createOscillator(), depth = c.createGain();
+        lfo.frequency.value = p.vib[0];
+        depth.gain.setValueAtTime(p.vib[1], s);
+        if (p.fade) depth.gain.linearRampToValueAtTime(0, e);
+        lfo.connect(depth).connect(src.detune);
+        lfo.start(s); lfo.stop(e + .02);
+      }
+    } else {
+      src = c.createBufferSource();
+      src.buffer = p.steps ? kt.crunch : kt.white;
+    }
+    let out = src;
+    if (p.fl) {
+      const f = c.createBiquadFilter();
+      f.type = p.fl[0]; f.Q.value = p.fl[3];
+      glide(f.frequency, [p.fl[1], p.fl[2]], s, p.d, p.steps, false);
+      out = out.connect(f);
+    }
+    out.connect(g).connect(dest);
+    src.start(s); src.stop(e + .02);
+    end = Math.max(end, e);
+  }
+  return end;
+}
+
+// Loudness: each sound in each style is rendered offline once, then played
+// at the gain that brings it to the same RMS (alarms 2 dB louder, the
+// tiny click 6 dB quieter), peaks
+// capped so 100% volume never clips. `len` is how long it really sounds.
+const RATE = 44100, TARGET = .07, measured = {};
+async function measure(id, parts, style, flags) {
+  const c = new OfflineAudioContext(1, RATE * 1.3, RATE);
+  render(c, c.destination, parts, style, 0);
+  const x = (await c.startRendering()).getChannelData(0);
+  let peak = 0, last = 0, sum = 0;
+  for (let i = 0; i < x.length; i++) peak = Math.max(peak, Math.abs(x[i]));
+  for (let i = 0; i < x.length; i++) { if (Math.abs(x[i]) > peak * .001) last = i; sum += x[i] * x[i]; }
+  const rms = Math.sqrt(sum / (last + 1));
+  measured[id + "." + style] = { gain: Math.min((TARGET * (flags.alarm ? 1.26 : flags.quiet ? .5 : 1)) / rms, .45 / peak), len: (last + 1) / RATE, rms, peak };
+}
+
+let actx = null, bus = null, hush = 0, run = [], volume = .5, playingBtn = null;
+function playSound(id, style, btn) {
+  const parts = SOUNDS.find((s) => s[0] === id)[3];
+  try {
+    actx ??= new AudioContext();
+    void actx.resume();
+    if (bus) { // one sound at a time: the old one fades out fast
+      const old = bus;
+      old.gain.setTargetAtTime(0, actx.currentTime, .008);
+      setTimeout(() => old.disconnect(), 80);
+    }
+    bus = actx.createGain();
+    bus.gain.value = (measured[id + "." + style]?.gain ?? 1) * volume * 2;
+    bus.connect(actx.destination);
+    const ms = (render(actx, bus, parts, style, actx.currentTime + .02) - actx.currentTime) * 1000;
+    playingBtn?.classList.remove("on");
+    playingBtn = btn; btn?.classList.add("on");
+    clearTimeout(hush); // the context sleeps between sounds
+    hush = setTimeout(() => { playingBtn?.classList.remove("on"); void actx.suspend(); }, ms + 250);
+  } catch { /* no audio device */ }
+}
+
+// Picks: keep / change per sound per style, and a note per sound. Kept in
+// this browser only, copied out as plain text.
+const PICKS_KEY = "bouncer-sound-picks";
+let picks = {};
+try { picks = JSON.parse(localStorage.getItem(PICKS_KEY)) || {}; } catch { picks = {}; }
+function countPicks() {
+  const marks = Object.entries(picks).filter(([k, v]) => !k.endsWith(".note") && v);
+  const change = marks.filter(([, v]) => v === "change").length;
+  document.getElementById("sb-count").textContent = `${marks.length} of ${SOUNDS.length * STYLES.length} picked · ${change} to change`;
+}
+function savePicks() {
+  try { localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); } catch { /* private window: picks last this visit */ }
+  countPicks();
+}
+
+const sb = document.getElementById("sb");
+const sbHead = el("div", "sb-row sb-head");
+sbHead.append(el("div", "", "Sound"));
+for (const [style, name] of STYLES) {
+  const h = el("div"), all = el("button", "chip", "▶ all");
+  all.setAttribute("aria-label", `Play all ${name} sounds`);
+  all.addEventListener("click", () => {
+    run.forEach(clearTimeout);
+    run = SOUNDS.map(([id], i) => setTimeout(() => playSound(id, style, document.querySelector(`[data-p="${id}.${style}"]`)), i * 1150));
+  });
+  h.append(document.createTextNode(name), all);
+  sbHead.append(h);
+}
+sbHead.append(el("div", "", "What to change"));
+sb.append(sbHead);
+for (const [id, name, what, , flags = {}] of SOUNDS) {
+  const row = el("div", "sb-row"), n = el("div", "sb-name");
+  n.append(el("b", "", name), el("span", "", what), el("br"));
+  if (flags.alarm) n.append(el("span", "sb-tag", "alarm: harsh in every style"));
+  if (flags.off) n.append(el("span", "sb-tag off", "off by default"));
+  row.append(n);
+  for (const [style, sname] of STYLES) {
+    const key = `${id}.${style}`, cell = el("div", "sb-cell");
+    cell.dataset.style = sname;
+    const play = el("button", "chip sb-play", "▶");
+    play.dataset.p = key;
+    play.setAttribute("aria-label", `Play ${name}, ${sname}`);
+    play.addEventListener("click", () => { run.forEach(clearTimeout); playSound(id, style, play); });
+    cell.append(play);
+    for (const [choice, word] of [["keep", "Keep"], ["change", "Change"]]) {
+      const b = el("button", "chip " + choice, word);
+      b.setAttribute("aria-pressed", String(picks[key] === choice));
+      b.setAttribute("aria-label", `${word} ${name}, ${sname}`);
+      b.addEventListener("click", () => {
+        picks[key] = picks[key] === choice ? "" : choice;
+        cell.querySelectorAll(".keep, .change").forEach((x) => x.setAttribute("aria-pressed", String(x.classList.contains(picks[key]))));
+        savePicks();
+      });
+      cell.append(b);
+    }
+    row.append(cell);
+  }
+  const note = el("input", "sb-note");
+  note.placeholder = "e.g. lower, shorter…";
+  note.setAttribute("aria-label", `What to change in ${name}`);
+  note.value = picks[id + ".note"] || "";
+  note.addEventListener("input", () => { picks[id + ".note"] = note.value; savePicks(); });
+  row.append(note);
+  sb.append(row);
+}
+document.getElementById("sb-vol").addEventListener("input", (e) => { volume = e.target.value / 100; });
+document.getElementById("sb-copy").addEventListener("click", () => {
+  const lines = SOUNDS.map(([id, name]) => {
+    const each = STYLES.map(([s, sname]) => `${sname} ${picks[`${id}.${s}`] || "?"}`).join(", ");
+    const note = (picks[id + ".note"] || "").trim();
+    return `${name}: ${each}${note ? ` — ${note}` : ""}`;
+  });
+  const out = document.getElementById("sb-out");
+  out.hidden = false;
+  out.value = lines.join("\n");
+  out.select();
+  navigator.clipboard?.writeText(out.value).catch(() => {});
+});
+countPicks();
+// Each play button shows its sound's real length once measured.
+Promise.all(SOUNDS.flatMap(([id, , , parts, flags = {}]) => STYLES.map(([s]) => measure(id, parts, s, flags)))).then(() => {
+  for (const [key, m] of Object.entries(measured)) {
+    const b = document.querySelector(`[data-p="${key}"]`);
+    if (b) b.textContent = `▶ ${m.len.toFixed(2)} s`;
+  }
+}).catch(() => {});
 show(current);
 </script>
