@@ -1820,18 +1820,42 @@ Findings:
    `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
    `PermissionRequest`, `Notification`, `Stop`; Claude Code reports a failed
    tool in `PostToolUseFailure`, which we don't install. Adding it changes
-   what's written into `~/.claude/settings.json` (an install change):
-   **Charan's call** after the picks. Until then the sad trombone is only
-   on the board.
+   what's written into `~/.claude/settings.json` (an install change).
+   **Decided (Charan, 2026-10-06): add it**, with these rules:
+   - `install-hooks` shows it in the diff and asks, as now;
+     `uninstall-hooks` removes it.
+   - A real fixture from a failing command in the playground, user name
+     replaced by `dev`.
+   - Its error text is never stored or shown unredacted: the log keeps only
+     "failed", the island only a short redacted label.
+   - Fire-and-forget like the other events: never waits, never answers.
+   - Older installs just don't hear the trombone until `install-hooks` is
+     re-run; nothing breaks.
+
+   Recorded (2.1.291, `claude-code-2.1.291-PostToolUseFailure-Bash.json`):
+   `tool_name`, `tool_input`, `tool_use_id`, `error` (the error text: "Exit
+   code 1" plus the command's stderr), `is_interrupt`, `duration_ms`. A call
+   refused by a deny rule sends no `PostToolUseFailure` (only its
+   `PreToolUse`), so a denial never plays the trombone. Done that way: the
+   relay drops `error` with `tool_response` (it never leaves the relay); the
+   step gets the tag "failed" in the island (the label is the step, already
+   redacted); the log entry's `how` is "failed"; a failure for a card still
+   up clears it, like `PostToolUse`. Still to settle with the sound:
+   `is_interrupt: true` (Esc) is the user's own stop, so it shouldn't play
+   the trombone. The lowest Claude Code version that knows the event isn't
+   confirmed (the changelog doesn't name it; it exists in 2.1.288 and
+   2.1.291).
 5. **Frequent events.** Auto-allowed fires on every tool call in auto mode:
    off by default (as planned). Tool failed (if added) can be frequent too:
    off by default. New session (once per session), allowed / denied / always
    allow / poke / dizzy (Charan's own clicks), done (once per turn), paused /
    resumed, auto on, history wiped (his own actions): on.
 6. **Launch vs the quiet first view.** The greeting runs on the first view
-   (`greetUntil`), which is the app's launch. Proposal: the "yo!" plays with
-   the greeting only; every other first-view sound stays quiet, as now.
-   A reload in dev replays it (prod has no reload).
+   (`greetUntil`), which is the app's launch. The "yo!" plays with the
+   greeting only; every other first-view sound stays quiet, as now. A
+   reload in dev replays it (prod has no reload). **Charan, 2026-10-06:** it
+   follows the same rules as every other sound: muted when Sound is off,
+   silent when paused.
 7. **Priority when two fire together:** risky, then needs you, then the
    rest; only one plays. The 2-s repeat drop stays; "longest sound" becomes
    the longest in the pack (checked by a test over the recipes, ≤ 1 s).
@@ -1860,7 +1884,12 @@ Done when:
   (board built, prototype v0.13, 2026-10-06: all 51 render offline, each
   ≤ 1.00 s, loudness evened to one RMS, alarms +2 dB, the click −6 dB;
   waiting for Charan's picks)
-- [ ] Charan's calls: `PostToolUseFailure` (tool failed), launch "yo!"
+- [x] Charan's calls: `PostToolUseFailure` added (rules above); launch
+  "yo!" muted with Sound off and silent when paused
+- [x] `PostToolUseFailure`: in install / uninstall (diff, confirm, removed
+  cleanly, an old install gains only it), fixture recorded, `error` dropped
+  in the relay, log `how` "failed", island tag "failed", fire-and-forget
+  (fixture relayed silently)
 - [ ] The app plays the picked pack: style, volume, per-sound on / off in
   Settings, saved in `preferences.json`
 - [ ] Rules hold: one at a time, risky > needs > rest, 2-s repeat drop,
