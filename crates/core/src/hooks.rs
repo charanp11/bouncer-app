@@ -19,6 +19,7 @@ pub const EVENTS: &[(&str, u64)] = &[
     ("UserPromptSubmit", 5),
     ("PreToolUse", 5),
     ("PostToolUse", 5),
+    ("PostToolUseFailure", 5),
     ("PermissionRequest", 120),
     ("Notification", 5),
     ("Stop", 5),
