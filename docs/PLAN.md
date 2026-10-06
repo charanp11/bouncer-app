@@ -1769,12 +1769,17 @@ ships the first three sounds (needs you, risky, done) as they are.
   | Paused | snore "zzz" |
   | Resumed | "bip-bip!" |
   | Auto-allow turned on | "cha-ching" |
-  | History wiped | eraser whoosh |
+  | History wiped | one of three, Charan picks: shredder "brrrt" / eraser squeak + "poof" / broom "swish" (each < 0.6 s) |
 
-- **Styles:** Playful (default); Soft and Retro are calmer versions of the
-  same ideas (same rhythm and contour, gentler timbre / chiptune).
+- **Styles:** Soft (default) and Playful (Charan, 2026-10-06: Retro
+  dropped). Soft is the same ideas with the same rhythm and contour, a
+  gentler timbre, 3 dB quieter.
+- **On by default** (Charan, 2026-10-06): needs you, risky, done, tool
+  failed, welcome back, launch "yo!". Everything else starts off and is
+  turned on per sound in Settings.
 - **Risky and needs you stay clearly different from the fun ones** (lower,
-  harsher, insistent), so they're never ignored, in every style.
+  harsher, insistent), so they're never ignored, in every style. In Soft
+  they are less harsh, never easy to miss (Charan, 2026-10-06).
 - **Settings:** volume, the style choice and per-sound on / off.
 - **Rules:** never more than one sound at a time; a repeat within 2 s is
   dropped; frequent events stay quiet by default; nothing while paused;
@@ -1802,20 +1807,22 @@ known (a reload stays quiet).
 Findings:
 
 1. **Order.** Design first: the listen-and-pick board goes into the
-   prototype (v0.13) with all 17 sounds × 3 styles, made the same way the
+   prototype (v0.13; v0.14 after the first listen: two styles, three wipe
+   options) with every sound in every style, made the same way the
    app will make them (oscillators, filtered noise, envelopes; no files, no
    samples). Charan marks each one keep / change. Nothing goes into the app
    until every sound is a keep.
-2. **One recipe per sound, three styles.** Each sound is written once as a
+2. **One recipe per sound, two styles.** Each sound is written once as a
    list of parts (tone or noise, timing, pitch contour); the style only
-   changes the timbre: Playful as written; Soft = sine, slower attack, low-
-   pass, quieter noise; Retro = 25% pulse / triangle, pitch stepped to
-   semitones at 30 steps/s, crunchy noise. So rhythm and contour can't drift
-   between styles.
-3. **Alarm parts stay harsh in every style.** Needs you and risky mark
-   their parts as alarms: in Soft they keep a triangle / sawtooth through a
-   low-pass instead of becoming sine, and risky stays the lowest sound in
-   the set. Both stay under 1 s.
+   changes the timbre: Playful as written; Soft = sine, slower attack,
+   quieter, darker noise, 3 dB below Playful. So rhythm and contour can't
+   drift between styles.
+3. **Alarms grab attention in every style.** Needs you and risky mark
+   their parts as alarms. In Soft they keep their wave (the buzz), lose only
+   the harsh top (low-pass at 2.2 kHz), keep a quick attack, and play at the
+   same level as in Playful: 2 dB above Playful's other sounds, 5 dB above
+   Soft's (measured offline: −21.1 vs −26.1 dB RMS). Risky stays the
+   lowest sound in the set. Both stay under 1 s.
 4. **"A tool failed" has no event yet.** Bouncer installs `SessionStart`,
    `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
    `PermissionRequest`, `Notification`, `Stop`; Claude Code reports a failed
@@ -1845,11 +1852,12 @@ Findings:
    the trombone. The lowest Claude Code version that knows the event isn't
    confirmed (the changelog doesn't name it; it exists in 2.1.288 and
    2.1.291).
-5. **Frequent events.** Auto-allowed fires on every tool call in auto mode:
-   off by default (as planned). Tool failed (if added) can be frequent too:
-   off by default. New session (once per session), allowed / denied / always
-   allow / poke / dizzy (Charan's own clicks), done (once per turn), paused /
-   resumed, auto on, history wiped (his own actions): on.
+5. **Defaults (Charan, 2026-10-06).** On: needs you, risky, done, tool
+   failed, welcome back, launch. Off, each turned on in Settings: new
+   session, allowed, denied, always allow, auto-allowed, poke, dizzy,
+   paused, resumed, auto on, history wiped. (Auto-allowed fires on every
+   tool call in auto mode; tool failed can be frequent, but Charan wants it
+   on.)
 6. **Launch vs the quiet first view.** The greeting runs on the first view
    (`greetUntil`), which is the app's launch. The "yo!" plays with the
    greeting only; every other first-view sound stays quiet, as now. A
@@ -1862,7 +1870,7 @@ Findings:
 8. **Paused:** the snore is the pause itself; after it nothing plays until
    resumed (the "bip-bip" is the resume).
 9. **Storage:** `preferences.json` gains `volume` (0–100, default 50),
-   `style` (`playful` / `soft` / `retro`) and `sounds` (name → on / off,
+   `style` (`soft` default / `playful`) and `sounds` (name → on / off,
    known names only); `sound` stays the master switch. Unknown or
    out-of-range values give the default, same checked atomic write.
 
@@ -1870,7 +1878,7 @@ Threats:
 
 | Threat | Fix |
 | --- | --- |
-| A fun sound masks a risky alert | One sound at a time, risky > needs > rest; alarms harsh and low in every style |
+| A fun sound masks a risky alert | One sound at a time, risky > needs > rest; alarms keep their buzz and play 5 dB above the rest in Soft |
 | Sound spam with many sessions | 2-s repeat drop; frequent events off by default; one at a time |
 | Loud surprise | Volume capped (100% = today's level ×2), default 50% |
 | Idle CPU / battery | Context suspended after each sound (unchanged) |
@@ -1879,11 +1887,13 @@ Threats:
 
 Done when:
 
-- [ ] Listen-and-pick board in the prototype: 17 sounds × 3 styles, each
-  playable, keep / change per cell; every sound a keep (Charan)
-  (board built, prototype v0.13, 2026-10-06: all 51 render offline, each
-  ≤ 1.00 s, loudness evened to one RMS, alarms +2 dB, the click −6 dB;
-  waiting for Charan's picks)
+- [ ] Listen-and-pick board in the prototype: every sound × Soft / Playful,
+  each playable, keep / change per cell, a wipe sound picked; every sound
+  a keep (Charan)
+  (v0.13 built, 2026-10-06; v0.14 after the first listen: Retro gone,
+  three wipe options 0.47–0.51 s, all 38 render offline, each ≤ 1.00 s;
+  Settings mock has style, volume and a switch per sound, 6 of 17 on;
+  waiting for Charan's re-check of Soft and the wipe pick)
 - [x] Charan's calls: `PostToolUseFailure` added (rules above); launch
   "yo!" muted with Sound off and silent when paused
 - [x] `PostToolUseFailure`: in install / uninstall (diff, confirm, removed
