@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 /// Bigger events are dropped whole rather than cut (a cut command could be
 /// approved by someone who never saw its end).
 const MAX_INPUT: u64 = 1024 * 1024;
-/// Fields that can be huge and that Bouncer never shows.
-const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path"];
+/// Fields that can be huge, or hold text Bouncer never shows (a failed
+/// tool's `error` can quote a secret): they never leave the relay.
+const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path", "error"];
 /// Whole-run budget for an event nobody waits on.
 const FIRE_AND_FORGET: Duration = Duration::from_secs(2);
 /// Longest answer line read from the app.
@@ -134,6 +135,19 @@ mod tests {
             "{\"hook_event_name\":\"PostToolUse\",\"tool_input\":{\"command\":\"ls\"}}\n"
         );
         assert_eq!(event, "PostToolUse");
+    }
+
+    #[test]
+    fn a_failure_never_forwards_its_error_text() {
+        let (line, event) = read_event(
+            &br#"{"hook_event_name":"PostToolUseFailure","tool_input":{"command":"cat x"},"error":"Exit code 1\ncat: x: No such file","is_interrupt":false}"#[..],
+        )
+        .unwrap();
+        assert_eq!(
+            line,
+            "{\"hook_event_name\":\"PostToolUseFailure\",\"tool_input\":{\"command\":\"cat x\"},\"is_interrupt\":false}\n"
+        );
+        assert_eq!(event, "PostToolUseFailure");
     }
 
     #[test]
