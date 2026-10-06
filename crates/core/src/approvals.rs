@@ -45,6 +45,8 @@ const BY_RULE: &str = "auto-allowed by rule";
 const QUESTIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
 /// What a session waiting on one of those shows.
 const QUESTION_STEP: &str = "question in the terminal";
+/// A tool call that failed (its error text never reaches Bouncer).
+pub const FAILED: &str = "failed";
 /// A session with no event for this long is dropped (it may never send
 /// `SessionEnd`: crashed, killed, closed terminal). Any later event brings it back.
 const IDLE_LIMIT: Duration = Duration::from_secs(30 * 60);
@@ -187,12 +189,19 @@ impl State {
                 session.step = "Idle".into();
                 session.lines = None;
             }
+            "PostToolUseFailure" => {
+                if let Some(last) = session.history.back_mut()
+                    && last.0 == step(event)
+                {
+                    last.1 = FAILED;
+                }
+            }
             _ => {}
         }
         session.status = match event.kind.as_str() {
             "PermissionRequest" if paused => IN_TERMINAL,
             "PermissionRequest" => "needs you",
-            "UserPromptSubmit" | "PreToolUse" | "PostToolUse" => "working",
+            "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => "working",
             "Stop" => "idle",
             _ => session.status,
         };
@@ -245,7 +254,9 @@ impl State {
             .filter(|p| {
                 p.event.session == event.session
                     && match event.kind.as_str() {
-                        "PostToolUse" => p.event.tool == event.tool && p.event.input == event.input,
+                        "PostToolUse" | "PostToolUseFailure" => {
+                            p.event.tool == event.tool && p.event.input == event.input
+                        }
                         "Stop" | "UserPromptSubmit" | "SessionEnd" => true,
                         _ => false,
                     }
@@ -1011,6 +1022,44 @@ mod tests {
         let s = &view["sessions"][0];
         assert_eq!(s["status"], "working");
         assert_eq!(s["history"][0]["how"], "answered in terminal");
+    }
+
+    /// A failed tool call (recorded: 2.1.291 `PostToolUseFailure`): its step
+    /// is tagged "failed" and the session keeps working; nothing is answered.
+    #[test]
+    fn a_failed_tool_tags_its_step() {
+        let desk = desk(Duration::from_millis(100));
+        assert_eq!(desk.handle(event("a", "PreToolUse", "cat nope")), None);
+        assert_eq!(
+            desk.handle(event("a", "PostToolUseFailure", "cat nope")),
+            None
+        );
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["status"], "working");
+        assert_eq!(s["history"][0]["how"], FAILED);
+        // A failure for another call doesn't tag the latest step.
+        assert_eq!(desk.handle(event("a", "PreToolUse", "ls")), None);
+        assert_eq!(
+            desk.handle(event("a", "PostToolUseFailure", "cat nope")),
+            None
+        );
+        assert_eq!(desk.view()["sessions"][0]["history"][1]["how"], "");
+    }
+
+    /// Answered Yes in the terminal while the card is up, and the tool then
+    /// failed: the failure clears the stale card like a PostToolUse.
+    #[test]
+    fn a_failure_after_a_terminal_yes_clears_the_card() {
+        let desk = desk(Duration::from_millis(400));
+        let a = ask(&desk, "a", "mkdir x");
+        queued(&desk, 1);
+        assert_eq!(
+            desk.handle(event("a", "PostToolUseFailure", "mkdir x")),
+            None
+        );
+        assert_eq!(desk.view()["queue"], json!([]));
+        assert_eq!(a.join().unwrap(), None);
     }
 
     /// Another tool finishing in the same session (a subagent) is not an

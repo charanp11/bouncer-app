@@ -121,6 +121,7 @@ const TAG: Record<string, string> = {
   "asked in terminal": "you",
   "answered in terminal": "mine",
   "waiting in terminal": "you",
+  failed: "flag",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");

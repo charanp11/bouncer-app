@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::approvals::step;
+use crate::approvals::{FAILED, step};
 use crate::code::line_counts;
 use crate::event::Event;
 use crate::redact::redact;
@@ -77,7 +77,8 @@ impl Entry {
                 String::new()
             },
             file,
-            how: None,
+            // A failure keeps only that it failed, never its error.
+            how: (event.kind == "PostToolUseFailure").then(|| FAILED.into()),
             added: lines.map(|(a, _)| a as u64),
             removed: lines.and_then(|(_, r)| r).map(|r| r as u64),
         }
@@ -455,6 +456,34 @@ pub(crate) mod tests {
         assert_eq!(read(&dir, day, day + DAY_MS).len(), 4);
     }
 
+    /// A failed call is logged like any tool step, plus only "failed".
+    #[test]
+    fn a_failure_logs_only_that_it_failed() {
+        let e = event(
+            "PostToolUseFailure",
+            Some("Bash"),
+            json!({ "command": "cat nope" }),
+            0,
+        );
+        let entry = Entry::of(&e);
+        assert_eq!(entry.how.as_deref(), Some("failed"));
+        let line: Value = serde_json::from_str(&entry.line()).unwrap();
+        let keys: Vec<&str> = line
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "t", "session", "project", "kind", "tool", "label", "file", "how", "added",
+                "removed"
+            ]
+        );
+        assert_eq!(Entry::parse(&entry.line()), Some(entry));
+    }
+
     #[test]
     fn no_fake_secret_reaches_the_file() {
         let dir = temp_dir("secrets").join("history");
@@ -474,6 +503,8 @@ pub(crate) mod tests {
                 e.project = format!("/p/{text}");
                 log.write(&Entry::of(&e));
                 log.write(&Entry::answer(&e, "you allowed", t));
+                e.kind = "PostToolUseFailure".into();
+                log.write(&Entry::of(&e));
             }
         }
         assert_eq!(log.note(), None);
