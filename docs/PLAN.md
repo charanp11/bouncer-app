@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5 — Character (5a, 5b, 5c merged; island window region in review; 5d next)**
+**Current phase: Phase 5d — Sound pack (5a, 5b, 5c and the island window region merged)**
 
 ## MVP scope
 
@@ -1446,7 +1446,7 @@ Phase 5b is done when:
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 130 Rust + 36 frontend; gitleaks clean)
 
-## Phase 5c — Island motion (current)
+## Phase 5c — Island motion
 
 Charan, 2026-10-04. Its own PR, all four stages, after 5b is merged.
 
@@ -1737,10 +1737,10 @@ Done when:
 - [x] A test that the region always holds the card's buttons
 - [x] Forced failure falls back to box-sized resizing (test + by hand)
 - [x] Arm still counts from fully visible; idle CPU unchanged by the region
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
-  (local green: 142 Rust + 42 frontend)
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local green: 142 Rust + 42 frontend; PR 13 CI green, merged 2026-10-05)
 
-## Phase 5d — Sound pack (after 5c)
+## Phase 5d — Sound pack (current)
 
 Charan, 2026-10-04. Its own PR, all four stages, after 5c is merged. 5b
 ships the first three sounds (needs you, risky, done) as they are.
@@ -1785,6 +1785,85 @@ ships the first three sounds (needs you, risky, done) as they are.
   started?), what "a tool failed" is in the hook data, the greeting sound
   vs the no-sound-at-launch rule (5b: the first view is quiet), and how
   volume and per-sound choices are stored (`preferences.json`).
+
+### Phase 5d audit (2026-10-06)
+
+Sources: this section, `sound.ts` (`cue`, `allowed`, `play`), `main.ts`
+(where `cue` runs, the greeting, `savePrefs`), `prefs.rs`, `hooks.rs` (the
+hook events we install), the 2.1.288 "denied in terminal" fixture, the
+prototype (Settings, Build spec).
+
+What exists (5b): three cues (needs you, risky, done) from two sine /
+triangle notes each; one master on / off in `preferences.json`; one sound
+at a time, a repeat within 2 s dropped, nothing while paused, the audio
+context suspended after each sound; the first view only records what's
+known (a reload stays quiet).
+
+Findings:
+
+1. **Order.** Design first: the listen-and-pick board goes into the
+   prototype (v0.13) with all 17 sounds × 3 styles, made the same way the
+   app will make them (oscillators, filtered noise, envelopes; no files, no
+   samples). Charan marks each one keep / change. Nothing goes into the app
+   until every sound is a keep.
+2. **One recipe per sound, three styles.** Each sound is written once as a
+   list of parts (tone or noise, timing, pitch contour); the style only
+   changes the timbre: Playful as written; Soft = sine, slower attack, low-
+   pass, quieter noise; Retro = 25% pulse / triangle, pitch stepped to
+   semitones at 30 steps/s, crunchy noise. So rhythm and contour can't drift
+   between styles.
+3. **Alarm parts stay harsh in every style.** Needs you and risky mark
+   their parts as alarms: in Soft they keep a triangle / sawtooth through a
+   low-pass instead of becoming sine, and risky stays the lowest sound in
+   the set. Both stay under 1 s.
+4. **"A tool failed" has no event yet.** Bouncer installs `SessionStart`,
+   `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+   `PermissionRequest`, `Notification`, `Stop`; Claude Code reports a failed
+   tool in `PostToolUseFailure`, which we don't install. Adding it changes
+   what's written into `~/.claude/settings.json` (an install change):
+   **Charan's call** after the picks. Until then the sad trombone is only
+   on the board.
+5. **Frequent events.** Auto-allowed fires on every tool call in auto mode:
+   off by default (as planned). Tool failed (if added) can be frequent too:
+   off by default. New session (once per session), allowed / denied / always
+   allow / poke / dizzy (Charan's own clicks), done (once per turn), paused /
+   resumed, auto on, history wiped (his own actions): on.
+6. **Launch vs the quiet first view.** The greeting runs on the first view
+   (`greetUntil`), which is the app's launch. Proposal: the "yo!" plays with
+   the greeting only; every other first-view sound stays quiet, as now.
+   A reload in dev replays it (prod has no reload).
+7. **Priority when two fire together:** risky, then needs you, then the
+   rest; only one plays. The 2-s repeat drop stays; "longest sound" becomes
+   the longest in the pack (checked by a test over the recipes, ≤ 1 s).
+8. **Paused:** the snore is the pause itself; after it nothing plays until
+   resumed (the "bip-bip" is the resume).
+9. **Storage:** `preferences.json` gains `volume` (0–100, default 50),
+   `style` (`playful` / `soft` / `retro`) and `sounds` (name → on / off,
+   known names only); `sound` stays the master switch. Unknown or
+   out-of-range values give the default, same checked atomic write.
+
+Threats:
+
+| Threat | Fix |
+| --- | --- |
+| A fun sound masks a risky alert | One sound at a time, risky > needs > rest; alarms harsh and low in every style |
+| Sound spam with many sessions | 2-s repeat drop; frequent events off by default; one at a time |
+| Loud surprise | Volume capped (100% = today's level ×2), default 50% |
+| Idle CPU / battery | Context suspended after each sound (unchanged) |
+| A tampered `preferences.json` | Known names and values only, volume clamped; never security policy |
+| Copying sounds | All synthesized from code written here; nothing sampled or copied |
+
+Done when:
+
+- [ ] Listen-and-pick board in the prototype: 17 sounds × 3 styles, each
+  playable, keep / change per cell; every sound a keep (Charan)
+- [ ] Charan's calls: `PostToolUseFailure` (tool failed), launch "yo!"
+- [ ] The app plays the picked pack: style, volume, per-sound on / off in
+  Settings, saved in `preferences.json`
+- [ ] Rules hold: one at a time, risky > needs > rest, 2-s repeat drop,
+  quiet while paused, frequent ones off by default, context suspended
+- [ ] Tests: recipes ≤ 1 s, priority, repeat drop, prefs parsing
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
 
 ## Phase 6 — Chat in the island (~1.5 weeks)
 
