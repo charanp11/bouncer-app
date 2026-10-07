@@ -335,9 +335,10 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     let mut anchor = island.anchor.lock().unwrap();
     let mut placed = island.placed.lock().unwrap();
     let hidden = island.hidden.load(Ordering::Relaxed);
-    // A visible window that isn't where we put it was dragged: that's the new spot.
-    if !hidden
-        && window.is_visible().unwrap_or(false)
+    // A visible window that isn't where we put it was dragged: that's the new
+    // spot. Checked even when this layout hides the island (closed with ×
+    // right after a drag), or the strip would go back to the old spot.
+    if window.is_visible().unwrap_or(false)
         && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
         && *placed != Some(pos)
     {
