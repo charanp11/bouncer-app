@@ -46,6 +46,10 @@ struct Island {
     moved: Mutex<mpsc::Sender<()>>,
     /// The settings screen is open (gear or tray); a card still comes first.
     settings: AtomicBool,
+    /// The island has the keyboard: taken on purpose (gear, tray), until
+    /// another window is clicked or Esc. The page can't tell by itself: in
+    /// WebView2 it always thinks it has focus.
+    focused: AtomicBool,
     /// Island size and sound, and where they're saved.
     prefs: Mutex<Prefs>,
     prefs_path: Option<PathBuf>,
@@ -114,8 +118,11 @@ fn main() {
             }
             // Clicking anywhere else gives the keyboard back for good: the
             // island can't be focused again until it's opened on purpose.
+            // (A focus-in is never trusted: Windows reports one at launch
+            // while another app is in front.)
             WindowEvent::Focused(false) => {
                 let _ = window.set_focusable(false);
+                keyboard_now(window.app_handle(), false);
             }
             _ => {}
         })
@@ -139,6 +146,7 @@ fn main() {
                 frame: Mutex::new(LogicalSize::new(320.0, 44.0)),
                 moved: Mutex::new(settle_after_moves(app.handle().clone())),
                 settings: AtomicBool::new(false),
+                focused: AtomicBool::new(false),
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
                 prefs_path,
             });
@@ -281,6 +289,7 @@ fn show(app: &AppHandle, mut view: Value) {
     view["hidden"] = hidden.into();
     view["rounded"] = ROUNDED.into();
     view["settings"] = settings.into();
+    view["keyboard"] = island.focused.load(Ordering::Relaxed).into();
     view["prefs"] = island.prefs.lock().unwrap().to_json();
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
@@ -515,6 +524,7 @@ fn take_keyboard(app: &AppHandle) {
             let _ = window.set_focusable(true);
             let _ = window.set_focus();
         }
+        keyboard_now(&handle, true);
     });
 }
 
@@ -530,6 +540,18 @@ fn keyboard(app: AppHandle, on: bool) {
                 let _ = window.set_focusable(false);
             }
         });
+        keyboard_now(&app, false);
+    }
+}
+
+/// Tells the page whether the island has the keyboard, so it shows focus
+/// (and the ring) only then.
+fn keyboard_now(app: &AppHandle, on: bool) {
+    let Some(island) = app.try_state::<Island>() else {
+        return;
+    };
+    if island.focused.swap(on, Ordering::Relaxed) != on {
+        show(app, island.desk.view());
     }
 }
 
