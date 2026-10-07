@@ -77,8 +77,9 @@ impl Entry {
                 String::new()
             },
             file,
-            // A failure keeps only that it failed, never its error.
-            how: (event.kind == "PostToolUseFailure").then(|| FAILED.into()),
+            // A failure keeps only that it failed, never its error (Esc
+            // isn't a failure).
+            how: event.is_failure().then(|| FAILED.into()),
             added: lines.map(|(a, _)| a as u64),
             removed: lines.and_then(|(_, r)| r).map(|r| r as u64),
         }
@@ -339,6 +340,7 @@ pub(crate) mod tests {
             tool: tool.map(str::to_owned),
             input: Some(input),
             time: UNIX_EPOCH + Duration::from_millis(t),
+            interrupted: false,
         }
     }
 

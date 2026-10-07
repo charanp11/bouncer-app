@@ -19,6 +19,9 @@ pub struct Event {
     pub input: Option<Value>,
     /// When Bouncer received it.
     pub time: SystemTime,
+    /// A `PostToolUseFailure` caused by the user stopping the call (Esc),
+    /// not by the tool failing.
+    pub interrupted: bool,
 }
 
 impl Event {
@@ -37,11 +40,17 @@ impl Event {
             },
             input: hook.get("tool_input").cloned(),
             time: SystemTime::now(),
+            interrupted: hook.get("is_interrupt") == Some(&Value::Bool(true)),
         })
     }
 
     pub fn is_permission_request(&self) -> bool {
         self.kind == "PermissionRequest"
+    }
+
+    /// A tool call that failed on its own (not stopped by the user).
+    pub fn is_failure(&self) -> bool {
+        self.kind == "PostToolUseFailure" && !self.interrupted
     }
 }
 
@@ -80,5 +89,24 @@ mod tests {
         let mut bad = ok.clone();
         bad["tool_name"] = json!(["Bash"]);
         assert!(Event::from_claude_code(&bad).is_none());
+    }
+
+    /// Only a real failure counts; Esc (`is_interrupt: true`) doesn't, and
+    /// anything but `true` is not an interrupt.
+    #[test]
+    fn a_failure_is_not_an_interrupt() {
+        let fail = |interrupt: Value| {
+            let mut hook = json!({"session_id": "s", "cwd": "/p", "hook_event_name": "PostToolUseFailure", "tool_name": "Bash"});
+            if !interrupt.is_null() {
+                hook["is_interrupt"] = interrupt;
+            }
+            Event::from_claude_code(&hook).unwrap().is_failure()
+        };
+        assert!(fail(json!(false)));
+        assert!(fail(Value::Null));
+        assert!(fail(json!("true")));
+        assert!(!fail(json!(true)));
+        let stop = json!({"session_id": "s", "cwd": "/p", "hook_event_name": "PostToolUse", "is_interrupt": false});
+        assert!(!Event::from_claude_code(&stop).unwrap().is_failure());
     }
 }
