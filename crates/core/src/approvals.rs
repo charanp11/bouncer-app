@@ -12,7 +12,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -32,6 +32,8 @@ pub const WAIT: Duration =
     Duration::from_secs(bouncer_relay::DECISION_BUDGET.as_secs().saturating_sub(10));
 /// Allow is refused this soon after a request is queued.
 pub const ARM: Duration = Duration::from_millis(600);
+/// While a card waits, how often its relay is checked for having hung up.
+const GONE_CHECK: Duration = Duration::from_millis(200);
 
 /// Status of a session whose request went to Claude Code's own prompt.
 const IN_TERMINAL: &str = "asks in terminal";
@@ -479,6 +481,14 @@ impl Desk {
     /// decides, the wait runs out, or Bouncer is paused. Only a decision
     /// returns `Some`.
     pub fn handle(&self, event: Event) -> Option<Decision> {
+        self.handle_until(event, &|| false)
+    }
+
+    /// As `handle`, and while the card waits, `gone` is asked every
+    /// `GONE_CHECK`: once the relay has hung up (Claude Code stopped the hook,
+    /// so it has its answer from its own prompt), the card leaves at once,
+    /// unanswered, as "answered in terminal".
+    pub fn handle_until(&self, event: Event, gone: &dyn Fn() -> bool) -> Option<Decision> {
         let (tx, rx) = mpsc::channel();
         let id = {
             let mut state = self.lock();
@@ -526,7 +536,27 @@ impl Desk {
         };
         self.publish();
         let id = id?;
-        let answer = rx.recv_timeout(self.wait).ok();
+        let deadline = Instant::now() + self.wait;
+        let answer = loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left.min(GONE_CHECK)) {
+                Ok(decision) => break Some(decision),
+                // Taken elsewhere (a stale card): already settled.
+                Err(RecvTimeoutError::Disconnected) => break None,
+                Err(RecvTimeoutError::Timeout) if left <= GONE_CHECK => break None,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+            if gone() {
+                if self
+                    .lock()
+                    .take(&id, "idle", "answered in terminal")
+                    .is_some()
+                {
+                    self.publish();
+                }
+                return None;
+            }
+        };
         if answer.is_none()
             && self
                 .lock()

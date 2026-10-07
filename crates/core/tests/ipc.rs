@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bouncer_core::event::Event;
 use bouncer_core::ipc::{Decision, Handler, Server};
 
 fn endpoint(name: &str) -> PathBuf {
@@ -17,7 +18,7 @@ fn endpoint(name: &str) -> PathBuf {
 fn start(name: &str, decision: Option<Decision>) -> PathBuf {
     let path = endpoint(name);
     let server = Server::bind(&path).unwrap();
-    let handler: Handler = Arc::new(move |_| decision);
+    let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision);
     std::thread::spawn(move || server.run(handler));
     path
 }

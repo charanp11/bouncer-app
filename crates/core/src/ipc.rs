@@ -24,12 +24,21 @@ pub enum Decision {
     Deny,
 }
 
-/// Called once per event, on its own thread. The return value is sent back
-/// only for permission requests; `None` leaves the decision to the terminal.
-pub type Handler = Arc<dyn Fn(Event) -> Option<Decision> + Send + Sync>;
+/// Called once per event, on its own thread, with a check that says whether
+/// the relay has hung up (non-blocking; asked while a card waits). The
+/// return value is sent back only for permission requests; `None` leaves the
+/// decision to the terminal.
+pub type Handler = Arc<dyn Fn(Event, &dyn Fn() -> bool) -> Option<Decision> + Send + Sync>;
+
+/// One relay connection.
+trait Conn: Read + Write {
+    /// The relay has hung up (its process ended or closed the connection).
+    /// Never blocks; any doubt counts as gone (the terminal then decides).
+    fn gone(&self) -> bool;
+}
 
 /// Reads one event, asks the handler, writes the answer if there is one.
-fn handle(mut stream: impl Read + Write, handler: &Handler) {
+fn handle(mut stream: impl Conn, handler: &Handler) {
     let mut line = Vec::new();
     if BufReader::new(&mut stream)
         .take(MAX_LINE)
@@ -45,7 +54,7 @@ fn handle(mut stream: impl Read + Write, handler: &Handler) {
         return;
     };
     let asks = event.is_permission_request();
-    let answer = match handler(event) {
+    let answer = match handler(event, &|| stream.gone()) {
         Some(_) if !asks => return,
         Some(Decision::Allow) => "allow\n",
         Some(Decision::Deny) => "deny\n",
@@ -70,6 +79,21 @@ mod unix {
     use bouncer_relay::unix::{peer_is_same_user, uid};
 
     pub struct Server(UnixListener);
+
+    impl Conn for UnixStream {
+        fn gone(&self) -> bool {
+            if self.set_nonblocking(true).is_err() {
+                return true;
+            }
+            let peeked = self.peek(&mut [0u8; 1]);
+            let _ = self.set_nonblocking(false);
+            match peeked {
+                Ok(0) => true,
+                Ok(_) => false,
+                Err(e) => e.kind() != io::ErrorKind::WouldBlock,
+            }
+        }
+    }
 
     impl Server {
         /// Creates the private folder if needed and listens. Fails if the folder
@@ -131,6 +155,7 @@ mod win {
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
         PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+        PeekNamedPipe,
     };
 
     pub struct Server {
@@ -173,6 +198,26 @@ mod win {
                     }
                 });
             }
+        }
+    }
+
+    impl Conn for &File {
+        fn gone(&self) -> bool {
+            let mut available = 0;
+            // SAFETY: our own connected pipe handle; no buffer is read (size
+            // 0), the only out-pointer is `available`. Fails once the client
+            // has closed its end (ERROR_BROKEN_PIPE / not connected).
+            let ok = unsafe {
+                PeekNamedPipe(
+                    self.as_raw_handle(),
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    &mut available,
+                    std::ptr::null_mut(),
+                )
+            };
+            ok == 0
         }
     }
 
@@ -248,8 +293,14 @@ mod tests {
         }
     }
 
+    impl Conn for &mut Fake {
+        fn gone(&self) -> bool {
+            false
+        }
+    }
+
     fn reply(input: &str, decision: Option<Decision>) -> String {
-        let handler: Handler = Arc::new(move |_| decision);
+        let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision);
         let mut fake = Fake(Cursor::new(input.as_bytes().to_vec()), Vec::new());
         handle(&mut fake, &handler);
         String::from_utf8(fake.1).unwrap()
