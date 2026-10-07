@@ -1052,7 +1052,7 @@ function draw(view: View) {
   tune({ on: prefs.sound, style: prefs.style, volume: prefs.volume, sounds: prefs.sounds, paused: view.paused });
   const sound = cue(heard, view, ended);
   heard = sound.heard;
-  if (sound.cue && (sound.cue !== "launch" || greeting(view, now, greetUntil, REDUCED.matches))) play(sound.cue);
+  if (sound.cue) play(sound.cue);
   if (sound.cue) announce(sound.cue, view);
   const done = now < doneUntil;
   if (done) later(doneUntil - now);
