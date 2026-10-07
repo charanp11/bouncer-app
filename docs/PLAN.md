@@ -1998,6 +1998,41 @@ Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
   then a re-render → nothing focused, no ring; Close focused with no
   re-render → no ring; with the keyboard (class set by hand) → yellow
   ring. Needs Charan: gear / tray → keyboard → ring, then click away.
+- Found (Charan, 2026-10-07, second round): (1) a white area beside the
+  island's top; (2) with no sessions the idle pill couldn't open the island,
+  so Settings was unreachable; (3) the ring on the pill was cut off; and
+  asked for every keyboard / focus path checked. Fixed: the pill always
+  opens the island ("No sessions yet" and the gear); the ring is drawn
+  inside each control's edge (`outline-offset: -2px`), so no edge can cut
+  it; a keyboard change only tells the page (no window re-layout). Found by
+  the matrix and fixed: Tab skipped the volume and "Which sounds" and could
+  land on switches hidden in the closed list; opening a session's detail by
+  keyboard left focus nowhere; when the keyboard arrives, focus goes to the
+  first control (Deny with a card up).
+- (1) is **not reproduced**: on a test instance over a black backdrop, the
+  pre-fix build and the fixed build both open Settings by a real gear click
+  with no white anywhere, at Medium and at Small; the page paints nothing
+  outside the island. Waiting on Charan for when exactly it shows.
+
+Keyboard / focus matrix (2026-10-07, test instance beside Charan's dev app,
+keys sent to the page over the debug port, real clicks only on the test
+window and a black backdrop; screenshots per state):
+
+| State | Tab / Shift+Tab, stays in | Ring whole | Enter / Space | Esc | Click away | Focus lands |
+| --- | --- | --- | --- | --- | --- | --- |
+| No sessions | pass (gear ↔ ×) | pass | pass: pill opens; gear → Settings; × closes | pass | — | gear |
+| Idle pill | n/a (not a stop) | n/a | pass: click opens the list | n/a | — | n/a |
+| Session list | pass (rows, gear, ×) | pass | pass: row → detail | pass | — | first row |
+| Session detail | pass | pass | pass: × → list | pass | — | × (fixed) |
+| Settings | pass (28 stops) | pass, on screen too | pass: switches, style, list, volume | pass | pass (real click) | Small (real gear click) |
+| Auto-allow confirm | pass | pass | pass: Enter never turns on; Esc closes it only | n/a | — | Cancel |
+| Normal card | pass | pass | pass: Enter on Allow never approves; Deny denies | pass (card stays) | — | Deny |
+| Risky card | pass | pass | pass: no Always allow, Deny filled | pass | — | Deny |
+| Two cards | pass | pass | pass: next card's Deny | pass | — | Deny |
+| Away summary | pass | pass | — | pass | — | first row |
+| Paused | by hand (tray only) | | | | | |
+| Open from the tray | by hand (two Bouncer icons in the tray) | | | | | |
+
 - [ ] Settings by keyboard and with a screen reader
 - [x] Launch with reduced motion: Charan, 2026-10-06: the "yo!" plays
   anyway (whenever Sound is on); changed
