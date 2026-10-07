@@ -85,7 +85,10 @@ mod unix {
             if self.set_nonblocking(true).is_err() {
                 return true;
             }
-            let peeked = self.peek(&mut [0u8; 1]);
+            // A non-blocking 1-byte read (`peek` isn't stable): the relay
+            // sends nothing after its request line (it only reads the answer,
+            // no half-close), so a read only ever sees EOF once it's gone.
+            let peeked = Read::read(&mut &*self, &mut [0u8; 1]);
             let _ = self.set_nonblocking(false);
             match peeked {
                 Ok(0) => true,
