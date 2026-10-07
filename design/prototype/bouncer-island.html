@@ -369,8 +369,6 @@ h2.sec { font-family: var(--display); font-weight: 600; font-size: 22px; margin:
 .sb-name span { color: var(--muted); font-size: 12.5px; }
 .sb-name .sb-tag { display: inline-block; font: 600 10.5px var(--ui); border-radius: 999px; padding: 0 7px; margin: 3px 4px 0 0; color: var(--island); background: var(--wait); }
 .sb-name .sb-tag.on { background: var(--ok); }
-.sb-name .sb-pick { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; }
-.sb-name .sb-pick input { accent-color: var(--sun); margin: 0; }
 .sb-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .sb-cell .chip { font-size: 12px; padding: 3px 9px; }
 .sb-cell .sb-play { font-family: var(--mono); min-width: 70px; }
@@ -398,7 +396,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.14 · Oct 6 2026</div>
+    <div class="meta">design/prototype · v0.15 · Oct 6 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -454,7 +452,7 @@ a.chip { text-decoration: none; }
 
   <h2 class="sec" id="sounds">Sound pack</h2>
   <section class="board" aria-label="Sound pack: listen and pick">
-    <p class="lede">Phase 5d. Bouncer is a club bouncer: each sound is a little joke that still says what happened. All 17 are made in code (oscillators and filtered noise, no files), each under 1&nbsp;s. One recipe per sound; the style changes only the timbre: <b>Soft</b> (the default) rounder and 3&nbsp;dB quieter, <b>Playful</b> as written. Needs you and risky (orange tag) keep their buzz in Soft, losing only the harsh top, and play 5&nbsp;dB above the other Soft sounds: less harsh, never easy to miss. Green tags are on by default; the rest start off and can be turned on one by one in Settings. History wiped has three options (A, B, C): pick one with “Use this one”. Press &#9654; to hear one, mark it Keep or Change (and say what to change); picks stay in this browser until you copy them.</p>
+    <p class="lede">Phase 5d. Bouncer is a club bouncer: each sound is a little joke that still says what happened. All 17 are made in code (oscillators and filtered noise, no files), each under 1&nbsp;s. One recipe per sound; the style changes only the timbre: <b>Soft</b> (the default) rounder and 3&nbsp;dB quieter, <b>Playful</b> as written. Needs you and risky (orange tag) keep their buzz in Soft, losing only the harsh top, and play 5&nbsp;dB above the other Soft sounds: less harsh, never easy to miss. Green tags are on by default; the rest start off and can be turned on one by one in Settings. Picked by Charan on 2026-10-06: every sound a keep in both styles, the broom “swish” for History wiped. The app plays exactly these (src/pack.ts). Press &#9654; to hear one, mark it Keep or Change (and say what to change); picks stay in this browser until you copy them.</p>
     <div class="sb-tools">
       <label>Volume <input type="range" id="sb-vol" min="0" max="100" value="50"></label>
       <button class="chip" id="sb-copy">Copy my picks</button>
@@ -834,10 +832,9 @@ function settings(confirming) {
   const vol = el("input", "vol"); vol.type = "range"; vol.min = "0"; vol.max = "100"; vol.value = "50"; vol.setAttribute("aria-label", "Volume");
   const pct = el("span", "", "50%"); vol.addEventListener("input", () => { pct.textContent = vol.value + "%"; });
   list.append(setRow("Volume", [vol, pct], null));
-  // Which sounds: one switch each; the picked wipe sound is "History wiped".
+  // Which sounds: one switch each.
   const which = el("details", "which"), sum = el("summary"), sl = el("div", "soundlist");
-  const rows = SOUNDS.filter(([, , , , f = {}]) => !f.wipe).map(([, name, , , f = {}]) => [name, !!f.on]);
-  rows.push(["History wiped", false]);
+  const rows = SOUNDS.map(([, name, , , f = {}]) => [name, !!f.on]);
   const count = () => { sum.textContent = `Which sounds \u00b7 ${sl.querySelectorAll('[aria-checked="true"]').length} of ${rows.length} on`; };
   for (const [name, on] of rows) {
     const r = el("div"); r.append(el("span", "", name));
@@ -1090,9 +1087,8 @@ for (const [st, name, what] of CAST) {
 // A sound is a list of parts, written once. T: a tone, N: filtered noise;
 // times in seconds. f: pitch points (Hz) spread evenly over the part;
 // fl: [filter type, from Hz, to Hz, Q]; vib: [rate Hz, depth cents], fade:
-// the vibrato dies away; trem: [rate Hz, depth 0-1] (a flutter in the
-// level); hold: sustains, then releases (else it rings out); alarm: grabs
-// attention in every style. The style only changes the timbre (voice()),
+// the vibrato dies away; hold: sustains, then releases (else it rings out);
+// alarm: grabs attention in every style. The style only changes the timbre (voice()),
 // never timing or pitch contour.
 const T = (t, d, f, o = {}) => ({ k: "T", t, d, f: [].concat(f), w: "triangle", v: 1, ...o });
 const N = (t, d, o = {}) => ({ k: "N", t, d, v: 1, ...o });
@@ -1147,18 +1143,10 @@ const SOUNDS = [
     N(0, .07, { fl: ["highpass", 3500, 3500, .7], v: .6 }), N(.05, .05, { fl: ["bandpass", 2500, 2500, 2], v: .5 }),
     ...[2093, 2637.02, 3135.96].map((f) => T(.13, .55, f, { w: "sine", v: .3 })),
     N(.13, .2, { fl: ["highpass", 7000, 7000, .7], v: .2 })]],
-  // History wiped: three options, Charan picks one (each under 0.6 s).
-  ["wipeA", "History wiped · A", "paper shredder “brrrt”", [
-    T(0, .44, [78, 74, 58], { w: "sawtooth", fl: ["lowpass", 900, 600, 1], v: 1.1, hold: 1, trem: [26, .7] }),
-    N(0, .44, { fl: ["bandpass", 2200, 1500, 1.2], v: .7, hold: 1, trem: [26, .9] }),
-    N(.46, .05, { fl: ["highpass", 2500, 2500, .7], v: .3 })], { wipe: 1 }],
-  ["wipeB", "History wiped · B", "eraser squeak + soft “poof”", [
-    T(0, .1, [1800, 2300, 1900], { w: "sine", v: .45, vib: [32, 45], hold: 1 }),
-    T(.13, .1, [1900, 2400, 1800], { w: "sine", v: .45, vib: [32, 45], hold: 1 }),
-    N(.28, .26, { fl: ["lowpass", 1400, 300, .7], v: 1.2, a: .03 })], { wipe: 1 }],
-  ["wipeC", "History wiped · C", "quick broom “swish”", [
+  // History wiped: option C, picked by Charan (2026-10-06) over a shredder and an eraser.
+  ["wiped", "History wiped", "quick broom “swish”", [
     N(0, .2, { fl: ["bandpass", 900, 3000, 1.6], v: 1, a: .08 }),
-    N(.23, .25, { fl: ["bandpass", 1300, 3600, 1.6], v: 1.1, a: .09 })], { wipe: 1 }],
+    N(.23, .25, { fl: ["bandpass", 1300, 3600, 1.6], v: 1.1, a: .09 })]],
 ];
 const STYLES = [["soft", "Soft"], ["playful", "Playful"]];
 
@@ -1182,7 +1170,6 @@ function voice(p, style) {
   if (p.k === "N") q.fl = [p.fl[0], p.fl[1] * .6, p.fl[2] * .6, Math.min(p.fl[3], 1)];
   else { q.w = "sine"; q.fl = null; }
   if (p.vib) q.vib = [p.vib[0], p.vib[1] * (p.fade ? 1 : .5)];
-  if (p.trem) q.trem = [p.trem[0], p.trem[1] * .6];
   return q;
 }
 
@@ -1241,12 +1228,6 @@ function render(c, dest, parts, style, t0) {
       glide(f.frequency, [p.fl[1], p.fl[2]], s, p.d);
       out = out.connect(f);
     }
-    if (p.trem) { // the level flutters between 1 - depth and 1
-      const t = c.createGain();
-      t.gain.value = 1 - p.trem[1] / 2;
-      lfo(c, t.gain, p.trem[0], p.trem[1] / 2, s, e);
-      out = out.connect(t);
-    }
     out.connect(g).connect(dest);
     src.start(s); src.stop(e + .02);
     end = Math.max(end, e);
@@ -1294,17 +1275,14 @@ function playSound(id, style, btn) {
   } catch { /* no audio device */ }
 }
 
-// Picks: keep / change per sound per style, a note per sound, and which
-// wipe sound. Kept in this browser only, copied out as plain text.
+// Picks: keep / change per sound per style, and a note per sound. Kept in this browser only, copied out as plain text.
 const PICKS_KEY = "bouncer-sound-picks";
 let picks = {};
 try { picks = JSON.parse(localStorage.getItem(PICKS_KEY)) || {}; } catch { picks = {}; }
 function countPicks() {
   const marks = SOUNDS.flatMap(([id]) => STYLES.map(([s]) => picks[`${id}.${s}`])).filter(Boolean);
   const change = marks.filter((v) => v === "change").length;
-  const wipe = SOUNDS.find(([id]) => id === picks.wipe);
-  document.getElementById("sb-count").textContent =
-    `${marks.length} of ${SOUNDS.length * STYLES.length} picked · ${change} to change · wipe: ${wipe ? wipe[1].slice(-1) : "not picked"}`;
+  document.getElementById("sb-count").textContent = `${marks.length} of ${SOUNDS.length * STYLES.length} picked · ${change} to change`;
 }
 function savePicks() {
   try { localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); } catch { /* private window: picks last this visit */ }
@@ -1331,13 +1309,6 @@ for (const [id, name, what, , flags = {}] of SOUNDS) {
   n.append(el("b", "", name), el("span", "", what), el("br"));
   if (flags.alarm) n.append(el("span", "sb-tag", "alarm: grabs attention"));
   if (flags.on) n.append(el("span", "sb-tag on", "on by default"));
-  if (flags.wipe) {
-    const pick = el("label", "sb-pick"), radio = el("input");
-    radio.type = "radio"; radio.name = "sb-wipe"; radio.checked = picks.wipe === id;
-    radio.addEventListener("change", () => { picks.wipe = id; savePicks(); });
-    pick.append(radio, document.createTextNode(" Use this one"));
-    n.append(pick);
-  }
   row.append(n);
   for (const [style, sname] of STYLES) {
     const key = `${id}.${style}`, cell = el("div", "sb-cell");
@@ -1375,8 +1346,6 @@ document.getElementById("sb-copy").addEventListener("click", () => {
     const note = (picks[id + ".note"] || "").trim();
     return `${name}: ${each}${note ? ` — ${note}` : ""}`;
   });
-  const wipe = SOUNDS.find(([id]) => id === picks.wipe);
-  lines.push(`History wiped, use: ${wipe ? `${wipe[1].slice(-1)} (${wipe[2]})` : "not picked"}`);
   const out = document.getElementById("sb-out");
   out.hidden = false;
   out.value = lines.join("\n");
