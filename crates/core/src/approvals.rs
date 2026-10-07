@@ -34,6 +34,16 @@ pub const WAIT: Duration =
 pub const ARM: Duration = Duration::from_millis(600);
 /// While a card waits, how often its relay is checked for having hung up.
 const GONE_CHECK: Duration = Duration::from_millis(200);
+/// A request answered in Claude Code's own prompt, before Bouncer knows
+/// more (it can't tell a No from a Yes; the word "denied" is never used).
+const ANSWERED: &str = "answered in terminal";
+/// ...and then its tool ran (its PostToolUse, same tool and input, came).
+const ALLOWED_IN_TERMINAL: &str = "allowed in terminal";
+/// ...and nothing ran for it within `NOT_RUN_AFTER` (or the turn moved on).
+const NOT_RUN: &str = "not run (answered in terminal)";
+const NOT_RUN_AFTER: Duration = Duration::from_secs(5);
+/// What a session waiting for its user after `NOT_RUN` shows.
+const WAITING_STEP: &str = "Waiting for you";
 
 /// Status of a session whose request went to Claude Code's own prompt.
 const IN_TERMINAL: &str = "asks in terminal";
@@ -76,6 +86,17 @@ struct Session {
     lines: Option<(usize, Option<usize>)>,
     /// Tool calls that failed so far (for the "tool failed" sound).
     failed: u64,
+    /// A request answered in Claude Code's own prompt that isn't settled
+    /// yet: whether its tool runs (a long one only reports when it ends).
+    terminal: Option<Terminal>,
+}
+
+struct Terminal {
+    event: Event,
+    since: SystemTime,
+    /// Already shown as `NOT_RUN` (its PostToolUse can still turn it into
+    /// `ALLOWED_IN_TERMINAL` until the next prompt).
+    not_run: bool,
 }
 
 struct Pending {
@@ -149,6 +170,7 @@ impl State {
                     code: None,
                     lines: None,
                     failed: 0,
+                    terminal: None,
                 });
                 self.sessions.len() - 1
             }
@@ -158,6 +180,7 @@ impl State {
 
     fn track(&mut self, event: &Event) {
         let paused = self.paused;
+        self.settle_terminal(event);
         if event.kind == "SessionEnd" {
             self.sessions.retain(|s| s.id != event.session);
             return;
@@ -216,6 +239,7 @@ impl State {
     /// Drops sessions quiet for longer than their limit, except any with a
     /// card in the queue. True if any went.
     fn expire(&mut self, now: SystemTime) -> bool {
+        let settled = self.not_run_yet(now);
         let before = self.sessions.len();
         let queue = &self.queue;
         self.sessions.retain(|s| {
@@ -226,7 +250,7 @@ impl State {
             let quiet = now.duration_since(s.last).unwrap_or_default();
             quiet < limit || queue.iter().any(|p| p.event.session == s.id)
         });
-        self.sessions.len() != before
+        settled || self.sessions.len() != before
     }
 
     /// Removes a request from the queue, gives its session `status`, and notes
@@ -246,6 +270,91 @@ impl State {
             }
         }
         Some(pending)
+    }
+
+    /// A request whose card left because Claude Code answered it in its own
+    /// prompt (the relay hung up): "answered in terminal" until its tool
+    /// runs or `NOT_RUN_AFTER` passes.
+    fn answered_in_terminal(&mut self, id: &str) -> bool {
+        let Some(pending) = self.take(id, "working", ANSWERED) else {
+            return false;
+        };
+        if let Some(s) = self
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == pending.event.session)
+        {
+            s.terminal = Some(Terminal {
+                event: pending.event,
+                since: SystemTime::now(),
+                not_run: false,
+            });
+        }
+        true
+    }
+
+    /// What this event says about a request answered in the terminal: its
+    /// tool ran (PostToolUse, same tool and input) → allowed; the turn moved
+    /// on (a new prompt, Stop, the session's end) → not run.
+    fn settle_terminal(&mut self, event: &Event) {
+        let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) else {
+            return;
+        };
+        let Some(t) = s.terminal.as_ref() else {
+            return;
+        };
+        let how = match event.kind.as_str() {
+            "PostToolUse" | "PostToolUseFailure"
+                if t.event.tool == event.tool && t.event.input == event.input =>
+            {
+                ALLOWED_IN_TERMINAL
+            }
+            "UserPromptSubmit" | "Stop" | "SessionEnd" if !t.not_run => NOT_RUN,
+            "UserPromptSubmit" | "Stop" | "SessionEnd" => {
+                s.terminal = None;
+                return;
+            }
+            _ => return,
+        };
+        let label = step(&t.event);
+        if let Some(entry) = s.history.iter_mut().rev().find(|(l, _)| *l == label) {
+            entry.1 = how;
+        }
+        if how == ALLOWED_IN_TERMINAL && t.not_run {
+            s.step = label;
+        }
+        let event = s.terminal.take().map(|t| t.event);
+        if let Some(e) = event {
+            self.answered(&e, how);
+        }
+    }
+
+    /// Requests answered in the terminal with nothing run for them after
+    /// `NOT_RUN_AFTER`: not run, and the session is waiting for its user,
+    /// not "Running". True if any changed.
+    fn not_run_yet(&mut self, now: SystemTime) -> bool {
+        let mut gone = Vec::new();
+        for s in &mut self.sessions {
+            let Some(t) = s.terminal.as_mut() else {
+                continue;
+            };
+            if t.not_run || now.duration_since(t.since).unwrap_or_default() < NOT_RUN_AFTER {
+                continue;
+            }
+            t.not_run = true;
+            let label = step(&t.event);
+            if let Some(entry) = s.history.iter_mut().rev().find(|(l, _)| *l == label) {
+                entry.1 = NOT_RUN;
+            }
+            s.status = "idle";
+            s.step = WAITING_STEP.into();
+            s.lines = None;
+            gone.push(t.event.clone());
+        }
+        for e in &gone {
+            self.answered(e, NOT_RUN);
+        }
+        !gone.is_empty()
     }
 
     /// A request answered in Claude Code's own prompt while its card is still
@@ -274,8 +383,12 @@ impl State {
             .iter()
             .find(|s| s.id == event.session)
             .map_or("idle", |s| s.status);
+        let how = match event.kind.as_str() {
+            "PostToolUse" | "PostToolUseFailure" => ALLOWED_IN_TERMINAL,
+            _ => NOT_RUN,
+        };
         for id in stale {
-            self.take(&id, status, "answered in terminal");
+            self.take(&id, status, how);
         }
     }
 
@@ -547,11 +660,7 @@ impl Desk {
                 Err(RecvTimeoutError::Timeout) => {}
             }
             if gone() {
-                if self
-                    .lock()
-                    .take(&id, "idle", "answered in terminal")
-                    .is_some()
-                {
+                if self.lock().answered_in_terminal(&id) {
                     self.publish();
                 }
                 return None;
@@ -1044,8 +1153,8 @@ mod tests {
 
     /// Answered Yes in Claude Code's own prompt while the card is still up:
     /// the tool's PostToolUse means the card is stale. It leaves the island at
-    /// once (no answer is sent: Claude Code already has one), and the session
-    /// is working, not "asks in terminal".
+    /// once (no answer is sent: Claude Code already has one), the step reads
+    /// "allowed in terminal" (the tool ran), and the session is working.
     #[test]
     fn answering_in_the_terminal_while_the_card_is_up_clears_it() {
         let desk = desk(Duration::from_millis(400));
@@ -1057,7 +1166,7 @@ mod tests {
         let view = desk.view();
         let s = &view["sessions"][0];
         assert_eq!(s["status"], "working");
-        assert_eq!(s["history"][0]["how"], "answered in terminal");
+        assert_eq!(s["history"][0]["how"], ALLOWED_IN_TERMINAL);
     }
 
     /// A failed tool call (recorded: 2.1.291 `PostToolUseFailure`): its step
@@ -1148,6 +1257,155 @@ mod tests {
         assert_eq!(s["history"][0]["how"], "asked in terminal");
         let last = s["last_ms"].as_u64().unwrap();
         assert!(last >= before && last <= epoch_ms(SystemTime::now()));
+    }
+
+    /// Events recorded from a real session.
+    fn recorded(jsonl: &str) -> Vec<Event> {
+        jsonl
+            .lines()
+            .map(|line| Event::from_claude_code(&serde_json::from_str(line).unwrap()).unwrap())
+            .collect()
+    }
+
+    /// A permission request whose relay hangs up once its card is up, as when
+    /// Claude Code's own prompt is answered (Claude Code stops the hook).
+    fn hang_up(desk: &Arc<Desk>, request: Event) {
+        let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (d, g) = (desk.clone(), gone.clone());
+        let waiting = std::thread::spawn(move || {
+            d.handle_until(request, &|| g.load(std::sync::atomic::Ordering::Relaxed))
+        });
+        let before = desk.view()["queue"].as_array().map_or(0, Vec::len);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while desk.view()["queue"].as_array().map_or(0, Vec::len) == before {
+            assert!(Instant::now() < deadline, "request never queued");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        gone.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(waiting.join().unwrap(), None, "nothing is answered");
+    }
+
+    fn replay(desk: &Arc<Desk>, events: Vec<Event>) {
+        for e in events {
+            if e.is_permission_request() {
+                hang_up(desk, e);
+            } else {
+                assert_eq!(desk.handle(e), None);
+            }
+        }
+    }
+
+    /// Recorded (2.1.293): No in Claude Code's own prompt with the card up.
+    /// The relay hangs up at once and nothing more comes for that tool (not
+    /// even Stop): "answered in terminal", then after 5 s "not run" and the
+    /// session waits for its user instead of showing "Running".
+    #[test]
+    fn a_no_in_the_terminal_with_the_card_up() {
+        let desk = desk(WAIT);
+        let events = recorded(include_str!(
+            "../tests/fixtures/claude-code-2.1.293-no-in-terminal.jsonl"
+        ));
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PermissionRequest",
+                "Notification"
+            ]
+        );
+        replay(&desk, events);
+        let view = desk.view();
+        assert_eq!(view["queue"], json!([]));
+        assert_eq!(view["sessions"][0]["history"][0]["how"], ANSWERED);
+        desk.lock()
+            .expire(SystemTime::now() + NOT_RUN_AFTER + Duration::from_secs(1));
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["history"][0]["how"], NOT_RUN);
+        assert_eq!(s["status"], "idle");
+        assert_eq!(s["step"], WAITING_STEP);
+    }
+
+    /// Recorded (2.1.293): Yes in Claude Code's own prompt with the card up.
+    /// The relay hangs up, then the tool's PostToolUse comes: "allowed in
+    /// terminal", the session works on, and Stop makes it idle.
+    #[test]
+    fn a_yes_in_the_terminal_with_the_card_up() {
+        let desk = desk(WAIT);
+        let mut events = recorded(include_str!(
+            "../tests/fixtures/claude-code-2.1.293-yes-in-terminal.jsonl"
+        ));
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            [
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PermissionRequest",
+                "PostToolUse",
+                "Stop",
+                "Notification"
+            ]
+        );
+        let after = events.split_off(3);
+        replay(&desk, events);
+        assert_eq!(desk.view()["sessions"][0]["history"][0]["how"], ANSWERED);
+        let mut after = after.into_iter();
+        assert_eq!(desk.handle(after.next().unwrap()), None); // PostToolUse
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["history"][0]["how"], ALLOWED_IN_TERMINAL);
+        assert_eq!(s["status"], "working");
+        for e in after {
+            assert_eq!(desk.handle(e), None);
+        }
+        desk.lock()
+            .expire(SystemTime::now() + NOT_RUN_AFTER + Duration::from_secs(1));
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(
+            s["history"][0]["how"], ALLOWED_IN_TERMINAL,
+            "settled: 5 s change nothing"
+        );
+        assert_eq!(s["status"], "idle");
+    }
+
+    /// A long command allowed in the terminal only reports when it ends: shown
+    /// "not run" after 5 s, it becomes "allowed in terminal" when its
+    /// PostToolUse comes, and the session works again.
+    #[test]
+    fn a_long_command_allowed_in_the_terminal_turns_allowed_late() {
+        let desk = desk(WAIT);
+        assert_eq!(desk.handle(event("a", "PreToolUse", "cargo build")), None);
+        hang_up(&desk, event("a", "PermissionRequest", "cargo build"));
+        desk.lock()
+            .expire(SystemTime::now() + NOT_RUN_AFTER + Duration::from_secs(1));
+        assert_eq!(desk.view()["sessions"][0]["history"][0]["how"], NOT_RUN);
+        assert_eq!(desk.handle(event("a", "PostToolUse", "cargo build")), None);
+        let view = desk.view();
+        let s = &view["sessions"][0];
+        assert_eq!(s["history"][0]["how"], ALLOWED_IN_TERMINAL);
+        assert_eq!(s["status"], "working");
+        assert_eq!(s["step"], "Running cargo build");
+    }
+
+    /// Two cards queued: answering one in the terminal (its relay hangs up)
+    /// removes only that one.
+    #[test]
+    fn a_hang_up_removes_only_its_own_card() {
+        let desk = desk(WAIT);
+        let other = ask(&desk, "a", "mkdir one");
+        queued(&desk, 1);
+        hang_up(&desk, event("b", "PermissionRequest", "mkdir two"));
+        let view = desk.view();
+        let queue = view["queue"].as_array().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0]["text"], "mkdir one");
+        let id = queue[0]["id"].as_str().unwrap().to_owned();
+        desk.decide(&id, false).unwrap();
+        assert_eq!(other.join().unwrap(), Some(Decision::Deny));
     }
 
     #[test]

@@ -359,7 +359,8 @@ fn a_relay_that_goes_away_takes_its_card_with_it() {
     let view = desk.view();
     let session = &view["sessions"][0];
     assert_eq!(session["history"][0]["how"], "answered in terminal");
-    assert_eq!(session["status"], "idle");
+    // Until its tool runs (or 5 s pass), the session may still be working.
+    assert_eq!(session["status"], "working");
 }
 
 #[test]
