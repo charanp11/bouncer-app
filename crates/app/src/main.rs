@@ -275,7 +275,24 @@ fn greyed(rgba: &[u8]) -> Vec<u8> {
 /// Sends the view to the page and sizes the window to match: hidden with
 /// nothing to show, a pill while sessions run, open with a request or when
 /// the user opened it.
-fn show(app: &AppHandle, mut view: Value) {
+fn show(app: &AppHandle, view: Value) {
+    send(app, view);
+    // Window work happens on the main thread only: this runs on relay
+    // connection threads too, and window calls from them wait for the main
+    // thread, which could be waiting on our locks (deadlock).
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = handle.get_webview_window("main") else {
+            return;
+        };
+        lay_out(&window, &handle.state::<Island>());
+        // The window is not focusable, so showing it never takes the keyboard.
+        let _ = window.show();
+    });
+}
+
+/// Sends the page the view with the island's own state added; no window work.
+fn send(app: &AppHandle, mut view: Value) {
     let island = app.state::<Island>();
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
     let away = !view["away"].is_null();
@@ -294,18 +311,6 @@ fn show(app: &AppHandle, mut view: Value) {
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
     }
-    // Window work happens on the main thread only: this runs on relay
-    // connection threads too, and window calls from them wait for the main
-    // thread, which could be waiting on our locks (deadlock).
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(window) = handle.get_webview_window("main") else {
-            return;
-        };
-        lay_out(&window, &handle.state::<Island>());
-        // The window is not focusable, so showing it never takes the keyboard.
-        let _ = window.show();
-    });
 }
 
 /// Sizes the window to what the page asked for and places it: hanging from
@@ -545,13 +550,15 @@ fn keyboard(app: AppHandle, on: bool) {
 }
 
 /// Tells the page whether the island has the keyboard, so it shows focus
-/// (and the ring) only then.
+/// (and the ring) only then. Only the page hears it: the window isn't laid
+/// out or shown again (doing that while it was active painted a white band
+/// beside the island's top corners).
 fn keyboard_now(app: &AppHandle, on: bool) {
     let Some(island) = app.try_state::<Island>() else {
         return;
     };
     if island.focused.swap(on, Ordering::Relaxed) != on {
-        show(app, island.desk.view());
+        send(app, island.desk.view());
     }
 }
 
