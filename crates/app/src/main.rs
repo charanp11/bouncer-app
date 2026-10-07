@@ -297,10 +297,16 @@ fn send(app: &AppHandle, mut view: Value) {
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
     let away = !view["away"].is_null();
     let settings = island.settings.load(Ordering::Relaxed);
-    let open = has("queue")
-        || settings
-        || ((has("sessions") || away) && island.expanded.load(Ordering::Relaxed));
-    let hidden = !has("queue") && !has("sessions") && !away && !settings && view["paused"] != true;
+    // Opened on purpose (the pill) it stays open with no sessions too, so
+    // Settings is always reachable.
+    let expanded = island.expanded.load(Ordering::Relaxed);
+    let open = has("queue") || settings || expanded;
+    let hidden = !has("queue")
+        && !has("sessions")
+        && !away
+        && !settings
+        && !expanded
+        && view["paused"] != true;
     island.hidden.store(hidden, Ordering::Relaxed);
     view["open"] = open.into();
     view["hidden"] = hidden.into();

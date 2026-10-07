@@ -1151,12 +1151,13 @@ function draw(view: View) {
     setShape("open");
     const body = el("div", "body");
     body.dataset.screen = "sessions";
-    body.append(...rulesNotes(view), sessionRows(view.sessions));
+    body.append(...rulesNotes(view), view.sessions.length ? sessionRows(view.sessions) : el("p", "none", "No sessions yet"));
     const close = () => {
       detail = null;
       invoke("expand", { open: false });
     };
-    island.replaceChildren(head(mood(view, done), "Bouncer", `· ${plural(view.sessions.length, "session")}`, close, [gearButton()]), body);
+    const sub = view.sessions.length ? `· ${plural(view.sessions.length, "session")}` : "";
+    island.replaceChildren(head(mood(view, done), "Bouncer", sub, close, [gearButton()]), body);
     later(CLOCK_MS);
     return;
   }
@@ -1190,7 +1191,8 @@ function draw(view: View) {
     return;
   }
   const n = view.sessions.length;
-  island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", n > 0, badge));
+  // Always opens the island, so the gear (Settings) is reachable with no sessions too.
+  island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", true, badge));
 }
 
 // Enter never approves: not Allow, Allow edit, "Add rule and allow", "Turn
