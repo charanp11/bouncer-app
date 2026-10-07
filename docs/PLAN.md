@@ -2044,6 +2044,42 @@ Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
   spot. (c) not reproduced on the current build with Charan's steps (gear,
   sounds list open, Tab, click away, click back): no bright pixel beside
   the island's top in any capture.
+- Found (Charan, fourth round): with another window holding the keyboard,
+  the first click on ×, the gear, a switch, Deny or Allow only gave Bouncer
+  the keyboard; a second click was needed. Cause (`57b3c1c`): pressing the
+  mouse asked for the keyboard, the backend sent a new view and the island
+  was rebuilt before the button was released, so the click had no target.
+  Fixed (`cd42ca5`): when only the keyboard state changes, nothing is
+  rebuilt (only the ring class and focus), so the pressed button stays.
+- End-to-end with real clicks (2026-10-07, test instance over a black
+  backdrop, every first-click case starting with a real click on another
+  window so Bouncer doesn't hold the keyboard; Allow before the arm clicked
+  by a pre-warmed clicker 231 ms after the card appeared):
+
+  | Check | Result |
+  | --- | --- |
+  | Launch: strip at the main screen's top centre | pass |
+  | Pill click opens the list, first click | pass |
+  | × on the list: one click closes | pass |
+  | Gear: one click opens Settings | pass |
+  | Settings switch: one click flips it | pass |
+  | × on Settings: one click closes it | pass |
+  | Card armed: one click on Deny denies (relay printed deny) | pass |
+  | Card armed: one click on Allow once allows (relay printed allow) | pass |
+  | Card before 600 ms: a click on Allow doesn't allow (no answer; Deny then gave deny) | pass |
+  | Focus never lands on Allow by itself (Deny after the early click) | pass |
+  | Strip after a drag and close: above where the island was (centre 398 = island centre) | pass |
+  | No line after launch / after the pill click | pass |
+  | No line after the first drag after launch | **fail**: follow-up |
+
+- The line: 1 px, #EAEAEA, 30 px below the window's top, across the whole
+  window region beside the island; only after the window's first
+  activation after launch, by a drag (a second drag, or a drag after other
+  activations, leaves none). The page doesn't draw it (its own render is
+  clean outside the island). Not `WM_NCACTIVATE` (already lParam -1), not
+  `WM_NCPAINT` (swallowed: still there), not DWM non-client rendering
+  (`DWMNCRP_DISABLED`: still there); both experiments reverted. Its own PR
+  after #14 (Charan, 2026-10-07).
 
 Keyboard / focus matrix (2026-10-07, test instance beside Charan's dev app,
 keys sent to the page over the debug port, real clicks only on the test
