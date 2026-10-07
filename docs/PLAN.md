@@ -2164,12 +2164,57 @@ Sources: `ipc.rs` (`handle`, both servers), `approvals.rs` (`Desk::handle`,
 
 Done when:
 
-- [ ] Killing the relay mid-request: the card leaves within a second, the
-  step reads "answered in terminal", nothing is answered (test)
-- [ ] Answers still reach the relay as before (existing tests)
-- [ ] Playground: No / Yes in Claude Code's prompt with the card up
-  (fixture + test, or logged)
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] Killing the relay mid-request: the card leaves within a second, the
+  step reads "answered in terminal", nothing is answered (test: 203 ms)
+- [x] Answers still reach the relay as before (existing tests; real clicks)
+- [x] Playground: No / Yes in Claude Code's prompt with the card up
+  (fixtures + tests)
+- [ ] fmt, clippy, tests green locally and in CI (Windows and macOS: the
+  macOS job runs the kill test against the socket check); gitleaks rules
+  checked (local: 155 Rust + 51 frontend)
+
+Playground (Charan, 2026-10-07, Claude Code 2.1.293): with the card up, No
+and Yes in Claude Code's own prompt (keyboard and mouse) both made the card
+leave at once: Claude Code stops the hook, so the relay hangs up. Recorded:
+after a No, nothing more comes for that tool (no PostToolUse, no Stop; a
+`permission_prompt` Notification, then nothing until the next prompt);
+after a Yes, the tool's PostToolUse and then Stop. Two problems in that
+first build: after a No the session still read "Running mkdir test-no", and
+the No and the Yes looked the same (a green check, "answered in terminal").
+
+Fixed: the step settles in three words, never "denied" (Bouncer can't tell
+a No from a Yes until something runs):
+
+- the relay hangs up → "answered in terminal", a neutral icon (grey ring);
+  the session counts as working meanwhile;
+- the same call's PostToolUse comes → "allowed in terminal", green check;
+- nothing for it within 5 s (the 2-s tick: 5–7 s), or the next prompt / Stop
+  first → "not run (answered in terminal)", grey dash; the session is idle
+  and reads "Waiting for you", not "Running".
+
+A long command allowed in the terminal only reports when it ends: shown
+"not run" at 5 s, it turns "allowed in terminal" when its PostToolUse comes
+(until the next prompt). A card already timed out and answered No later
+stays as before ("Waiting in terminal" after 2 minutes). Fixtures:
+`claude-code-2.1.293-no-in-terminal.jsonl`, `-yes-in-terminal.jsonl`.
+
+Real clicks (2026-10-07, test instance beside Charan's dev app, black
+backdrop, the guard as before):
+
+| Check | Result |
+| --- | --- |
+| Allow from the island answers the card (relay: allow) | pass |
+| Deny from the island answers the card (relay: deny) | pass |
+| Two cards: one relay hangs up → only that card leaves (130 ms) | pass |
+| …the other card still answers (relay: deny) | pass |
+| Live relay never dropped: card up at 30, 60, 90 s | pass |
+| The wait still ends in the terminal: relay ended at 100.1 s, nothing printed, logged "asked in terminal" (the wait is 100 s: the relay's 110 s budget minus 10, unchanged) | pass |
+| Auto-allowed request: no card, allowed in 21 ms | pass |
+| Paused requests | unchanged path (returns before any wait); unit test; tray only, not clicked |
+| Idle CPU, no card, 60 s: 0.31%; the check only runs while a card waits (with one: the app process 31 ms in 30 s) | pass |
+
+Found, not this PR: with a card up the WebView uses about half a core
+(15 s of CPU in 30 s): the waiting card's animations, drawn every frame.
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
