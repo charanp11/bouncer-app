@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 5d — Sound pack (5a, 5b, 5c and the island window region merged)**
+**Current phase: Phase 6 — Chat in the island (Phase 5d sound pack in review)**
 
 ## MVP scope
 
@@ -1740,7 +1740,7 @@ Done when:
 - [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   (local green: 142 Rust + 42 frontend; PR 13 CI green, merged 2026-10-05)
 
-## Phase 5d — Sound pack (current)
+## Phase 5d — Sound pack
 
 Charan, 2026-10-04. Its own PR, all four stages, after 5c is merged. 5b
 ships the first three sounds (needs you, risky, done) as they are.
@@ -1887,27 +1887,93 @@ Threats:
 
 Done when:
 
-- [ ] Listen-and-pick board in the prototype: every sound × Soft / Playful,
+- [x] Listen-and-pick board in the prototype: every sound × Soft / Playful,
   each playable, keep / change per cell, a wipe sound picked; every sound
-  a keep (Charan)
-  (v0.13 built, 2026-10-06; v0.14 after the first listen: Retro gone,
-  three wipe options 0.47–0.51 s, all 38 render offline, each ≤ 1.00 s;
-  Settings mock has style, volume and a switch per sound, 6 of 17 on;
-  waiting for Charan's re-check of Soft and the wipe pick)
+  a keep (Charan, 2026-10-06: all 34 keep, the broom "swish" (C) for
+  history wiped; prototype v0.15 records the picks)
 - [x] Charan's calls: `PostToolUseFailure` added (rules above); launch
   "yo!" muted with Sound off and silent when paused
 - [x] `PostToolUseFailure`: in install / uninstall (diff, confirm, removed
   cleanly, an old install gains only it), fixture recorded, `error` dropped
   in the relay, log `how` "failed", island tag "failed", fire-and-forget
   (fixture relayed silently)
-- [ ] The app plays the picked pack: style, volume, per-sound on / off in
-  Settings, saved in `preferences.json`
-- [ ] Rules hold: one at a time, risky > needs > rest, 2-s repeat drop,
-  quiet while paused, frequent ones off by default, context suspended
-- [ ] Tests: recipes ≤ 1 s, priority, repeat drop, prefs parsing
+- [x] The app plays the picked pack: style, volume, per-sound on / off in
+  Settings, saved in `preferences.json` (live, see Verify)
+- [x] Rules hold: one at a time (an alarm cuts a lighter sound), risky >
+  needs > rest, 2-s repeat drop, quiet while paused but the snore, six on
+  by default, context suspended after each sound
+- [x] Tests: recipes ≤ 1 s, the pack equals `preferences.json`'s list,
+  priority, repeat drop, gates, prefs parsing, Esc isn't a failure (the
+  app's recipes checked equal to the prototype's once, by hand)
 - [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local green: 150 Rust + 51 frontend)
 
-## Phase 6 — Chat in the island (~1.5 weeks)
+Implement (2026-10-06):
+
+- `src/pack.ts`: the 17 picked recipes and the synth (oscillators,
+  filtered noise, envelopes), ported from the board. Checked equal to the
+  prototype's recipes once, part by part (2026-10-06); not kept as a test,
+  since reading them means evaluating the prototype's script, which the
+  no-HTML-sinks guard rightly forbids under `src/`.
+- Loudness: each sound in each style is rendered offline once, on first
+  use, and played at the gain that brings it to one RMS (alarms +2 dB, the
+  rest of Soft −3 dB, the click −6 dB); peaks capped so 100% never clips.
+  Volume 50% = that level.
+- `src/sound.ts`: `cue` covers launch (first view, only with the greeting),
+  paused / resumed (transitions), new card, a session newly asking, a failed
+  tool call (the session's new `failed` count), done, new session, the away
+  summary, the auto-allowed flash (not "Rules changed"). Clicks play
+  directly: Allow / Deny (once the backend took the answer), "Always allow"
+  added, auto on, history wiped, poke / dizzy. `play` checks Sound, the
+  sound's switch and paused itself.
+- Backend: `Event.interrupted` from `is_interrupt`; Esc is not a failure
+  (no tag, no count, the log keeps no "failed"); each session's `failed`
+  count in the view.
+- `preferences.json`: `style`, `volume`, `sounds` (all 17 named); a bitmask
+  inside; unknown names and values ignored when read; `set_prefs` refuses
+  an unknown size / style / sound or a volume over 100.
+- Settings: Sound style (Soft / Playful), Volume (saved when let go), and
+  "Which sounds" with one switch each; focus stays on the slider or switch
+  after the re-render.
+
+Verify (2026-10-06, Windows, debug app built to a scratch target, own pipe,
+rules folder and WebView2 folder, Vite started for it; a test-only spy over
+the debug port logged every sound that reached the speakers by its first
+pitches; events through the scratch relay):
+
+- Launch: "yo!" once on the first view; the audio context suspended after.
+- Defaults: new session silent (off); a failed `cat` → trombone; Esc
+  (`is_interrupt: true`) → silence; a card → needs you; Deny → silence
+  (off); a `curl … | sh` card → risky; "done" after a turn with work.
+- Everything on, Playful, 100%: a card → needs you at ~2× the gain; Allow →
+  allowed; a click on Bouncer → boing; a new session → chime.
+- Sound off: a new card → silence. `set_prefs` refused "retro", 101 and an
+  unknown sound name.
+- The failed step shows the red "failed" tag in session detail.
+- Settings (page screenshots): style, volume, "Which sounds · 6 of 17 on",
+  as the prototype. Keyboard: Space on a switch toggles it and keeps focus
+  (7 of 17), arrows move the volume 5 at a time and keep focus;
+  `preferences.json` written as expected.
+- Idle CPU, settled hidden strip, app + WebView2, 60 s: 484 ms (0.81%),
+  audio service 0 ms; the context is suspended between sounds.
+- Not by me: pause / resume (tray only), and how it all sounds.
+- Diff reread: no HTML sinks; labels are our constants via `textContent`;
+  the error text never leaves the relay. The no-HTML-sinks guard caught a
+  `new Function` in my first parity test (committed with that Rust test
+  failing, fixed in the next commit).
+- Noticed, not 5d: a card whose relay was killed stays up until its wait
+  runs out (110 s).
+
+Manual checks (Charan):
+
+- [ ] Listen in the app: launch "yo!", a card, a risky card, done, a failed
+  command, both styles, volume
+- [ ] Pause and resume from the tray (turn those two sounds on first)
+- [ ] Settings by keyboard and with a screen reader
+- [ ] Launch with reduced motion: no greeting, so no "yo!" (by the rule
+  "with the greeting only"); say if it should play anyway
+
+## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
   session reuse, permission modes, how it authenticates (the user's own login, no
@@ -2346,6 +2412,27 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
 - Tests: 133 Rust + 36 frontend, green locally.
 - Needs Charan by hand: tray items and real OS focus, Narrator reading
   order, the sounds by ear, Settings on his screen.
+
+### Phase 5d summary (2026-10-06)
+
+- Listen-and-pick board in the prototype first (v0.13 → v0.15): 17
+  club-bouncer sounds made in code, three styles cut to Soft (default) and
+  Playful after Charan's first listen, three wipe options; every sound a
+  keep, the broom "swish" picked.
+- The app plays exactly those recipes (checked against the prototype's,
+  part by part). Soft keeps needs you and risky buzzy and 5 dB above the rest.
+- Six sounds on by default (launch, needs you, risky, done, tool failed,
+  welcome back); Settings has style, volume and one switch per sound, saved
+  in `preferences.json`.
+- `PostToolUseFailure`: installed with the other hooks (diff, confirm,
+  uninstall), a real 2.1.291 fixture, the error text dropped in the relay,
+  "failed" in the log and the island, Esc doesn't count.
+- Rules: one sound at a time (alarms cut lighter ones), 2-s repeat drop,
+  nothing while paused but the snore, "yo!" only with the greeting, the
+  audio context suspended between sounds; idle CPU unchanged.
+- Tests: 150 Rust + 51 frontend, green locally.
+- Needs Charan: listening in the app, pause / resume from the tray, the
+  reduced-motion launch question, macOS.
 
 ### Phase 5c summary (2026-10-04)
 
