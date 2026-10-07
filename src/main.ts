@@ -1214,6 +1214,13 @@ window.addEventListener("focus", () => {
   if (card && !island.contains(document.activeElement)) findKey(`deny:${card.id}`)?.focus();
 });
 
+// Clicking anywhere else gives the keyboard back (the backend makes the
+// window unfocusable): nothing inside keeps focus, so no ring stays drawn.
+window.addEventListener("blur", () => {
+  const had = document.activeElement;
+  if (had instanceof HTMLElement && island.contains(had)) had.blur();
+});
+
 // Esc gives the keyboard back: settings and the session list close; a card
 // stays (it can only be answered), but the keyboard goes back anyway.
 document.addEventListener("keydown", (e) => {
