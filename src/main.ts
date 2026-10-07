@@ -653,6 +653,7 @@ function renderApproval(view: View, request: Request, done?: boolean) {
   setShape("open");
   const waiting = view.queue.length > 1 ? `· ${view.queue.length} waiting` : "";
   const body = el("div", "body");
+  body.dataset.screen = `card:${request.id}`;
   body.append(card(request, view.queue, done));
   const top = request.risk && done === undefined
     ? head("risky", "Risky", "· check before allowing")
@@ -709,6 +710,7 @@ function renderAway(view: View, away: Away) {
     stats.append(s);
   }
   const body = el("div", "body");
+  body.dataset.screen = "away";
   body.append(stats);
   if (away.stuck) {
     const stuck = el("div", "stuck");
@@ -977,6 +979,7 @@ function renderSettings(view: View, state: BallState) {
   );
 
   const body = el("div", "body");
+  body.dataset.screen = "settings";
   body.append(list);
   island.replaceChildren(head(state, "Settings", "", closeSettings), body);
 }
@@ -988,15 +991,21 @@ function rulesBadge(view: View): Badge | undefined {
 
 /** Keyboard focus survives the island being rebuilt: it goes back to the
  * same control. A new card at the front takes it to its Deny (never Allow).
+ * So does the scroll position, when the same screen (or the same card) is
+ * drawn again; anything else starts at the top.
  * The island morphs from the box it had to the one it gets (motion below). */
 function render(view: View) {
   const had = focusKey(document.activeElement);
+  const old = island.querySelector<HTMLElement>(".body");
+  const scrolled = old ? { screen: old.dataset.screen, top: old.scrollTop } : null;
   const before = front.id;
   const box = snapshot();
   const cardBefore = cardUp;
   const first = current === null;
   stopMorph();
   draw(view);
+  const body = island.querySelector<HTMLElement>(".body");
+  if (body && scrolled && body.dataset.screen === scrolled.screen) body.scrollTop = scrolled.top;
   settle(box, first || cardBefore || cardUp || REDUCED.matches || !view.rounded);
   armIfVisible();
   if (!document.hasFocus()) return;
@@ -1129,6 +1138,7 @@ function draw(view: View) {
   if (view.open) {
     setShape("open");
     const body = el("div", "body");
+    body.dataset.screen = "sessions";
     body.append(...rulesNotes(view), sessionRows(view.sessions));
     const close = () => {
       detail = null;
