@@ -86,9 +86,22 @@ struct Session {
     lines: Option<(usize, Option<usize>)>,
     /// Tool calls that failed so far (for the "tool failed" sound).
     failed: u64,
-    /// A request answered in Claude Code's own prompt that isn't settled
-    /// yet: whether its tool runs (a long one only reports when it ends).
-    terminal: Option<Terminal>,
+    /// Requests answered in Claude Code's own prompt that aren't settled
+    /// yet: whether each one's tool runs (a long one only reports when it
+    /// ends). Each settles by its own tool and input.
+    terminal: Vec<Terminal>,
+}
+
+/// Sets how the latest step `label` that's still unsettled in the terminal
+/// (answered, or shown not run) ended.
+fn mark(history: &mut VecDeque<(String, &'static str)>, label: &str, how: &'static str) {
+    if let Some(entry) = history
+        .iter_mut()
+        .rev()
+        .find(|(l, h)| l == label && (*h == ANSWERED || *h == NOT_RUN))
+    {
+        entry.1 = how;
+    }
 }
 
 struct Terminal {
@@ -170,7 +183,7 @@ impl State {
                     code: None,
                     lines: None,
                     failed: 0,
-                    terminal: None,
+                    terminal: Vec::new(),
                 });
                 self.sessions.len() - 1
             }
@@ -284,7 +297,7 @@ impl State {
             .iter_mut()
             .find(|s| s.id == pending.event.session)
         {
-            s.terminal = Some(Terminal {
+            s.terminal.push(Terminal {
                 event: pending.event,
                 since: SystemTime::now(),
                 not_run: false,
@@ -293,63 +306,67 @@ impl State {
         true
     }
 
-    /// What this event says about a request answered in the terminal: its
-    /// tool ran (PostToolUse, same tool and input) → allowed; the turn moved
-    /// on (a new prompt, Stop, the session's end) → not run.
+    /// What this event says about requests answered in the terminal: a
+    /// tool ran (PostToolUse, same tool and input) → that one is allowed; the
+    /// turn moved on (a new prompt, Stop, the session's end) → all the rest
+    /// are not run.
     fn settle_terminal(&mut self, event: &Event) {
         let Some(s) = self.sessions.iter_mut().find(|s| s.id == event.session) else {
             return;
         };
-        let Some(t) = s.terminal.as_ref() else {
-            return;
-        };
-        let how = match event.kind.as_str() {
-            "PostToolUse" | "PostToolUseFailure"
-                if t.event.tool == event.tool && t.event.input == event.input =>
-            {
-                ALLOWED_IN_TERMINAL
+        let mut settled = Vec::new();
+        match event.kind.as_str() {
+            "PostToolUse" | "PostToolUseFailure" => {
+                let ran = s
+                    .terminal
+                    .iter()
+                    .position(|t| t.event.tool == event.tool && t.event.input == event.input);
+                if let Some(i) = ran {
+                    let t = s.terminal.remove(i);
+                    let label = step(&t.event);
+                    mark(&mut s.history, &label, ALLOWED_IN_TERMINAL);
+                    if t.not_run {
+                        s.step = label;
+                    }
+                    settled.push((t.event, ALLOWED_IN_TERMINAL));
+                }
             }
-            "UserPromptSubmit" | "Stop" | "SessionEnd" if !t.not_run => NOT_RUN,
             "UserPromptSubmit" | "Stop" | "SessionEnd" => {
-                s.terminal = None;
-                return;
+                for t in std::mem::take(&mut s.terminal) {
+                    if !t.not_run {
+                        mark(&mut s.history, &step(&t.event), NOT_RUN);
+                        settled.push((t.event, NOT_RUN));
+                    }
+                }
             }
-            _ => return,
-        };
-        let label = step(&t.event);
-        if let Some(entry) = s.history.iter_mut().rev().find(|(l, _)| *l == label) {
-            entry.1 = how;
+            _ => {}
         }
-        if how == ALLOWED_IN_TERMINAL && t.not_run {
-            s.step = label;
-        }
-        let event = s.terminal.take().map(|t| t.event);
-        if let Some(e) = event {
+        for (e, how) in settled {
             self.answered(&e, how);
         }
     }
 
     /// Requests answered in the terminal with nothing run for them after
-    /// `NOT_RUN_AFTER`: not run, and the session is waiting for its user,
-    /// not "Running". True if any changed.
+    /// `NOT_RUN_AFTER` (each by its own clock): not run, and the session is
+    /// waiting for its user, not "Running". True if any changed.
     fn not_run_yet(&mut self, now: SystemTime) -> bool {
         let mut gone = Vec::new();
         for s in &mut self.sessions {
-            let Some(t) = s.terminal.as_mut() else {
-                continue;
-            };
-            if t.not_run || now.duration_since(t.since).unwrap_or_default() < NOT_RUN_AFTER {
-                continue;
+            let mut any = false;
+            for t in &mut s.terminal {
+                if t.not_run || now.duration_since(t.since).unwrap_or_default() < NOT_RUN_AFTER {
+                    continue;
+                }
+                t.not_run = true;
+                mark(&mut s.history, &step(&t.event), NOT_RUN);
+                gone.push(t.event.clone());
+                any = true;
             }
-            t.not_run = true;
-            let label = step(&t.event);
-            if let Some(entry) = s.history.iter_mut().rev().find(|(l, _)| *l == label) {
-                entry.1 = NOT_RUN;
+            if any {
+                s.status = "idle";
+                s.step = WAITING_STEP.into();
+                s.lines = None;
             }
-            s.status = "idle";
-            s.step = WAITING_STEP.into();
-            s.lines = None;
-            gone.push(t.event.clone());
         }
         for e in &gone {
             self.answered(e, NOT_RUN);
@@ -1389,6 +1406,52 @@ mod tests {
         assert_eq!(s["history"][0]["how"], ALLOWED_IN_TERMINAL);
         assert_eq!(s["status"], "working");
         assert_eq!(s["step"], "Running cargo build");
+    }
+
+    /// Two cards in one session, both answered in the terminal: each settles
+    /// on its own. The one whose PostToolUse comes is allowed; the other is
+    /// not run after 5 s (one record no longer overwrites the other).
+    #[test]
+    fn two_terminal_answers_in_one_session_settle_separately() {
+        let desk = desk(WAIT);
+        assert_eq!(desk.handle(event("a", "PreToolUse", "mkdir one")), None);
+        hang_up(&desk, event("a", "PermissionRequest", "mkdir one"));
+        assert_eq!(desk.handle(event("a", "PreToolUse", "mkdir two")), None);
+        hang_up(&desk, event("a", "PermissionRequest", "mkdir two"));
+        let hows = |desk: &Desk| -> Vec<String> {
+            desk.view()["sessions"][0]["history"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| {
+                    format!(
+                        "{} = {}",
+                        h["label"].as_str().unwrap(),
+                        h["how"].as_str().unwrap()
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            hows(&desk),
+            [
+                "Running mkdir one = answered in terminal",
+                "Running mkdir two = answered in terminal"
+            ]
+        );
+        assert_eq!(desk.handle(event("a", "PostToolUse", "mkdir one")), None);
+        desk.lock()
+            .expire(SystemTime::now() + NOT_RUN_AFTER + Duration::from_secs(1));
+        assert_eq!(
+            hows(&desk),
+            [
+                "Running mkdir one = allowed in terminal",
+                "Running mkdir two = not run (answered in terminal)"
+            ]
+        );
+        let view = desk.view();
+        assert_eq!(view["sessions"][0]["status"], "idle");
+        assert_eq!(view["sessions"][0]["step"], WAITING_STEP);
     }
 
     /// Two cards queued: answering one in the terminal (its relay hangs up)
