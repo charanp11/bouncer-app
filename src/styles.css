@@ -950,9 +950,11 @@ pre.cmd {
   outline: none;
 }
 
+/* Drawn inside the control's edge, so no edge (the island's, a scrolling
+   list's, the window region) can cut it off. */
 .keys .island :focus {
   outline: 2px solid var(--sun);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 /* the open island with no sessions yet */
