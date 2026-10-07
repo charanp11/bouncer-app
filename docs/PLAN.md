@@ -1967,11 +1967,21 @@ pitches; events through the scratch relay):
 - Noticed, not 5d: a card whose relay was killed stays up until its wait
   runs out (110 s).
 
-Manual checks (Charan):
+Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
 
-- [ ] Listen in the app: launch "yo!", a card, a risky card, done, a failed
-  command, both styles, volume
-- [ ] Pause and resume from the tray (turn those two sounds on first)
+- [x] Listen in the app: a card (needs you), `curl … | sh` (risky), a
+  finished session (done), `cat` of a missing file (sad trombone): all
+  good
+- [x] Pause and resume from the tray, with those two sounds turned on
+- [x] Sound off, then a card: silence
+- Found: in Settings, turning a sound on or off further down the "Which
+  sounds" list jumped the list back to the top. The island is rebuilt on
+  every change and its scroll box started at 0. Fixed: `render()` keeps
+  the scroll position when the same screen (or the same card) is drawn
+  again; a new screen or card still starts at the top. Checked on a test
+  instance: scrolled to Paused (450 px), two clicks and a Space press, the
+  list stayed at 450 px with focus kept; reopening Settings starts at the
+  top.
 - [ ] Settings by keyboard and with a screen reader
 - [x] Launch with reduced motion: Charan, 2026-10-06: the "yo!" plays
   anyway (whenever Sound is on); changed
