@@ -36,7 +36,8 @@ const RANK: Partial<Record<Cue, number>> = { risky: 3, needs: 2 };
 const rank = (c: Cue) => RANK[c] ?? 1;
 
 /** The sound this view deserves (or null), and what to remember. The first
- * view is the launch: only the greeting's "yo!". Then, most urgent first:
+ * view is the launch: only the "yo!" (with or without the greeting:
+ * reduced motion is about movement, not sound). Then, most urgent first:
  * pause / resume, a new card (risky / needs), a session newly asking, a
  * failed tool call, a finished session, a new session, the away summary,
  * an auto-allow. Nothing else while paused. */
