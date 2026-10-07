@@ -955,6 +955,13 @@ pre.cmd {
   outline-offset: 2px;
 }
 
+/* the open island with no sessions yet */
+.island .none {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--muted);
+}
+
 /* read by screen readers only (the island's announcements) */
 .sr-only {
   position: absolute;
