@@ -2125,6 +2125,52 @@ island until its wait runs out (110 s).
   EOF), without a busy loop and without changing the relay; and which
   history tag the session gets.
 
+### Relay disconnect audit (2026-10-07)
+
+Sources: `ipc.rs` (`handle`, both servers), `approvals.rs` (`Desk::handle`,
+`take`, `drop_stale`), the relay's `talk`, `crates/relay/tests/relay.rs`.
+
+- Today a waiting card ends only by an answer, a stale-card event
+  (PostToolUse of the same call, Stop, a new prompt, the session's end) or
+  the 110 s wait. A relay that's gone isn't noticed.
+- Removing a card from the queue already wakes its waiter at once with no
+  answer (its channel's sender is dropped): that's how stale cards leave.
+  So the fix is only noticing the hang-up while waiting.
+- Noticing it: the waiting thread is the connection's own thread, which
+  later writes the answer. A blocking read in another thread would hold up
+  that write on Windows (synchronous pipe I/O on one handle is serialized),
+  so the check is non-blocking and made by the waiting thread: Windows
+  `PeekNamedPipe` (fails once the client is gone), macOS a non-blocking
+  `peek` (0 bytes = closed). The desk waits in 200 ms slices and checks
+  between them; no busy loop, nothing runs while no card is up.
+- The handler gets the event and that check (`Handler` changes; the relay
+  doesn't). Any check failure counts as gone: the card leaves with no
+  answer, so Claude Code's own prompt decides (fail safe).
+- A gone relay ends the card as "answered in terminal" (the relay only
+  closes early when Claude Code stops the hook). The session's status
+  after it: settled by the playground check below.
+- To check with a real session (Charan): with the card up, answer No (and
+  separately Yes) in Claude Code's own prompt. Does Claude Code stop the
+  relay? If yes: the card leaves at once, "answered in terminal", Idle
+  after a No, working after a Yes; a recorded fixture and a test. If no:
+  logged next to the Phase 4 limit. A No after the card already timed out
+  stays as it is ("Waiting in terminal" after 2 minutes).
+
+| Threat | Fix |
+| --- | --- |
+| A live relay's card dropped by mistake | Only a failed peek / EOF counts; no answer is ever sent for it (Claude Code asks) |
+| The check delays a real answer | Same thread, non-blocking; an answer wakes the waiter at once as before |
+| Idle CPU | Checks only while a card waits, 5 a second |
+
+Done when:
+
+- [ ] Killing the relay mid-request: the card leaves within a second, the
+  step reads "answered in terminal", nothing is answered (test)
+- [ ] Answers still reach the relay as before (existing tests)
+- [ ] Playground: No / Yes in Claude Code's prompt with the card up
+  (fixture + test, or logged)
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
