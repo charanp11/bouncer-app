@@ -170,9 +170,11 @@ mod win {
     unsafe extern "system" {
         fn SetWindowSubclass(hwnd: Handle, proc: SubclassProc, id: usize, data: usize) -> i32;
         fn DefSubclassProc(hwnd: Handle, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn RemoveWindowSubclass(hwnd: Handle, proc: SubclassProc, id: usize) -> i32;
     }
 
     const WM_NCACTIVATE: u32 = 0x0086;
+    const WM_NCDESTROY: u32 = 0x0082;
     const SUBCLASS_ID: usize = 0x5D;
 
     const SWP_NOZORDER: u32 = 0x0004;
@@ -234,8 +236,15 @@ mod win {
         _data: usize,
     ) -> isize {
         let lparam = if msg == WM_NCACTIVATE { -1 } else { lparam };
-        // SAFETY: called by Windows for our window with its own message.
-        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        // SAFETY: called by Windows for our window with its own message; the
+        // subclass is removed as the window goes, before the message is
+        // passed on (DefSubclassProc still reaches the original procedure).
+        unsafe {
+            if msg == WM_NCDESTROY {
+                RemoveWindowSubclass(hwnd, quiet_caption, SUBCLASS_ID);
+            }
+            DefSubclassProc(hwnd, msg, wparam, lparam)
+        }
     }
 }
 
