@@ -2009,10 +2009,27 @@ Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
   land on switches hidden in the closed list; opening a session's detail by
   keyboard left focus nowhere; when the keyboard arrives, focus goes to the
   first control (Deny with a card up).
-- (1) is **not reproduced**: on a test instance over a black backdrop, the
-  pre-fix build and the fixed build both open Settings by a real gear click
-  with no white anywhere, at Medium and at Small; the page paints nothing
-  outside the island. Waiting on Charan for when exactly it shows.
+- (1) reproduced with Charan's steps (2026-10-07): Settings by the gear,
+  Tab down, then click another window → a pale band (~22 px) across the
+  window's width behind the island's top, staying. Cause: Tao keeps the
+  caption style on an undecorated top-level window (hiding it another way),
+  and the default handling of `WM_NCACTIVATE` paints the inactive caption
+  when the window loses activation; the transparent margin shows it. Not
+  the page, and not the frame refresh alone (tried on a never-focused
+  window). Root fix, no repaint workaround: a window subclass in
+  `region.rs` passes every message on, `WM_NCACTIVATE` with lParam -1
+  (Windows then doesn't repaint the non-client area; Tao still sees the
+  focus change). If it can't be set up, nothing changes. Before / after
+  captures over a black backdrop: band with the old build, none with the
+  new; the ring still goes when the window loses the keyboard.
+- Found (Charan): after dragging the island to another screen, closing it
+  put the wake strip back on the main screen (opening brought the island
+  back to the moved spot). The hidden strip always used the primary
+  monitor's top centre. Now it's on the screen the island is on, at its top
+  edge right above the island; at launch the main screen (the spot is never
+  saved). Checked on one monitor (same code path): moved to x=20, closed →
+  strip stayed above it (old build: jumped to the top centre); reopened at
+  the moved spot. Needs Charan with two screens.
 
 Keyboard / focus matrix (2026-10-07, test instance beside Charan's dev app,
 keys sent to the page over the debug port, real clicks only on the test
