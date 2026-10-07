@@ -325,7 +325,9 @@ fn send(app: &AppHandle, mut view: Value) {
 
 /// Sizes the window to what the page asked for and places it: hanging from
 /// the user's spot (or the top centre at first), kept inside the work area.
-/// While hidden it is the wake strip at the very top centre of the screen.
+/// While hidden it is the wake strip at the top edge of the screen the
+/// island is on, right above it (the main screen's top centre before any
+/// move; the spot is never saved).
 /// On Windows the window is the fixed frame and only its region follows the
 /// page (`region`); if that fails, the window is sized to the page as before.
 /// Main thread only.
@@ -353,7 +355,14 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
         ))
     };
     let top_centre = if hidden {
-        screen_top(0.0)
+        // The strip stays on the screen the island was moved to, at its top
+        // edge right above the island; before any move, the main screen.
+        anchor
+            .and_then(|a| {
+                let ((_, top), _) = work_area(&window.as_ref().window(), a)?;
+                Some(PhysicalPosition::new(a.x, top))
+            })
+            .or_else(|| screen_top(0.0))
     } else {
         // The 8-px gap from the top is inside a transparent window (the
         // page's top padding), so the strip and the island share its top edge.
