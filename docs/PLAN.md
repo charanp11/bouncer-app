@@ -1859,11 +1859,13 @@ Findings:
    tool call in auto mode; tool failed can be frequent, but Charan wants it
    on.)
 6. **Launch vs the quiet first view.** The greeting runs on the first view
-   (`greetUntil`), which is the app's launch. The "yo!" plays with the
-   greeting only; every other first-view sound stays quiet, as now. A
-   reload in dev replays it (prod has no reload). **Charan, 2026-10-06:** it
-   follows the same rules as every other sound: muted when Sound is off,
-   silent when paused.
+   (`greetUntil`), which is the app's launch. The "yo!" plays on the first
+   view; every other first-view sound stays quiet, as now. A reload in dev
+   replays it (prod has no reload). **Charan, 2026-10-06:** it follows the
+   same rules as every other sound: muted when Sound is off, silent when
+   paused. Then (after Verify): it plays at launch whenever Sound is on,
+   with or without the greeting, so also with reduced motion (reduced
+   motion is about movement, not sound).
 7. **Priority when two fire together:** risky, then needs you, then the
    rest; only one plays. The 2-s repeat drop stays; "longest sound" becomes
    the longest in the pack (checked by a test over the recipes, ≤ 1 s).
@@ -1959,8 +1961,9 @@ pitches; events through the scratch relay):
 - Not by me: pause / resume (tray only), and how it all sounds.
 - Diff reread: no HTML sinks; labels are our constants via `textContent`;
   the error text never leaves the relay. The no-HTML-sinks guard caught a
-  `new Function` in my first parity test (committed with that Rust test
-  failing, fixed in the next commit).
+  `new Function` in my first parity test; that test was removed and the
+  removal folded into the commit that added it (Charan), so every commit
+  on the branch passes the full Rust and frontend tests (run on each).
 - Noticed, not 5d: a card whose relay was killed stays up until its wait
   runs out (110 s).
 
@@ -1970,8 +1973,29 @@ Manual checks (Charan):
   command, both styles, volume
 - [ ] Pause and resume from the tray (turn those two sounds on first)
 - [ ] Settings by keyboard and with a screen reader
-- [ ] Launch with reduced motion: no greeting, so no "yo!" (by the rule
-  "with the greeting only"); say if it should play anyway
+- [x] Launch with reduced motion: Charan, 2026-10-06: the "yo!" plays
+  anyway (whenever Sound is on); changed
+
+## Relay disconnect fix (after 5d, before 6)
+
+Charan, 2026-10-06. Its own small PR, right after 5d is merged. Found in
+5d's Verify: a card whose relay is gone (Claude Code killed the hook, or
+the user answered in the terminal and the hook was stopped) stays in the
+island until its wait runs out (110 s).
+
+- When a relay's connection closes before its card is answered, drop the
+  card at once. No answer is sent (nobody is listening; Claude Code
+  already asks in its terminal). The session shows "asked in terminal" /
+  "answered in terminal" as today.
+- Never the other way round: a card is never answered, armed or moved
+  because of a disconnect; an answer that races the close is simply not
+  delivered.
+- A test: a permission request whose client closes mid-wait leaves the
+  queue well before the wait (e.g. under 1 s), and nothing is written back.
+- Audit to settle: how the waiting connection notices the close on both
+  ends (Windows pipe: a read returning broken pipe / EOF; macOS socket:
+  EOF), without a busy loop and without changing the relay; and which
+  history tag the session gets.
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
@@ -2428,11 +2452,11 @@ Toolchain already present: git 2.51.2, Node 24.11.0, rustc/cargo 1.99.0
   uninstall), a real 2.1.291 fixture, the error text dropped in the relay,
   "failed" in the log and the island, Esc doesn't count.
 - Rules: one sound at a time (alarms cut lighter ones), 2-s repeat drop,
-  nothing while paused but the snore, "yo!" only with the greeting, the
-  audio context suspended between sounds; idle CPU unchanged.
+  nothing while paused but the snore, "yo!" at launch whenever Sound is
+  on (reduced motion too), the audio context suspended between sounds;
+  idle CPU unchanged.
 - Tests: 150 Rust + 51 frontend, green locally.
-- Needs Charan: listening in the app, pause / resume from the tray, the
-  reduced-motion launch question, macOS.
+- Needs Charan: listening in the app, pause / resume from the tray, macOS.
 
 ### Phase 5c summary (2026-10-04)
 
