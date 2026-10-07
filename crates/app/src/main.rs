@@ -150,6 +150,10 @@ fn main() {
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
                 prefs_path,
             });
+            if let Some(window) = app.get_webview_window("main") {
+                // Fail safe: if it can't be set up, the window works as before.
+                region::no_caption(&window);
+            }
             start_relay_server(desk.clone());
             tray(app, desk)?;
             Ok(())

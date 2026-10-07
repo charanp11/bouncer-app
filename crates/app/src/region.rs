@@ -107,6 +107,25 @@ pub fn clear(w: &WebviewWindow) {
     }
 }
 
+/// Stops Windows painting an inactive title bar into the window when it
+/// loses the keyboard. The window has no decorations, but Tao keeps the
+/// caption style (and hides it by other means), so the default handling of
+/// `WM_NCACTIVATE` drew a pale band in the transparent margin above the
+/// island. False if it couldn't be set up (then nothing changes). Main
+/// thread only, once.
+#[cfg(windows)]
+pub fn no_caption(w: &WebviewWindow) -> bool {
+    match w.hwnd() {
+        Ok(hwnd) => win::no_caption(hwnd.0),
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+pub fn no_caption(_: &WebviewWindow) -> bool {
+    false
+}
+
 #[cfg(not(windows))]
 pub fn apply(_: &WebviewWindow, _: Rect, _: Rect) -> bool {
     let _ = forced_off();
@@ -144,6 +163,17 @@ mod win {
         fn CreateRectRgn(left: i32, top: i32, right: i32, bottom: i32) -> Handle;
         fn DeleteObject(object: Handle) -> i32;
     }
+
+    type SubclassProc = unsafe extern "system" fn(Handle, u32, usize, isize, usize, usize) -> isize;
+
+    #[link(name = "comctl32")]
+    unsafe extern "system" {
+        fn SetWindowSubclass(hwnd: Handle, proc: SubclassProc, id: usize, data: usize) -> i32;
+        fn DefSubclassProc(hwnd: Handle, msg: u32, wparam: usize, lparam: isize) -> isize;
+    }
+
+    const WM_NCACTIVATE: u32 = 0x0086;
+    const SUBCLASS_ID: usize = 0x5D;
 
     const SWP_NOZORDER: u32 = 0x0004;
     const SWP_NOACTIVATE: u32 = 0x0010;
@@ -184,6 +214,28 @@ mod win {
         unsafe {
             SetWindowRgn(hwnd, null_mut(), 1);
         }
+    }
+
+    // SAFETY: the subclass is set on this app's own window, on the main
+    // thread that owns it; the procedure only passes every message on.
+    pub fn no_caption(hwnd: Handle) -> bool {
+        unsafe { SetWindowSubclass(hwnd, quiet_caption, SUBCLASS_ID, 0) != 0 }
+    }
+
+    /// Every message goes on unchanged, except that `WM_NCACTIVATE` carries
+    /// lParam -1: the window still learns it's (in)active, but Windows
+    /// doesn't repaint the non-client area for it (documented for -1).
+    unsafe extern "system" fn quiet_caption(
+        hwnd: Handle,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+        _id: usize,
+        _data: usize,
+    ) -> isize {
+        let lparam = if msg == WM_NCACTIVATE { -1 } else { lparam };
+        // SAFETY: called by Windows for our window with its own message.
+        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     }
 }
 
