@@ -1982,13 +1982,22 @@ Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
   instance: scrolled to Paused (450 px), two clicks and a Space press, the
   list stayed at 450 px with focus kept; reopening Settings starts at the
   top.
-- Found: the yellow focus ring stayed on the island's Close button after
-  clicking into another window. The backend gives the keyboard back when
-  the window loses focus, but the page kept its own focus, and the ring
-  is drawn for any focused element. Fixed: on window blur, whatever is
-  focused inside the island is blurred. Checked on a test instance (no OS
-  focus taken): Close focused, ring drawn; after the window's blur,
-  nothing in the island has focus and no ring.
+- Found: the yellow focus ring stayed on the island's Close button while
+  another window (Claude) had the keyboard. Cause: in WebView2 the page
+  always thinks it has focus (`document.hasFocus()` true with Windows
+  Terminal in front), so `render()` kept putting focus back after every
+  re-render, and the ring is drawn for any focused element; the window's
+  `blur` never fires either (a first fix on it didn't work). Windows also
+  reports a focus-in at launch while another app is in front, so only the
+  backend's own record is trusted: the island has the keyboard from
+  `take_keyboard` (gear, tray) until a focus-out or Esc, sent to the page
+  as `view.keyboard`. Without it, `render()` lets go of focus and the CSS
+  draws no ring (the browser's default one included); with it, focus is
+  restored as before, and Deny gets it when the keyboard arrives with a
+  card up. Checked on a test instance (no OS focus taken): Close focused,
+  then a re-render → nothing focused, no ring; Close focused with no
+  re-render → no ring; with the keyboard (class set by hand) → yellow
+  ring. Needs Charan: gear / tray → keyboard → ring, then click away.
 - [ ] Settings by keyboard and with a screen reader
 - [x] Launch with reduced motion: Charan, 2026-10-06: the "yo!" plays
   anyway (whenever Sound is on); changed
