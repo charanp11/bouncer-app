@@ -123,8 +123,15 @@ const TAG: Record<string, string> = {
   "waiting for you": "you",
   "asked in terminal": "you",
   "answered in terminal": "mine",
+  "allowed in terminal": "auto",
+  "not run (answered in terminal)": "",
   "waiting in terminal": "you",
   failed: "flag",
+};
+/** Step icons that follow how the step ended, not whether it's current. */
+const OUTCOME_ICON: Record<string, string> = {
+  "answered in terminal": "mid",
+  "not run (answered in terminal)": "skip",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
@@ -597,7 +604,9 @@ function rail(session: Session | undefined, project: string, agent: string, stat
     const now = i === shown.length - 1 && session?.status !== "idle";
     // Answered (or still waiting) in Claude Code's own prompt: not running.
     const waiting = now && (step.how === "waiting for you" || stale);
-    const icon = !now ? "ok" : waiting ? "wait" : "spin";
+    // Answered in Claude Code's own prompt: neutral until Bouncer knows,
+    // a grey dash if it didn't run (never a green check for that).
+    const icon = OUTCOME_ICON[step.how] ?? (!now ? "ok" : waiting ? "wait" : "spin");
     const how = now && stale ? "waiting in terminal" : step.how;
     const li = el("li", now ? "now" : "done");
     li.append(el("span", `ic ${icon}`), el("span", "", title(step)));

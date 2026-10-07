@@ -749,6 +749,24 @@ pre.cmd {
   border: 1.5px dashed rgba(255, 255, 255, 0.22);
 }
 
+/* answered in Claude Code's own prompt: neutral until Bouncer knows */
+.ic.mid {
+  border: 2px solid var(--faint);
+}
+
+/* not run (answered in terminal): a grey dash, never a check */
+.ic.skip {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.ic.skip::after {
+  content: "";
+  width: 7px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+}
+
 .code {
   background: #0f1218;
   border: 1px solid var(--line);
