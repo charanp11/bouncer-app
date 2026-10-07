@@ -1235,6 +1235,16 @@ document.addEventListener("keydown", (e) => {
   all[next].focus();
 });
 
+// A click on the open island takes the keyboard back (clicking it is on
+// purpose); a click on the pill only opens it.
+island.addEventListener(
+  "pointerdown",
+  () => {
+    if (current?.open && !current.keyboard) invoke("keyboard", { on: true });
+  },
+  true,
+);
+
 // Esc gives the keyboard back: settings and the session list close; a card
 // stays (it can only be answered), but the keyboard goes back anyway.
 document.addEventListener("keydown", (e) => {
