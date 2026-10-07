@@ -1000,10 +1000,19 @@ function rulesBadge(view: View): Badge | undefined {
  * The island morphs from the box it had to the one it gets (motion below). */
 function render(view: View) {
   const had = focusKey(document.activeElement);
-  const old = island.querySelector<HTMLElement>(".body");
-  const scrolled = old ? { screen: old.dataset.screen, top: old.scrollTop } : null;
   const before = front.id;
   const keyboardBefore = current?.keyboard ?? false;
+  // Only the keyboard changed (taken by a click on the island, or given
+  // back): nothing is rebuilt, so the control under the mouse stays and the
+  // click that took the keyboard still lands on it.
+  if (current && keyboardBefore !== view.keyboard && sameButKeyboard(current, view)) {
+    current = view;
+    document.documentElement.classList.toggle("keys", view.keyboard);
+    placeFocus(view, had, before, keyboardBefore);
+    return;
+  }
+  const old = island.querySelector<HTMLElement>(".body");
+  const scrolled = old ? { screen: old.dataset.screen, top: old.scrollTop } : null;
   const box = snapshot();
   const cardBefore = cardUp;
   const first = current === null;
@@ -1013,6 +1022,18 @@ function render(view: View) {
   if (body && scrolled && body.dataset.screen === scrolled.screen) body.scrollTop = scrolled.top;
   settle(box, first || cardBefore || cardUp || REDUCED.matches || !view.rounded);
   armIfVisible();
+  placeFocus(view, had, before, keyboardBefore);
+}
+
+/** Two views that differ at most in whether the island has the keyboard. */
+function sameButKeyboard(a: View, b: View): boolean {
+  return JSON.stringify({ ...a, keyboard: false }) === JSON.stringify({ ...b, keyboard: false });
+}
+
+/** Where keyboard focus goes after a view: nowhere without the keyboard;
+ * else back to the control it was on, Deny for a new card or for the
+ * keyboard arriving with a card up (never Allow), or the first control. */
+function placeFocus(view: View, had: string | null, before: string, keyboardBefore: boolean) {
   if (!view.keyboard) {
     // Another window has the keyboard: nothing here keeps focus (or its ring).
     const now = document.activeElement;
