@@ -82,6 +82,8 @@ type View = {
   history: { note: string | null };
   /** The settings screen is open. */
   settings: boolean;
+  /** The island has the keyboard (from the OS: the page always thinks it does). */
+  keyboard: boolean;
   prefs: Prefs;
 };
 
@@ -990,7 +992,9 @@ function rulesBadge(view: View): Badge | undefined {
 }
 
 /** Keyboard focus survives the island being rebuilt: it goes back to the
- * same control. A new card at the front takes it to its Deny (never Allow).
+ * same control. A new card at the front, or the keyboard arriving with a
+ * card up, takes it to its Deny (never Allow). Without the keyboard
+ * (another window has it) nothing keeps focus, so no ring shows.
  * So does the scroll position, when the same screen (or the same card) is
  * drawn again; anything else starts at the top.
  * The island morphs from the box it had to the one it gets (motion below). */
@@ -999,6 +1003,7 @@ function render(view: View) {
   const old = island.querySelector<HTMLElement>(".body");
   const scrolled = old ? { screen: old.dataset.screen, top: old.scrollTop } : null;
   const before = front.id;
+  const keyboardBefore = current?.keyboard ?? false;
   const box = snapshot();
   const cardBefore = cardUp;
   const first = current === null;
@@ -1008,9 +1013,15 @@ function render(view: View) {
   if (body && scrolled && body.dataset.screen === scrolled.screen) body.scrollTop = scrolled.top;
   settle(box, first || cardBefore || cardUp || REDUCED.matches || !view.rounded);
   armIfVisible();
-  if (!document.hasFocus()) return;
+  if (!view.keyboard) {
+    // Another window has the keyboard: nothing here keeps focus (or its ring).
+    const now = document.activeElement;
+    if (now instanceof HTMLElement && island.contains(now)) now.blur();
+    refocus = null;
+    return;
+  }
   const card = view.queue[0];
-  const target = card && card.id !== before ? `deny:${card.id}` : had;
+  const target = card && (card.id !== before || !keyboardBefore) ? `deny:${card.id}` : had;
   const next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
   refocus = null;
   next?.focus({ preventScroll: true });
@@ -1051,6 +1062,7 @@ function draw(view: View) {
   clearTimeout(timer);
   timerAt = 0;
   document.documentElement.classList.toggle("square", !view.rounded);
+  document.documentElement.classList.toggle("keys", view.keyboard);
   const now = performance.now();
 
   if (greetUntil < 0) greetUntil = now + GREET_MS;
@@ -1205,20 +1217,6 @@ document.addEventListener("keydown", (e) => {
   const next = e.shiftKey ? (at <= 0 ? all.length - 1 : at - 1) : at === -1 || at === all.length - 1 ? 0 : at + 1;
   e.preventDefault();
   all[next].focus();
-});
-
-// The island just took the keyboard (tray, cog): with a card up, focus starts
-// on its Deny (never Allow).
-window.addEventListener("focus", () => {
-  const card = current?.queue[0];
-  if (card && !island.contains(document.activeElement)) findKey(`deny:${card.id}`)?.focus();
-});
-
-// Clicking anywhere else gives the keyboard back (the backend makes the
-// window unfocusable): nothing inside keeps focus, so no ring stays drawn.
-window.addEventListener("blur", () => {
-  const had = document.activeElement;
-  if (had instanceof HTMLElement && island.contains(had)) had.blur();
 });
 
 // Esc gives the keyboard back: settings and the session list close; a card
