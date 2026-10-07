@@ -2030,6 +2030,20 @@ Manual checks (Charan, 2026-10-07, Claude Code 2.1.292, Windows):
   saved). Checked on one monitor (same code path): moved to x=20, closed →
   strip stayed above it (old build: jumped to the top centre); reopened at
   the moved spot. Needs Charan with two screens.
+- Found (Charan, third round): (a) clicking back into the island after
+  another window had the keyboard didn't give it back, so Tab went to the
+  other window; (b) moving the open island and closing it with × sent the
+  strip back to the main screen (going through Settings didn't): the drag
+  was only noticed while the island stayed shown, and × hid it in the same
+  layout; (c) a thin line beside the island's top. Fixed (a): a click on
+  the open island takes the keyboard (the pill only opens it); (b): the
+  drag is noticed on the layout that hides it too. Checked on a test
+  instance at the top-centre spot with real clicks: clicked back on the
+  island's title → window in front, keyboard back, focus on the first
+  control, Tab moves on; × right after a move → strip stayed at the moved
+  spot. (c) not reproduced on the current build with Charan's steps (gear,
+  sounds list open, Tab, click away, click back): no bright pixel beside
+  the island's top in any capture.
 
 Keyboard / focus matrix (2026-10-07, test instance beside Charan's dev app,
 keys sent to the page over the debug port, real clicks only on the test
