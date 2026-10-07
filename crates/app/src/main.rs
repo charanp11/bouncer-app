@@ -14,7 +14,7 @@ use bouncer_core::approvals::{Desk, WAIT};
 use bouncer_core::away::{self, Away};
 use bouncer_core::hooks;
 use bouncer_core::ipc::{self, Handler, Server};
-use bouncer_core::prefs::{self, Prefs, Size};
+use bouncer_core::prefs::{self, Prefs, Size, Style};
 use bouncer_core::rules::{self, Mode};
 use serde_json::{Value, json};
 use tauri::image::Image;
@@ -547,9 +547,19 @@ fn set_prefs(
     island: State<'_, Island>,
     size: String,
     sound: bool,
+    style: String,
+    volume: u8,
+    sounds: Vec<String>,
 ) -> Result<(), String> {
-    let size = Size::parse(&size).ok_or("unknown size")?;
-    let new = Prefs { size, sound };
+    let new = Prefs {
+        size: Size::parse(&size).ok_or("unknown size")?,
+        sound,
+        style: Style::parse(&style).ok_or("unknown style")?,
+        volume: Some(volume)
+            .filter(|v| *v <= 100)
+            .ok_or("volume is 0 to 100")?,
+        sounds: Prefs::sounds_from(&sounds).ok_or("unknown sound")?,
+    };
     let path = island
         .prefs_path
         .as_deref()
