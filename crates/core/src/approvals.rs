@@ -72,6 +72,8 @@ struct Session {
     code: Option<Value>,
     /// Lines the current edit adds and removes (numbers only), for the pill.
     lines: Option<(usize, Option<usize>)>,
+    /// Tool calls that failed so far (for the "tool failed" sound).
+    failed: u64,
 }
 
 struct Pending {
@@ -144,6 +146,7 @@ impl State {
                     history: VecDeque::new(),
                     code: None,
                     lines: None,
+                    failed: 0,
                 });
                 self.sessions.len() - 1
             }
@@ -189,7 +192,8 @@ impl State {
                 session.step = "Idle".into();
                 session.lines = None;
             }
-            "PostToolUseFailure" => {
+            "PostToolUseFailure" if event.is_failure() => {
+                session.failed += 1;
                 if let Some(last) = session.history.back_mut()
                     && last.0 == step(event)
                 {
@@ -715,6 +719,7 @@ impl Desk {
                     "history": s.history.iter().map(|(label, how)| json!({ "label": visible(label), "how": how })).collect::<Vec<_>>(),
                     "code": s.code,
                     "lines": s.lines.map(|(added, removed)| json!([added, removed])),
+                    "failed": s.failed,
                 })
             })
             .collect();
@@ -873,6 +878,7 @@ mod tests {
             tool: Some("Bash".into()),
             input: Some(json!({ "command": command })),
             time: SystemTime::now(),
+            interrupted: false,
         }
     }
 
@@ -1038,6 +1044,7 @@ mod tests {
         let s = &view["sessions"][0];
         assert_eq!(s["status"], "working");
         assert_eq!(s["history"][0]["how"], FAILED);
+        assert_eq!(s["failed"], 1);
         // A failure for another call doesn't tag the latest step.
         assert_eq!(desk.handle(event("a", "PreToolUse", "ls")), None);
         assert_eq!(
@@ -1045,6 +1052,15 @@ mod tests {
             None
         );
         assert_eq!(desk.view()["sessions"][0]["history"][1]["how"], "");
+        assert_eq!(desk.view()["sessions"][0]["failed"], 2);
+        // Esc isn't a failure: no tag, no count.
+        assert_eq!(desk.handle(event("a", "PreToolUse", "sleep 9")), None);
+        let mut stop = event("a", "PostToolUseFailure", "sleep 9");
+        stop.interrupted = true;
+        assert_eq!(desk.handle(stop), None);
+        let view = desk.view();
+        assert_eq!(view["sessions"][0]["history"][2]["how"], "");
+        assert_eq!(view["sessions"][0]["failed"], 2);
     }
 
     /// Answered Yes in the terminal while the card is up, and the tool then
