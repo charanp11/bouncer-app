@@ -168,7 +168,10 @@ fn start_relay_server(desk: Arc<Desk>) {
     let server = ipc::endpoint().ok_or_else(|| std::io::Error::other("no endpoint"));
     match server.and_then(|path| Server::bind(&path)) {
         Ok(server) => {
-            let handler: Handler = Arc::new(move |event| desk.handle(event));
+            // While a card waits, a relay that hung up (Claude Code stopped the
+            // hook: answered in its own prompt) takes the card away at once.
+            let handler: Handler =
+                Arc::new(move |event, gone: &dyn Fn() -> bool| desk.handle_until(event, gone));
             std::thread::spawn(move || server.run(handler));
         }
         Err(e) => eprintln!("Bouncer: relay endpoint unavailable: {e}"),

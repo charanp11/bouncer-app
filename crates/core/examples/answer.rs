@@ -8,6 +8,7 @@
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex};
 
+use bouncer_core::event::Event;
 use bouncer_core::ipc::{self, Decision, Handler, Server};
 
 fn main() -> std::io::Result<()> {
@@ -15,7 +16,7 @@ fn main() -> std::io::Result<()> {
     let server = Server::bind(&path)?;
     println!("listening on {}", path.display());
     let console = Arc::new(Mutex::new(()));
-    let handler: Handler = Arc::new(move |event| {
+    let handler: Handler = Arc::new(move |event: Event, _: &dyn Fn() -> bool| {
         let _one_at_a_time = console.lock().unwrap();
         println!(
             "{} {} {} {}",

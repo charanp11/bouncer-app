@@ -63,7 +63,7 @@ fn wait_for<T>(seen: &Mutex<Vec<T>>, count: usize) {
 }
 
 fn always(decision: Option<Decision>) -> Handler {
-    Arc::new(move |_| decision)
+    Arc::new(move |_, _| decision)
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn fixtures_parse_into_events_and_relay_silently() {
     let log = seen.clone();
     let path = serve(
         "fixtures",
-        Arc::new(move |e: Event| {
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
             log.lock().unwrap().push(e.kind);
             Some(Decision::Allow)
         }),
@@ -220,7 +220,7 @@ fn two_sessions_stream_while_one_waits_for_a_decision() {
     let log = seen.clone();
     let path = serve(
         "two-sessions",
-        Arc::new(move |e: Event| {
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
             let asks = e.is_permission_request();
             log.lock().unwrap().push((e.session, e.kind));
             if asks {
@@ -292,7 +292,10 @@ fn decisions_from_the_desk_reach_claude_code() {
     use bouncer_core::approvals::{ARM, Desk, WAIT};
     let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
-    let path = serve("desk", Arc::new(move |e| handler.handle(e)));
+    let path = serve(
+        "desk",
+        Arc::new(move |e, gone| handler.handle_until(e, gone)),
+    );
     for allow in [false, true] {
         let child = spawn_relay(&path, &event("s", "PermissionRequest"));
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -313,12 +316,61 @@ fn decisions_from_the_desk_reach_claude_code() {
     }
 }
 
+/// Claude Code stops the hook when the request is answered in its own
+/// prompt: a relay that goes away mid-request takes its card with it at once
+/// (well before the wait runs out), unanswered, as "answered in terminal".
+#[test]
+fn a_relay_that_goes_away_takes_its_card_with_it() {
+    use bouncer_core::approvals::{Desk, WAIT};
+    let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
+    let handler = desk.clone();
+    let answered = Arc::new(Mutex::new(Vec::new()));
+    let seen = answered.clone();
+    let path = serve(
+        "gone",
+        Arc::new(move |e, gone| {
+            let answer = handler.handle_until(e, gone);
+            seen.lock().unwrap().push(answer);
+            answer
+        }),
+    );
+    let mut child = spawn_relay(&path, &event("s", "PermissionRequest"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while desk.view()["queue"][0]["id"].as_str().is_none() {
+        assert!(Instant::now() < deadline, "request never queued");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let killed = Instant::now();
+    while desk.view()["queue"]
+        .as_array()
+        .is_some_and(|q| !q.is_empty())
+    {
+        assert!(
+            killed.elapsed() < Duration::from_secs(1),
+            "card still up after the relay went"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    eprintln!("card gone {:?} after the relay", killed.elapsed());
+    wait_for(&answered, 1);
+    assert_eq!(answered.lock().unwrap()[0], None, "nothing is answered");
+    let view = desk.view();
+    let session = &view["sessions"][0];
+    assert_eq!(session["history"][0]["how"], "answered in terminal");
+    assert_eq!(session["status"], "idle");
+}
+
 #[test]
 fn questions_print_nothing_so_the_terminal_asks() {
     use bouncer_core::approvals::{Desk, WAIT};
     let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
-    let path = serve("question", Arc::new(move |e| handler.handle(e)));
+    let path = serve(
+        "question",
+        Arc::new(move |e, gone| handler.handle_until(e, gone)),
+    );
     for tool in ["AskUserQuestion", "ExitPlanMode"] {
         let input = serde_json::json!({
             "session_id": "s",
@@ -346,7 +398,10 @@ fn windows_paths_reach_the_island_intact() {
     use bouncer_core::approvals::{Desk, WAIT};
     let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
-    let path = serve("paths", Arc::new(move |e| handler.handle(e)));
+    let path = serve(
+        "paths",
+        Arc::new(move |e, gone| handler.handle_until(e, gone)),
+    );
     let project = r"C:\Users\chara\Desktop\Full Time\x";
     let input = serde_json::json!({
         "session_id": "s",
