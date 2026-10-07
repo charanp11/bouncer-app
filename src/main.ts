@@ -1022,9 +1022,23 @@ function render(view: View) {
   }
   const card = view.queue[0];
   const target = card && (card.id !== before || !keyboardBefore) ? `deny:${card.id}` : had;
-  const next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
+  let next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
+  // Nothing to go back to (the keyboard just arrived, or the focused control
+  // went, e.g. a row that opened its detail): the first control (in the body
+  // if there is one), so the keyboard is never stranded.
+  if (!next && !island.contains(document.activeElement)) {
+    next = controls(island.querySelector<HTMLElement>(".body") ?? island)[0] ?? controls(island)[0];
+  }
   refocus = null;
   next?.focus({ preventScroll: true });
+}
+
+/** The controls Tab moves through, in order: only ones you can see (a
+ * closed list's switches are skipped). */
+function controls(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), summary, [tabindex='0']")].filter((n) =>
+    n.checkVisibility(),
+  );
 }
 
 /** Where focus goes when the focused control disappears (a confirm closed). */
@@ -1213,7 +1227,7 @@ document.addEventListener(
 // focus to the window frame.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Tab") return;
-  const all = [...island.querySelectorAll<HTMLElement>("button:not(:disabled), [tabindex='0']")];
+  const all = controls(island);
   if (!all.length) return;
   const at = all.indexOf(document.activeElement as HTMLElement);
   const next = e.shiftKey ? (at <= 0 ? all.length - 1 : at - 1) : at === -1 || at === all.length - 1 ? 0 : at + 1;
