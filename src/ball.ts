@@ -6,6 +6,7 @@
 // Frames run only while something moves, and never while the page is
 // hidden or the OS asks for reduced motion. The island's Bouncer keeps one
 // Motion across re-renders, so a rebuilt island doesn't restart him.
+import { play } from "./sound.ts";
 import { advance, blink, BLINK_MS, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
 
 export type BallState = Mood;
@@ -122,6 +123,7 @@ function poke(b: Live) {
   const dizzy = clicks.length >= DIZZY_CLICKS;
   if (dizzy) clicks = [];
   squish(b.m, dizzy);
+  play(dizzy ? "dizzy" : "poke");
   kick();
 }
 

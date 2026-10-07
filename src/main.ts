@@ -10,7 +10,8 @@ import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
 import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
-import { cue, play, type Heard } from "./sound.ts";
+import { CUES, PACK, type Cue, type Style } from "./pack.ts";
+import { cue, play, tune, type Heard } from "./sound.ts";
 import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -64,7 +65,7 @@ type Away = {
   stuck: { minutes: number; project: string; what: string } | null;
 };
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
-type Prefs = { size: string; sound: boolean };
+type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>> };
 /** Read-only facts for the settings screen (asked for when it opens). */
 type About = { rules: string | null; hooks: "installed" | "missing" | "unknown" };
 type View = {
@@ -400,6 +401,7 @@ function decide(request: Request, allow: boolean, buttons: HTMLButtonElement[]) 
   const shown = { request, ok: allow, until: performance.now() + TOAST_MS };
   toast = shown;
   invoke("decide", { id: request.id, allow })
+    .then(() => play(allow ? "allowed" : "denied"))
     .catch(() => {
       // Refused (too soon, or already answered): show the current state again.
       if (toast === shown) toast = null;
@@ -477,6 +479,7 @@ function alwaysPreview(request: Request, offer: string, mode: string): HTMLEleme
     const shown = { request, ok: true, until: performance.now() + RULE_TOAST_MS, text };
     toast = shown;
     invoke("always", { id: request.id })
+      .then(() => play("vip"))
       .catch(() => {
         // Refused (too soon, already answered, or the file couldn't be saved).
         if (toast === shown) toast = null;
@@ -751,7 +754,8 @@ function toggle(label: string, on: boolean, onClick: () => void): HTMLButtonElem
 
 function savePrefs(prefs: Prefs) {
   // The backend saves, then sends the new view.
-  invoke("set_prefs", { size: prefs.size, sound: prefs.sound }).catch(() => {});
+  const sounds = CUES.filter((c) => prefs.sounds[c]);
+  invoke("set_prefs", { size: prefs.size, sound: prefs.sound, style: prefs.style, volume: prefs.volume, sounds }).catch(() => {});
 }
 
 function closeSettings() {
@@ -802,6 +806,7 @@ function autoRow(view: View): HTMLElement {
     on.addEventListener("click", () => {
       on.disabled = true;
       invoke("set_mode", { mode: "auto" })
+        .then(() => play("autoon"))
         .catch(() => {})
         .finally(close);
     });
@@ -827,6 +832,58 @@ function autoRow(view: View): HTMLElement {
   }
   if (auto) confirmingAuto = false;
   return row;
+}
+
+/** The "Which sounds" list is open (kept across re-renders). */
+let soundsOpen = false;
+
+/** Sound style, volume and one switch per sound (prototype v0.14). */
+function soundRows(prefs: Prefs): HTMLElement[] {
+  const style = el("div", "seg");
+  style.setAttribute("role", "radiogroup");
+  style.setAttribute("aria-label", "Sound style");
+  for (const [value, label] of [["soft", "Soft"], ["playful", "Playful"]] as const) {
+    const b = el("button", "", label);
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(prefs.style === value));
+    b.addEventListener("click", () => savePrefs({ ...prefs, style: value }));
+    style.append(b);
+  }
+  const volume = el("input", "vol");
+  volume.type = "range";
+  volume.min = "0";
+  volume.max = "100";
+  volume.step = "5";
+  volume.value = String(prefs.volume);
+  volume.dataset.key = "volume";
+  volume.setAttribute("aria-label", "Volume");
+  volume.setAttribute("aria-valuetext", `${prefs.volume}%`);
+  const pct = el("span", "", `${prefs.volume}%`);
+  volume.addEventListener("input", () => (pct.textContent = `${volume.value}%`));
+  // Saved when let go, not on every step of a drag.
+  volume.addEventListener("change", () => savePrefs({ ...prefs, volume: Number(volume.value) }));
+
+  const which = el("details", "which");
+  which.open = soundsOpen;
+  which.addEventListener("toggle", () => (soundsOpen = which.open));
+  const summary = el("summary", "", `Which sounds \u00b7 ${CUES.filter((c) => prefs.sounds[c]).length} of ${CUES.length} on`);
+  summary.dataset.key = "which";
+  const list = el("div", "soundlist");
+  for (const c of CUES) {
+    const row = el("div");
+    const sw = toggle(PACK[c].label, !!prefs.sounds[c], () => savePrefs({ ...prefs, sounds: { ...prefs.sounds, [c]: !prefs.sounds[c] } }));
+    sw.dataset.key = `sound-${c}`;
+    row.append(el("span", "", PACK[c].label), sw);
+    list.append(row);
+  }
+  which.append(summary, list);
+  const sounds = setRow("Sounds", []);
+  sounds.append(which);
+  return [
+    setRow("Sound style", [style], "Soft is calmer. Needs you and risky always stand out."),
+    setRow("Volume", [volume, pct]),
+    sounds,
+  ];
 }
 
 /** The prototype's "Settings": Size, Sound, history, rules file, hooks. */
@@ -860,9 +917,10 @@ function renderSettings(view: View, state: BallState) {
     setRow(
       "Sound",
       [el("span", "", prefs.sound ? "On" : "Off"), toggle("Sound", prefs.sound, () => savePrefs({ ...prefs, sound: !prefs.sound }))],
-      "Needs you, risky, done. Not while paused.",
+      "All sounds. Never while paused.",
     ),
   );
+  list.append(...soundRows(prefs));
 
   list.append(autoRow(view));
 
@@ -889,6 +947,7 @@ function renderSettings(view: View, state: BallState) {
     del.addEventListener("click", () => {
       del.disabled = true;
       invoke("wipe")
+        .then(() => play("wiped"))
         .catch(() => {})
         .finally(() => {
           wiping = false;
@@ -958,7 +1017,7 @@ function focusKey(node: Element | null): string | null {
 }
 
 function findKey(key: string): HTMLElement | undefined {
-  return [...island.querySelectorAll<HTMLElement>("button, [tabindex]")].find((n) => focusKey(n) === key);
+  return [...island.querySelectorAll<HTMLElement>("button, [tabindex], input, summary")].find((n) => focusKey(n) === key);
 }
 
 const announcer = document.getElementById("announce")!;
@@ -973,7 +1032,8 @@ function announce(kind: string, view: View) {
   else if (kind === "needs" && card) text = `Needs you: ${what(card.tool)} in ${folder(card.project)}.`;
   else if (kind === "needs" && asking) text = `Needs you: ${folder(asking.project)} is asking in the terminal.`;
   else if (kind === "done" && finishedNow) text = `${folder(finishedNow.project)} finished.`;
-  announcer.textContent = text;
+  else if (kind === "fail") text = "A tool call failed.";
+  if (text) announcer.textContent = text;
 }
 
 function draw(view: View) {
@@ -988,9 +1048,11 @@ function draw(view: View) {
   const ended = finished(statuses, view.sessions);
   if (ended) doneUntil = now + DONE_MS;
   statuses = new Map(view.sessions.map((s) => [s.id, s.status]));
+  const { prefs } = view;
+  tune({ on: prefs.sound, style: prefs.style, volume: prefs.volume, sounds: prefs.sounds, paused: view.paused });
   const sound = cue(heard, view, ended);
   heard = sound.heard;
-  if (sound.cue && view.prefs.sound) play(sound.cue);
+  if (sound.cue && (sound.cue !== "launch" || greeting(view, now, greetUntil, REDUCED.matches))) play(sound.cue);
   if (sound.cue) announce(sound.cue, view);
   const done = now < doneUntil;
   if (done) later(doneUntil - now);
