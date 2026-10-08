@@ -105,7 +105,8 @@ pub struct Summary {
 }
 
 /// Sums up `entries` (oldest first) for the span `since..=now`. `None` if
-/// nothing happened.
+/// nothing happened: no tool call and no request (sessions only starting,
+/// stopping or ending are no news).
 pub fn summarize(entries: &[Entry], since: u64, now: u64) -> Option<Summary> {
     let entries: Vec<&Entry> = entries
         .iter()
@@ -133,6 +134,9 @@ pub fn summarize(entries: &[Entry], since: u64, now: u64) -> Option<Summary> {
         .iter()
         .filter(|e| is(e, "PermissionRequest"))
         .count();
+    if calls == 0 && requests == 0 {
+        return None;
+    }
     let asked = requests.saturating_sub(entries.iter().filter(|e| by_rule(e)).count());
 
     // Each request not answered by a rule waits until the user answers it on
@@ -256,6 +260,19 @@ mod tests {
         assert_eq!(summarize(&[], 0, 1000), None);
         let old = entry(5, "a", "Stop", None, "");
         assert_eq!(summarize(&[old], 10, 1000), None);
+    }
+
+    /// Sessions that started, stopped or ended but did nothing: no tool call,
+    /// no request. An all-zero summary would open the island for nothing.
+    #[test]
+    fn a_span_with_no_work_means_no_summary() {
+        let quiet = [
+            entry(20, "a", "SessionStart", None, ""),
+            entry(30, "a", "Notification", None, ""),
+            entry(40, "a", "Stop", None, ""),
+            entry(50, "a", "SessionEnd", None, ""),
+        ];
+        assert_eq!(summarize(&quiet, 10, 1000), None);
     }
 
     /// A 30-minute span over two sessions, in the shape the desk logs real
