@@ -729,16 +729,45 @@ pre.cmd {
   transform: translateY(-1px) rotate(-45deg);
 }
 
+/* running: three turns when the step starts (motion budget), then it
+   settles into a still "running" mark: a sun disc with three dots */
 .ic.spin {
   border: 2px solid rgba(255, 255, 255, 0.18);
   border-top-color: var(--sun);
-  /* a few turns when the step starts, then a still ring (motion budget) */
-  animation: spin 800ms linear 3;
+  animation:
+    spin 800ms linear 3,
+    settle 0s 2400ms forwards;
+}
+
+.ic.spin::after {
+  content: "";
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--island);
+  box-shadow:
+    -4px 0 var(--island),
+    4px 0 var(--island);
+  opacity: 0;
+  animation: settle-dots 0s 2400ms forwards;
 }
 
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes settle {
+  to {
+    border-color: transparent;
+    background: var(--sun);
+  }
+}
+
+@keyframes settle-dots {
+  to {
+    opacity: 1;
   }
 }
 
@@ -1399,5 +1428,15 @@ pre.cmd {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+
+  /* no turns: the still "running" mark from the start */
+  .ic.spin {
+    border-color: transparent;
+    background: var(--sun);
+  }
+
+  .ic.spin::after {
+    opacity: 1;
   }
 }
