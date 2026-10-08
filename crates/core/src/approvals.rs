@@ -1219,6 +1219,32 @@ mod tests {
         assert_eq!(view["sessions"][0]["failed"], 2);
     }
 
+    /// The recorded failures (Bash 2.1.291, PowerShell 2.1.293, a non-zero
+    /// exit each) mark their step "failed" after the call's own PreToolUse.
+    #[test]
+    fn recorded_failures_mark_their_step() {
+        for recorded in [
+            include_str!(
+                "../../relay/tests/fixtures/claude-code-2.1.291-PostToolUseFailure-Bash.json"
+            ),
+            include_str!(
+                "../../relay/tests/fixtures/claude-code-2.1.293-PostToolUseFailure-PowerShell.json"
+            ),
+        ] {
+            let desk = desk(Duration::from_millis(100));
+            let failure: Value = serde_json::from_str(recorded).unwrap();
+            let mut pre = failure.clone();
+            pre["hook_event_name"] = json!("PreToolUse");
+            for hook in [pre, failure] {
+                assert_eq!(desk.handle(Event::from_claude_code(&hook).unwrap()), None);
+            }
+            let view = desk.view();
+            let s = &view["sessions"][0];
+            assert_eq!(s["history"][0]["how"], FAILED, "{recorded}");
+            assert_eq!(s["failed"], 1);
+        }
+    }
+
     /// Answered Yes in the terminal while the card is up, and the tool then
     /// failed: the failure clears the stale card like a PostToolUse.
     #[test]
