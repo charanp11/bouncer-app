@@ -2409,7 +2409,7 @@ new place, a dropped session coming back, install touching only its
 target, two cards from one session, the CSP and the window's commands, a
 burst of simultaneous hooks, a second launch. Each got a test; the real-
 click rows were run on the test instance. Three bugs, each shown failing
-first, then fixed in its own commit:
+first, then fixed in its own commit (a fourth came from review):
 
 1. **Events lost in a burst of hooks** (the flaky
    `two_sessions_stream_while_one_waits_for_a_decision`). Cause: a
@@ -2430,13 +2430,21 @@ first, then fixed in its own commit:
    "While you were away" with all zeros. Fix: no tool call and no request
    means no summary (test).
 
+4. **The tray wiped history in one click** (Charan, after review): its
+   "Wipe history" deleted at once, no confirm, beside Pause and Quit. Now
+   "Wipe history…" opens Settings at its existing confirm (Cancel first,
+   the armed "Delete history"); the only wipe is that button. Tests: one
+   wipe path in the app (it fails with a second one), and the page's wipe
+   only on the armed button; checked on the test instance (page-level);
+   the tray click itself is hand check 2.
+
 Found, not changed (decision for Charan): the live island shows commands
 exactly as sent, secrets included (you approve what you see; nothing is
 written; the log and the away summary are redacted). `docs/TESTS.md` L5.
 
 Done when:
 
-- [x] `docs/TESTS.md`: 82 scenarios, 73 automated in CI, 5 real-click only
+- [x] `docs/TESTS.md`: 83 scenarios, 74 automated in CI, 5 real-click only
   (run 2026-10-08), 3 hand checks (about 15 minutes), M3 waits for Phase 9
 - [x] Every row with no proof got a test, or a real-click run, or a hand check
 - [x] CI checks every named test exists, on Windows and macOS

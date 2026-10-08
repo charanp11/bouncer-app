@@ -79,7 +79,8 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | U4 | Missing rules file | Created with the defaults | unit | `rules::tests::missing_file_is_created_with_defaults` | CI |
 | U5 | Rules file others can write | Refused (Windows access list; macOS mode and links) | unit | `rules::tests::access_lists_with_other_writers_are_refused` `windows: rules::tests::own_files_pass_the_windows_access_check` `macos: rules::tests::files_others_can_write_are_refused` | CI |
 | U6 | preferences.json corrupt or missing | Defaults, per field; unknown sound names refused | unit, frontend | `prefs::tests::missing_file_gives_defaults_and_save_reads_back` `prefs::tests::unknown_or_broken_values_fall_back_per_field` `prefs::tests::sounds_from_names_refuses_unknown_names` `ts: the pack is exactly the sounds preferences.json knows, in its order` | CI |
-| U7 | Wipe history | Every day file and the summary deleted; only our files | unit | `activity::tests::old_days_are_deleted_and_wipe_deletes_all` `approvals::tests::coming_back_shows_a_summary_until_closed_and_wipe_empties_it` | CI |
+| U7 | Wipe history | Settings → Wipe… → confirm: Cancel keeps everything; "Delete history" is armed; then every day file and the summary are deleted, only our files, the pill says so, logging carries on | unit, real-click (page-level) | `activity::tests::old_days_are_deleted_and_wipe_deletes_all` `approvals::tests::coming_back_shows_a_summary_until_closed_and_wipe_empties_it` | CI; real-click 2026-10-08 |
+| U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 |
 | U8 | Rules added one at a time | Appended atomically, read back exactly | unit | `rules::tests::add_appends_one_rule_atomically` `rules::tests::scoped_rules_read_back_exactly` `rules::tests::rules_read_back_from_their_toml` `rules::tests::scoped_rule_keys_are_checked` | CI |
 
 ## Redaction and the activity log
@@ -130,7 +131,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | UI12 | CSP and capabilities | Only our script and style; no inline, eval or remote; only our own commands | unit | `tests::strict_csp_and_only_our_commands` | CI |
 | UI13 | Window region | Only the box catches clicks; the card's buttons always inside it | unit | `region::tests::the_region_is_only_the_box` `region::tests::the_region_always_holds_the_cards_buttons` `region::tests::the_no_region_switch_works_in_debug_builds_only` | CI |
 | UI14 | Fits the screen | Never taller than the work area; the frame fits every view | frontend | `ts: the open island is never taller than the work area` `ts: the frame fits every view and the work area` `ts: fully visible: the viewport holds the whole page, within 2 px` | CI |
-| UI15 | Tray menu | Pause / Resume, open, Wipe history (with its confirm), quit | hand | — | Hand 2 |
+| UI15 | Tray menu | Pause / Resume, open, Settings…, Wipe history… (opens Settings' confirm), quit | hand | — | Hand 2 |
 | UI16 | Screen reader | Card, list and Settings read in order with their names | hand | — | Hand 3 |
 | UI17 | Code pane | Rust / shell highlighting keeps every line exactly | frontend, unit | `ts: pieces always join back to the exact line` `code::tests::write_multiedit_and_bash` `diff::tests::keeps_removes_and_adds_lines` | CI |
 
@@ -156,9 +157,12 @@ never the real `~/.claude/settings.json`.
    Expected: each as said; nothing harsh.
 2. **Tray menu (about 3 min).** Right-click Bouncer's tray icon. Pause → the
    island goes grey, a request in the playground goes straight to the
-   terminal. Resume. "Wipe history" → its confirm → the away summary and the
-   history are empty. Quit → the island goes; a request in the playground is
-   asked in the terminal. Expected: each as said.
+   terminal. Resume. "Wipe history…" → nothing is deleted yet: the island
+   opens at Settings' confirm ("Delete all activity history? This can't be
+   undone.") with the keyboard on Cancel. Cancel → still there. "Wipe
+   history…" again → wait for "Delete history" to arm → click it → the pill
+   says "History wiped". Quit → the island goes; a request in the playground
+   is asked in the terminal. Expected: each as said.
 3. **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
    card up, click the card text, then Tab: Narrator reads "Deny", "Allow
    once", "Always allow…" with the command before them; open Settings and
