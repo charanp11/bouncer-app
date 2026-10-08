@@ -154,7 +154,13 @@ fn main() {
                 // Fail safe: if it can't be set up, the window works as before.
                 region::no_caption(&window);
             }
-            start_relay_server(desk.clone());
+            if start_relay_server(desk.clone()) == Relay::AlreadyRunning {
+                // A second launch: the first Bouncer has the pipe and the
+                // sessions; a second island would never hear anything. Quit
+                // before anything shows (an exit request here comes before
+                // the event loop and is ignored, so leave at once).
+                std::process::exit(0);
+            }
             tray(app, desk)?;
             Ok(())
         })
@@ -162,20 +168,48 @@ fn main() {
         .expect("error while running Bouncer");
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Relay {
+    Listening,
+    /// Another Bouncer of this user already answers on the endpoint.
+    AlreadyRunning,
+    /// Nobody of ours to talk to (no endpoint, or someone else holds it).
+    Unavailable,
+}
+
 /// Listens for the relay. If this fails, hooks find nobody and Claude Code
-/// keeps asking in the terminal, so the app still starts.
-fn start_relay_server(desk: Arc<Desk>) {
-    let server = ipc::endpoint().ok_or_else(|| std::io::Error::other("no endpoint"));
-    match server.and_then(|path| Server::bind(&path)) {
+/// keeps asking in the terminal, so the app still starts, unless the
+/// endpoint is taken by another Bouncer of ours (then this one is a second
+/// launch).
+fn start_relay_server(desk: Arc<Desk>) -> Relay {
+    let Some(path) = ipc::endpoint() else {
+        eprintln!("Bouncer: relay endpoint unavailable: no endpoint");
+        return Relay::Unavailable;
+    };
+    match Server::bind(&path) {
         Ok(server) => {
             // While a card waits, a relay that hung up (Claude Code stopped the
             // hook: answered in its own prompt) takes the card away at once.
             let handler: Handler =
                 Arc::new(move |event, gone: &dyn Fn() -> bool| desk.handle_until(event, gone));
             std::thread::spawn(move || server.run(handler));
+            Relay::Listening
         }
-        Err(e) => eprintln!("Bouncer: relay endpoint unavailable: {e}"),
+        Err(e) if another_bouncer_answers(&path) => {
+            eprintln!("Bouncer: already running ({e})");
+            Relay::AlreadyRunning
+        }
+        Err(e) => {
+            eprintln!("Bouncer: relay endpoint unavailable: {e}");
+            Relay::Unavailable
+        }
     }
+}
+
+/// True if a server on `path` answers and passes the relay's own check (the
+/// same user). It's sent nothing: an empty connection is ignored.
+fn another_bouncer_answers(path: &std::path::Path) -> bool {
+    ipc::answers(path)
 }
 
 /// How often the background checks run (each is a metadata read or less).
@@ -689,6 +723,23 @@ fn expand(app: AppHandle, island: State<'_, Island>, open: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A second launch finds the first one answering; a free endpoint has
+    /// nobody (the first launch).
+    #[test]
+    fn a_second_launch_sees_the_first_one() {
+        let id = format!("bouncer-app-test-{}-second", std::process::id());
+        #[cfg(windows)]
+        let path = std::path::PathBuf::from(format!(r"\\.\pipe\{id}"));
+        #[cfg(unix)]
+        let path = std::env::temp_dir().join(&id).join("bouncer.sock");
+        assert!(!another_bouncer_answers(&path));
+        let server = Server::bind(&path).unwrap();
+        let handler: Handler = Arc::new(|_, _: &dyn Fn() -> bool| None);
+        std::thread::spawn(move || server.run(handler));
+        assert!(another_bouncer_answers(&path));
+        assert!(Server::bind(&path).is_err());
+    }
 
     /// The shipped page may run only its own script and style (no inline
     /// code, no eval, nothing remote), and the window may call only our own
