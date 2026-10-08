@@ -1099,6 +1099,27 @@ mod tests {
         assert_eq!(queued(&desk, 0).len(), 0);
     }
 
+    /// Two requests from one session (parallel tools): both wait, in order,
+    /// and each answer reaches only its own request.
+    #[test]
+    fn two_cards_from_one_session_wait_in_order() {
+        let desk = desk(WAIT);
+        let first = ask(&desk, "a", "mkdir one");
+        queued(&desk, 1);
+        let second = ask(&desk, "a", "mkdir two");
+        let ids = queued(&desk, 2);
+        let view = desk.view();
+        assert_eq!(view["queue"][0]["text"], "mkdir one");
+        assert_eq!(view["queue"][1]["text"], "mkdir two");
+        assert_eq!(view["queue"][0]["session"], view["queue"][1]["session"]);
+        desk.decide(&ids[1], false).unwrap();
+        assert_eq!(second.join().unwrap(), Some(Decision::Deny));
+        assert_eq!(queued(&desk, 1), ids[..1]);
+        std::thread::sleep(ARM);
+        desk.decide(&ids[0], true).unwrap();
+        assert_eq!(first.join().unwrap(), Some(Decision::Allow));
+    }
+
     #[test]
     fn allow_is_refused_before_the_arm_delay() {
         let desk = desk(WAIT);
