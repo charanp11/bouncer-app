@@ -252,6 +252,25 @@ export function pose(m: Motion): Pose {
   };
 }
 
+/** The SVG's size in units, and the points the body turns about (its
+ * bottom centre) and the shadow scales about (its centre). styles.css sets
+ * these as the boxes' transform-origin. */
+export const VIEW = 32;
+export const BODY_ORIGIN = [16, 29] as const;
+export const SHADOW_ORIGIN = [16, 30] as const;
+
+const n = (x: number) => x.toFixed(3);
+
+/** A pose as CSS for the body and shadow boxes (each the SVG's size, so a
+ * unit is 1/32 of the box): the same picture as the old in-SVG transforms. */
+export function boxes(p: Pose): { lift: string; shade: string; fade: string } {
+  return {
+    lift: `translateY(${n((-p.y / VIEW) * 100)}%) rotate(${n(p.rot)}deg) scale(${n(p.sx)},${n(p.sy)})`,
+    shade: `scale(${n(p.shadow)},1)`,
+    fade: n(p.shadowOpacity),
+  };
+}
+
 /** Reduced motion: the mood's still pose. */
 export function still(): Pose {
   return { y: 0, sx: 1, sy: 1, rot: 0, shadow: 1, shadowOpacity: 0.35, look: [0, 0], lens: 1, tilt: 0 };

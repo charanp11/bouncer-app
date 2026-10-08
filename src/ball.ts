@@ -1,13 +1,15 @@
 // Bouncer, drawn in code: the SVG from design/prototype ("Meet Bouncer"),
 // built element by element (never parsed from a string). The mood is a
 // class on the wrapper (colors, which face shows, in styles.css); the motion
-// comes from motion.ts, written into the SVG's transforms here.
+// comes from motion.ts. Three stacked SVG boxes (shadow, body, the "z" and
+// "!"): the body and shadow move as whole boxes on their own layers, so a
+// frame is a transform for the compositor, not a new layout and paint.
 //
 // Frames run only while something moves, and never while the page is
 // hidden or the OS asks for reduced motion. The island's Bouncer keeps one
 // Motion across re-renders, so a rebuilt island doesn't restart him.
 import { play } from "./sound.ts";
-import { advance, blink, BLINK_MS, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
+import { advance, blink, BLINK_MS, boxes, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
 
 export type BallState = Mood;
 
@@ -38,13 +40,16 @@ function group(cls: string, parts: (Part | SVGElement)[]): SVGElement {
 }
 
 type Live = {
-  svg: SVGElement;
-  jumper: SVGElement;
-  shadow: SVGElement;
+  wrap: HTMLElement;
+  /** The body and the shadow, each in its own box, moved with CSS. */
+  body: HTMLElement;
+  shadow: HTMLElement;
   face: SVGElement;
   lens: SVGElement;
   glint: SVGElement;
   m: Motion;
+  /** What was last written per target, so an unchanged pose writes nothing. */
+  last: Map<string, string>;
 };
 
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
@@ -58,18 +63,30 @@ let clicks: number[] = [];
 
 const n = (x: number) => x.toFixed(3);
 
+/** Writes only what changed since the last frame. */
+function put(b: Live, key: string, value: string, write: () => void) {
+  if (b.last.get(key) === value) return;
+  b.last.set(key, value);
+  write();
+}
+
 function draw(b: Live, p: Pose) {
-  // Everything turns about the bottom centre (16, 29) and is transform-only:
-  // he never changes the layout around him.
-  b.jumper.setAttribute(
-    "transform",
-    `translate(0 ${n(-p.y)}) rotate(${n(p.rot)} 16 29) translate(16 29) scale(${n(p.sx)} ${n(p.sy)}) translate(-16 -29)`,
-  );
-  b.shadow.setAttribute("transform", `translate(16 30) scale(${n(p.shadow)} 1) translate(-16 -30)`);
-  (b.shadow as SVGElement & ElementCSSInlineStyle).style.opacity = n(p.shadowOpacity);
-  b.face.setAttribute("transform", `translate(${n(p.look[0])} ${n(p.look[1])})`);
-  b.lens.setAttribute("transform", `rotate(${n(p.tilt)} 16 15.6) translate(0 15.6) scale(1 ${n(p.lens)}) translate(0 -15.6)`);
-  b.glint.setAttribute("transform", `translate(${n(p.look[0] * 0.5)} ${n(p.look[1] * 0.3)})`);
+  // Everything is transform-only: he never changes the layout around him.
+  // The body and the shadow move as whole boxes (CSS transforms on their own
+  // layers, origins in styles.css: the bottom centre (16, 29) and the
+  // shadow's (16, 30)). Transforms inside an SVG make Chromium lay it out
+  // again on every frame; the face's only change when he looks, blinks or
+  // gets dizzy.
+  const { lift, shade, fade } = boxes(p);
+  put(b, "lift", lift, () => (b.body.style.transform = lift));
+  put(b, "shade", shade, () => (b.shadow.style.transform = shade));
+  put(b, "fade", fade, () => (b.shadow.style.opacity = fade));
+  const face = `translate(${n(p.look[0])} ${n(p.look[1])})`;
+  put(b, "face", face, () => b.face.setAttribute("transform", face));
+  const lens = `rotate(${n(p.tilt)} 16 15.6) translate(0 15.6) scale(1 ${n(p.lens)}) translate(0 -15.6)`;
+  put(b, "lens", lens, () => b.lens.setAttribute("transform", lens));
+  const glint = `translate(${n(p.look[0] * 0.5)} ${n(p.look[1] * 0.3)})`;
+  put(b, "glint", glint, () => b.glint.setAttribute("transform", glint));
 }
 
 function frame(now: number) {
@@ -82,7 +99,7 @@ function frame(now: number) {
   last = now;
   let more = false;
   for (const b of live) {
-    if (!b.svg.isConnected) {
+    if (!b.wrap.isConnected) {
       live.delete(b);
       continue;
     }
@@ -111,7 +128,7 @@ function scheduleBlink() {
     };
     shut(false);
     setTimeout(shut, BLINK_MS, true);
-    if ([...live].some((b) => b.svg.isConnected)) scheduleBlink();
+    if ([...live].some((b) => b.wrap.isConnected)) scheduleBlink();
   }, BLINK_MIN_MS + Math.random() * BLINK_SPREAD_MS);
 }
 
@@ -131,7 +148,7 @@ function poke(b: Live) {
 document.addEventListener("mousemove", (e) => {
   if (reduce.matches) return;
   for (const b of live) {
-    const r = b.svg.getBoundingClientRect();
+    const r = b.wrap.getBoundingClientRect();
     if (!r.width) continue;
     const dx = e.clientX - (r.left + r.width / 2);
     const dy = e.clientY - (r.top + r.height / 2);
@@ -158,8 +175,10 @@ reduce.addEventListener("change", () => {
 export function ball(state: BallState, size: "" | "big" | "sheet" = "", m: Motion = island): HTMLElement {
   const wrap = document.createElement("span");
   wrap.className = `ball ${state}${size ? ` ${size}` : ""}`;
-  const svg = part(["svg", { viewBox: "0 0 32 32", "aria-hidden": "true" }]);
-  const shadow = part(["ellipse", { class: "shadow", cx: "16", cy: "30", rx: "8", ry: "1.6" }]);
+  const box = () => part(["svg", { viewBox: "0 0 32 32", "aria-hidden": "true" }]);
+  // Three boxes, stacked: the shadow under the body, the "z" and "!" above it.
+  const [back, body, front] = [box(), box(), box()];
+  back.append(part(["ellipse", { class: "shadow", cx: "16", cy: "30", rx: "8", ry: "1.6" }]));
   const glint = part(["rect", { class: "glint", x: "9.4", y: "14.2", width: "3.4", height: "1.1", rx: ".55" }]);
   const lens = group("lens", [["rect", { class: "shades", x: "7.2", y: "13", width: "17.6", height: "5.2", rx: "2.6" }], glint]);
   const face = group("face", [
@@ -174,25 +193,31 @@ export function ball(state: BallState, size: "" | "big" | "sheet" = "", m: Motio
     ["ellipse", { class: "shine", cx: "10.5", cy: "10.8", rx: "3.2", ry: "1.9", transform: "rotate(-35 10.5 10.8)" }],
     face,
   ]);
-  svg.append(
-    shadow,
-    jumper,
+  body.append(jumper);
+  front.append(
     part(["text", { class: "zz", x: "25", y: "7" }, "z"]),
     group("alert", [
       ["circle", { cx: "27", cy: "5", r: "4.2" }],
       ["text", { x: "25.9", y: "7.6" }, "!"],
     ]),
   );
-  wrap.append(svg);
+  const layer = (cls: string, svg: SVGElement) => {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.append(svg);
+    return span;
+  };
+  const [backBox, bodyBox] = [layer("shade", back), layer("lift", body)];
+  wrap.append(backBox, bodyBox, front);
 
   // A rebuilt island replaces the old node; the Motion carries on.
   for (const b of live) if (b.m === m) live.delete(b);
-  const b: Live = { svg, jumper, shadow, face, lens, glint, m };
+  const b: Live = { wrap, body: bodyBox, shadow: backBox, face, lens, glint, m, last: new Map() };
   live.add(b);
   setMood(m, state);
   draw(b, reduce.matches ? still() : pose(m));
   // A click squashes him and goes no further (it doesn't open the island).
-  svg.addEventListener("click", (e) => {
+  wrap.addEventListener("click", (e) => {
     e.stopPropagation();
     poke(b);
   });

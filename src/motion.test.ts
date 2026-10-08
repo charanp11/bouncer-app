@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { advance, blink, lookAt, motion, moving, pose, setMood, squish, type Motion } from "./motion.ts";
+import { readFileSync } from "node:fs";
+import { advance, blink, BODY_ORIGIN, boxes, lookAt, motion, moving, pose, setMood, SHADOW_ORIGIN, squish, still, VIEW, type Motion } from "./motion.ts";
 
 /** Runs `seconds` at `hz` (jittered by up to ±50% when asked); returns the poses. */
 function run(m: Motion, seconds: number, hz: number, jitter = false) {
@@ -140,4 +141,26 @@ test("a blink shuts and opens the shades without asking for frames", () => {
   setMood(m, "paused");
   blink(m);
   assert.equal(pose(m).lens, 1);
+});
+
+test("the body and shadow boxes carry the pose as CSS, about the right points", () => {
+  assert.deepEqual(boxes(still()), {
+    lift: "translateY(0.000%) rotate(0.000deg) scale(1.000,1.000)",
+    shade: "scale(1.000,1)",
+    fade: "0.350",
+  });
+  // Up is negative; a unit is 1/32 of the box, whatever its size.
+  const p = { ...still(), y: 8, rot: -6, sx: 0.9, sy: 1.1, shadow: 0.6, shadowOpacity: 0.25 };
+  assert.deepEqual(boxes(p), {
+    lift: "translateY(-25.000%) rotate(-6.000deg) scale(0.900,1.100)",
+    shade: "scale(0.600,1)",
+    fade: "0.250",
+  });
+  // styles.css turns the boxes about the same points the old SVG did.
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const origin = (sel: string) =>
+    css.match(new RegExp(String.raw`\.ball \.${sel} \{[^}]*transform-origin: ([\d.]+)% ([\d.]+)%`))?.slice(1).map(Number);
+  const pct = ([x, y]: readonly [number, number]) => [(x / VIEW) * 100, (y / VIEW) * 100];
+  assert.deepEqual(origin("lift"), pct(BODY_ORIGIN));
+  assert.deepEqual(origin("shade"), pct(SHADOW_ORIGIN));
 });
