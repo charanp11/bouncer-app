@@ -2442,7 +2442,8 @@ Done when:
 - [x] CI checks every named test exists, on Windows and macOS
 - [x] The flaky relay test: cause found, shown failing, fixed without
   raising a timeout
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local: 168 Rust + 57 frontend; CI: 172 Rust on macOS, the gate on both)
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
