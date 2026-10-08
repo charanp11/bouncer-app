@@ -2377,6 +2377,23 @@ Done when:
 - [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   (local: 158 Rust + 56 frontend)
 
+Hand check of #19 (2026-10-08, test instance and black backdrop, real
+cursor and clicks behind the guard). "Loop ran" = seconds with frames
+(style recalcs > 10 that second):
+
+| Check | Result |
+| --- | --- |
+| Working: one burst, then still, a gesture every 8–12 s | `##..#........#.........#........##......` (7 of 40 s); 4.2% of a core over 60 s |
+| A card: hops on arrival, then every 8–12 s | `##..#......##.........#.......` (6 of 30 s); 2.4% over 60 s |
+| Cursor within 120 px | 95 recalcs while it moved (1.2 s), 29 easing in the next 1 s, 0 in the 2 s after: loop stopped |
+| Long step (`ping -n 30 localhost`) | turned 2.4 s, then stuck as a still ring: looked frozen |
+
+Fixed: after its three turns the spinner settles into a still "running"
+mark (sun disc, three dots; at once under reduced motion; prototype v0.20).
+The first try named its keyframes `running`, a CSS keyword (the play
+state), so it never ran; found by this check, now guarded by the test. On
+the rerun (real clicks): settled at 2.4 s, still afterwards.
+
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
