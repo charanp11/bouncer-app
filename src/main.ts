@@ -12,7 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { group, latest, title, waitingInTerminal, type Step } from "./steps.ts";
+import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
 
@@ -127,11 +127,6 @@ const TAG: Record<string, string> = {
   "not run (answered in terminal)": "",
   "waiting in terminal": "you",
   failed: "flag",
-};
-/** Step icons that follow how the step ended, not whether it's current. */
-const OUTCOME_ICON: Record<string, string> = {
-  "answered in terminal": "mid",
-  "not run (answered in terminal)": "skip",
 };
 const HIDDEN = /\\u\{([0-9A-F]{4,6})\}/g;
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
@@ -604,9 +599,7 @@ function rail(session: Session | undefined, project: string, agent: string, stat
     const now = i === shown.length - 1 && session?.status !== "idle";
     // Answered (or still waiting) in Claude Code's own prompt: not running.
     const waiting = now && (step.how === "waiting for you" || stale);
-    // Answered in Claude Code's own prompt: neutral until Bouncer knows,
-    // a grey dash if it didn't run (never a green check for that).
-    const icon = OUTCOME_ICON[step.how] ?? (!now ? "ok" : waiting ? "wait" : "spin");
+    const icon = stepIcon(step.how, now, waiting);
     const how = now && stale ? "waiting in terminal" : step.how;
     const li = el("li", now ? "now" : "done");
     li.append(el("span", `ic ${icon}`), el("span", "", title(step)));

@@ -754,6 +754,29 @@ pre.cmd {
   border: 2px solid var(--faint);
 }
 
+/* you denied: a red cross, never a check */
+.ic.no {
+  background: var(--risk);
+}
+
+.ic.no::before,
+.ic.no::after {
+  content: "";
+  grid-area: 1 / 1;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--island);
+}
+
+.ic.no::before {
+  transform: rotate(45deg);
+}
+
+.ic.no::after {
+  transform: rotate(-45deg);
+}
+
 /* not run (answered in terminal): a grey dash, never a check */
 .ic.skip {
   background: rgba(255, 255, 255, 0.14);
