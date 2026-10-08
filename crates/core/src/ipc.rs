@@ -15,6 +15,12 @@ use crate::event::Event;
 
 pub use bouncer_relay::endpoint;
 
+/// True if a server answers on `path` and runs as this user (the relay's own
+/// check). Nothing is sent: the server ignores an empty connection.
+pub fn answers(path: &Path) -> bool {
+    bouncer_relay::connect(path).is_some()
+}
+
 /// Longest event line accepted; the relay already drops bigger events.
 const MAX_LINE: u64 = 1024 * 1024 + 2;
 
