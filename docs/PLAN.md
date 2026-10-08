@@ -2262,7 +2262,8 @@ Done when:
 - [x] The white band after losing the keyboard stays fixed (0 light pixels)
 - [x] A failed step gets its own amber warning icon, never the green
   check (frontend test; prototype v0.18)
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local: 156 Rust + 52 frontend)
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
