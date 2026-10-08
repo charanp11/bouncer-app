@@ -252,6 +252,8 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .ic.todo { border: 1.5px dashed rgba(255,255,255,.22); }
 /* you denied: red cross (never a check) */
 .ic.no { background: var(--risk); } .ic.no::before, .ic.no::after { content: ""; grid-area: 1 / 1; width: 8px; height: 2px; border-radius: 1px; background: var(--island); } .ic.no::before { transform: rotate(45deg); } .ic.no::after { transform: rotate(-45deg); }
+/* the tool failed: amber warning (never a check) */
+.ic.warn { background: var(--wait); } .ic.warn::before, .ic.warn::after { content: ""; grid-area: 1 / 1; width: 2px; border-radius: 1px; background: var(--island); } .ic.warn::before { height: 6px; transform: translateY(-2px); } .ic.warn::after { height: 2px; transform: translateY(4px); }
 /* answered in Claude Code's own prompt: neutral until Bouncer knows; not run: grey dash */
 .ic.mid { border: 2px solid var(--faint); }
 .ic.skip { background: rgba(255,255,255,.14); } .ic.skip::after { content: ""; width: 7px; height: 2px; border-radius: 1px; background: var(--muted); }
@@ -401,7 +403,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.17 · Oct 8 2026</div>
+    <div class="meta">design/prototype · v0.18 · Oct 8 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -940,6 +942,7 @@ function rail(state, current) {
     ["done", "no", "Running git push --force", "flag", "you denied"],
     ["done", "skip", "Running rm -rf build", "", "not run (answered in terminal)"],
     ["done", "ok", "Running cargo fmt", "auto", "allowed in terminal"],
+    ["done", "warn", "Running cargo check", "flag", "failed"],
     current === "ask" ? ["now", "wait", "Edit approvals.rs", "you", "waiting for you"] : ["now", "spin", "Edit approvals.rs", "mine", "you allowed"],
     ["", "todo", "cargo test", "", ""],
     ["", "todo", "Done", "", ""],

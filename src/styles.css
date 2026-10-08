@@ -777,6 +777,30 @@ pre.cmd {
   transform: rotate(-45deg);
 }
 
+/* the tool failed: an amber warning, never a check */
+.ic.warn {
+  background: var(--wait);
+}
+
+.ic.warn::before,
+.ic.warn::after {
+  content: "";
+  grid-area: 1 / 1;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--island);
+}
+
+.ic.warn::before {
+  height: 6px;
+  transform: translateY(-2px);
+}
+
+.ic.warn::after {
+  height: 2px;
+  transform: translateY(4px);
+}
+
 /* not run (answered in terminal): a grey dash, never a check */
 .ic.skip {
   background: rgba(255, 255, 255, 0.14);

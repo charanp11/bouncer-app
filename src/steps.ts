@@ -31,6 +31,7 @@ const OUTCOME_ICON: Record<string, string> = {
   "you denied": "no",
   "answered in terminal": "mid",
   "not run (answered in terminal)": "skip",
+  failed: "warn",
 };
 
 /** The icon for a step: its outcome's, else a green check once done, or
