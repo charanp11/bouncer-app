@@ -2438,14 +2438,15 @@ first, then fixed in its own commit (a fourth came from review):
    only on the armed button; checked on the test instance (page-level);
    the tray click itself is hand check 2.
 
-Found, not changed (decision for Charan): the live island shows commands
+Decided (Charan, 2026-10-08): the live island keeps showing commands
 exactly as sent, secrets included (you approve what you see; nothing is
 written; the log and the away summary are redacted). `docs/TESTS.md` L5.
 
 Done when:
 
 - [x] `docs/TESTS.md`: 83 scenarios, 74 automated in CI, 5 real-click only
-  (run 2026-10-08), 3 hand checks (about 15 minutes), M3 waits for Phase 9
+  (run 2026-10-08), 2 hand checks (passed 2026-10-08, Charan); Narrator and
+  M3 (a real Mac) wait for Phase 9
 - [x] Every row with no proof got a test, or a real-click run, or a hand check
 - [x] CI checks every named test exists, on Windows and macOS
 - [x] The flaky relay test: cause found, shown failing, fixed without
@@ -2551,7 +2552,9 @@ Phase 8 is done when:
   (Same rules as `install-hooks`: shows the diff, asks, dated backup, atomic
   write; only our entries change.)
 - **Test:** install, use, uninstall on clean Windows (own PC) and macOS (friend's Mac,
-  using the CI build); `settings.json` restored exactly.
+  using the CI build); `settings.json` restored exactly. Narrator (and VoiceOver
+  on the Mac) reads the card, the list and Settings in order with their names
+  (`docs/TESTS.md` UI16, M3).
 - **Verify:** only the release job can write; no secrets in logs; README alone is enough.
 - Commits: `ci: release workflow with checksums and attestations` →
   `docs: install, verify and uninstall guide` → `chore: v1.0.0`

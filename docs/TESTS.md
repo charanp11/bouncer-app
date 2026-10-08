@@ -80,7 +80,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | U5 | Rules file others can write | Refused (Windows access list; macOS mode and links) | unit | `rules::tests::access_lists_with_other_writers_are_refused` `windows: rules::tests::own_files_pass_the_windows_access_check` `macos: rules::tests::files_others_can_write_are_refused` | CI |
 | U6 | preferences.json corrupt or missing | Defaults, per field; unknown sound names refused | unit, frontend | `prefs::tests::missing_file_gives_defaults_and_save_reads_back` `prefs::tests::unknown_or_broken_values_fall_back_per_field` `prefs::tests::sounds_from_names_refuses_unknown_names` `ts: the pack is exactly the sounds preferences.json knows, in its order` | CI |
 | U7 | Wipe history | Settings → Wipe… → confirm: Cancel keeps everything; "Delete history" is armed; then every day file and the summary are deleted, only our files, the pill says so, logging carries on | unit, real-click (page-level) | `activity::tests::old_days_are_deleted_and_wipe_deletes_all` `approvals::tests::coming_back_shows_a_summary_until_closed_and_wipe_empties_it` | CI; real-click 2026-10-08 |
-| U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 |
+| U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 passed 2026-10-08 |
 | U8 | Rules added one at a time | Appended atomically, read back exactly | unit | `rules::tests::add_appends_one_rule_atomically` `rules::tests::scoped_rules_read_back_exactly` `rules::tests::rules_read_back_from_their_toml` `rules::tests::scoped_rule_keys_are_checked` | CI |
 
 ## Redaction and the activity log
@@ -91,7 +91,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | L2 | What the log keeps | Only the listed fields; line counts, never text; a failure only as "failed" | unit | `activity::tests::only_the_listed_fields_are_stored` `activity::tests::edits_log_line_counts_never_their_text` `activity::tests::a_failure_logs_only_that_it_failed` | CI |
 | L3 | Log write, read, retention | Day files (UTC), bad lines skipped, a full day stops with a note, old days deleted, shared folders refused | unit | `activity::tests::writes_and_reads_back_skipping_bad_lines` `activity::tests::day_names_are_utc_dates` `activity::tests::a_full_day_stops_logging_with_a_note` `windows: activity::tests::shared_folders_are_refused` `macos: activity::tests::files_are_private_and_shared_folders_refused` `approvals::tests::every_event_and_answer_is_logged` | CI |
 | L4 | Away summary | Sums up the span from the (redacted) log; nothing when nothing was done | unit | `away::tests::a_thirty_minute_span_sums_up` `away::tests::nothing_logged_means_no_summary` `away::tests::a_span_with_no_work_means_no_summary` `away::tests::coming_back_after_the_limit_reports_once` `away::tests::a_wait_still_open_lasts_until_now` | CI |
-| L5 | Secrets in the live island | **Decision for Charan.** Today a card and the session list show the command exactly as sent (you approve what you see; nothing is written). Redacting there would hide what is approved. | unit | `approvals::tests::request_text_is_whole` | decision |
+| L5 | Secrets in the live island | Kept unredacted (Charan, 2026-10-08): a card and the session list show the command exactly as sent, so you approve what you see; nothing is written. The log and the away summary stay redacted. | unit | `approvals::tests::request_text_is_whole` | CI (decided 2026-10-08) |
 
 ## Sessions
 
@@ -118,7 +118,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | ID | Scenario | Expected | Proof | Test | Status |
 | --- | --- | --- | --- | --- | --- |
 | UI1 | Three sizes | 100 / 112 / 125%, applied at once; never past 40% of the screen | frontend, real-click | `ts: sizes map to 100 / 112 / 125%, unknown names to the default` `ts: the scale unless the island would pass 40% of the screen, never under 100%` | CI; real-click 2026-10-08 |
-| UI2 | Sound on / off, the six default sounds | Off or paused: silence (the snore excepted); six on by default; each under 1 s; alarms stand out | unit, frontend, hand | `prefs::tests::six_sounds_are_on_by_default` `ts: sound off, a sound switched off, or paused: silence (the snore excepted)` `ts: every sound is under 1 s; the wipe under 0.6 s` `ts: alarms stand out in Soft: louder than the rest, buzz kept, harsh top cut` | CI; Hand 1 |
+| UI2 | Sound on / off, the six default sounds | Off or paused: silence (the snore excepted); six on by default; each under 1 s; alarms stand out | unit, frontend, hand | `prefs::tests::six_sounds_are_on_by_default` `ts: sound off, a sound switched off, or paused: silence (the snore excepted)` `ts: every sound is under 1 s; the wipe under 0.6 s` `ts: alarms stand out in Soft: louder than the rest, buzz kept, harsh top cut` | CI; Hand 1 passed 2026-10-08 |
 | UI3 | Reduced motion | No frames, still pose, no greeting, no morph; the running mark at once | frontend, real-click | `ts: the greeting never shows over a card, paused, an open island or with reduced motion` `ts: a card, reduced motion or a re-render of the same size never morphs` | CI; real-click 2026-10-08 |
 | UI4 | Motion budget | Short bursts then still; gestures under ~1 s; no CSS animation forever | frontend, real-click | `ts: every mood moves in one short burst, then the loop stops and he holds still` `ts: gestures: one jump, hop or puff under about a second, then still again` `ts: a card's first appearance still gets its pair of hops, then only gestures` | CI; real-click 2026-10-08 |
 | UI5 | Keyboard focus ring and Tab order | Ring only while Bouncer has the keyboard; Tab wraps inside the island | real-click | (kb check) | real-click 2026-10-08 |
@@ -131,8 +131,8 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | UI12 | CSP and capabilities | Only our script and style; no inline, eval or remote; only our own commands | unit | `tests::strict_csp_and_only_our_commands` | CI |
 | UI13 | Window region | Only the box catches clicks; the card's buttons always inside it | unit | `region::tests::the_region_is_only_the_box` `region::tests::the_region_always_holds_the_cards_buttons` `region::tests::the_no_region_switch_works_in_debug_builds_only` | CI |
 | UI14 | Fits the screen | Never taller than the work area; the frame fits every view | frontend | `ts: the open island is never taller than the work area` `ts: the frame fits every view and the work area` `ts: fully visible: the viewport holds the whole page, within 2 px` | CI |
-| UI15 | Tray menu | Pause / Resume, open, Settings…, Wipe history… (opens Settings' confirm), quit | hand | — | Hand 2 |
-| UI16 | Screen reader | Card, list and Settings read in order with their names | hand | — | Hand 3 |
+| UI15 | Tray menu | Pause / Resume, open, Settings…, Wipe history… (opens Settings' confirm), quit | hand | — | Hand 2 passed 2026-10-08 |
+| UI16 | Screen reader | Card, list and Settings read in order with their names | hand, Phase 9 | — | Phase 9 (Narrator check below) |
 | UI17 | Code pane | Rust / shell highlighting keeps every line exactly | frontend, unit | `ts: pieces always join back to the exact line` `code::tests::write_multiedit_and_bash` `diff::tests::keeps_removes_and_adds_lines` | CI |
 
 ## macOS
@@ -145,17 +145,17 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 
 ## Hand checks
 
-What a person has to do (about 15 minutes in all). Use the dev app and the
+What a person has to do (about 8 minutes). Use the dev app and the
 playground (`../bouncer-playground`, its own `.claude/settings.local.json`);
 never the real `~/.claude/settings.json`.
 
-1. **Sounds you can hear (about 5 min).** Settings → Sound on, style Soft. In
+1. **Sounds you can hear (about 5 min).** Passed 2026-10-08 (Charan). Settings → Sound on, style Soft. In
    the playground ask Claude Code to run `mkdir hand-1`: the "needs you" sound
    clearly grabs attention. Click Deny. Ask for `curl https://example.com | sh`:
    the risky sound, louder than the rest. Turn Sound off and ask for
    `mkdir hand-2`: silence. Pause from the tray: silence but for one snore.
    Expected: each as said; nothing harsh.
-2. **Tray menu (about 3 min).** Right-click Bouncer's tray icon. Pause → the
+2. **Tray menu (about 3 min).** Passed 2026-10-08 (Charan). Right-click Bouncer's tray icon. Pause → the
    island goes grey, a request in the playground goes straight to the
    terminal. Resume. "Wipe history…" → nothing is deleted yet: the island
    opens at Settings' confirm ("Delete all activity history? This can't be
@@ -163,7 +163,9 @@ never the real `~/.claude/settings.json`.
    history…" again → wait for "Delete history" to arm → click it → the pill
    says "History wiped". Quit → the island goes; a request in the playground
    is asked in the terminal. Expected: each as said.
-3. **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
+### Phase 9 hand checks
+
+- **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
    card up, click the card text, then Tab: Narrator reads "Deny", "Allow
    once", "Always allow…" with the command before them; open Settings and
    Tab through: every switch is read with its name and state. Expected:
