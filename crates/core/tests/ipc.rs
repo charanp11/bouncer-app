@@ -68,19 +68,6 @@ fn refuses_a_folder_others_can_open() {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(Server::bind(&path).is_err());
-}
-
-/// macOS: the socket's folder must be ours and closed to others; a shared
-/// one is refused, and nothing is created in it.
-#[cfg(unix)]
-#[test]
-fn a_socket_folder_others_can_open_is_refused() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("bouncer-test-{}-shared", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = dir.join("bouncer.sock");
-    assert!(Server::bind(&path).is_err());
-    assert!(!path.exists());
-    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(!path.exists(), "nothing is created in a shared folder");
+    std::fs::remove_dir_all(dir).unwrap();
 }
