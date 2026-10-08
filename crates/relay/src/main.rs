@@ -105,10 +105,15 @@ fn read_event(input: impl Read) -> Option<(String, String)> {
 }
 
 /// Sends the event line; if `asks`, calls `waiting` and reads one answer line.
+/// Otherwise it waits for the app to close the connection: the app checks who
+/// sent an event before reading it, and an event whose relay had already
+/// exited could be lost (a burst of hooks on a busy machine). Still bounded by
+/// `FIRE_AND_FORGET`.
 fn talk(line: &str, asks: bool, waiting: impl FnOnce()) -> Option<String> {
     let mut stream = bouncer_relay::connect(&bouncer_relay::endpoint()?)?;
     stream.write_all(line.as_bytes()).ok()?;
     if !asks {
+        let _ = (&mut stream).take(MAX_ANSWER).read_to_end(&mut Vec::new());
         return None;
     }
     waiting();

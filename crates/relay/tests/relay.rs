@@ -214,6 +214,47 @@ fn hung_app_permission_request_keeps_waiting_past_two_seconds() {
     assert!(child.wait_with_output().unwrap().stdout.is_empty());
 }
 
+/// A burst of hooks (parallel subagent tools) arriving at the same moment:
+/// every event reaches the app. 32 relays start and wait on their stdin, then
+/// get their events together; each must stay until the app has taken its
+/// event (it used to exit right after writing, and an event whose relay was
+/// already gone could be lost: the server checks who sent it first).
+#[test]
+fn a_burst_of_simultaneous_relays_all_get_through() {
+    const BURST: usize = 32;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "burst",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock().unwrap().push(e.session);
+            None
+        }),
+    );
+    let mut relays: Vec<Child> = (0..BURST)
+        .map(|_| {
+            Command::new(env!("CARGO_BIN_EXE_bouncer-hook"))
+                .env(bouncer_relay::ENDPOINT_ENV, &path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300)); // all started, all waiting on stdin
+    let inputs: Vec<_> = relays.iter_mut().map(|r| r.stdin.take().unwrap()).collect();
+    for (i, mut input) in inputs.into_iter().enumerate() {
+        input
+            .write_all(&event(&format!("s{i}"), "PreToolUse"))
+            .unwrap();
+    } // each stdin closes here: the relays send together
+    for relay in relays {
+        assert_silent(&relay.wait_with_output().unwrap());
+    }
+    wait_for(&seen, BURST);
+}
+
 #[test]
 fn two_sessions_stream_while_one_waits_for_a_decision() {
     let seen = Arc::new(Mutex::new(Vec::new()));
