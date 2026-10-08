@@ -36,10 +36,11 @@ test("a request left in the terminal stops spinning after two quiet minutes", ()
   }
 });
 
-test("a denied step never gets the green check; only allowed outcomes do", () => {
+test("a denied or failed step never gets the green check; only allowed outcomes do", () => {
   for (const now of [false, true]) {
     for (const waiting of [false, true]) {
       assert.equal(stepIcon("you denied", now, waiting), "no", `now ${now}, waiting ${waiting}`);
+      assert.equal(stepIcon("failed", now, waiting), "warn", `now ${now}, waiting ${waiting}`);
       assert.notEqual(stepIcon("not run (answered in terminal)", now, waiting), "ok");
       assert.notEqual(stepIcon("answered in terminal", now, waiting), "ok");
     }
