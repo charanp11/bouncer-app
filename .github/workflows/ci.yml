@@ -40,6 +40,8 @@ jobs:
       - run: cargo test --locked
         env:
           BOUNCER_FUZZ_ITERS: 5000
+      # The regression gate: every test docs/TESTS.md names exists on this OS.
+      - run: node scripts/check-tests.mjs
       # Release builds must ignore BOUNCER_ENDPOINT, BOUNCER_RULES and BOUNCER_AWAY_SECS.
       - run: cargo test --locked --release -p bouncer-relay --lib
       - run: cargo test --locked --release -p bouncer-core --lib rules::tests::override
