@@ -50,6 +50,9 @@ struct Island {
     /// another window is clicked or Esc. The page can't tell by itself: in
     /// WebView2 it always thinks it has focus.
     focused: AtomicBool,
+    /// The tray's "Wipe history…" asked for Settings' confirm step; sent
+    /// once with the next view.
+    confirm_wipe: AtomicBool,
     /// Island size and sound, and where they're saved.
     prefs: Mutex<Prefs>,
     prefs_path: Option<PathBuf>,
@@ -147,6 +150,7 @@ fn main() {
                 moved: Mutex::new(settle_after_moves(app.handle().clone())),
                 settings: AtomicBool::new(false),
                 focused: AtomicBool::new(false),
+                confirm_wipe: AtomicBool::new(false),
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
                 prefs_path,
             });
@@ -243,13 +247,14 @@ fn tick(app: AppHandle, desk: Arc<Desk>) {
 const TOOLTIP: &str = "Bouncer";
 const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal";
 
-/// Tray menu: Pause / Resume, Wipe history and Quit. While paused the icon is greyed and
-/// every request goes to the terminal.
+/// Tray menu: Pause / Resume, Wipe history… and Quit. While paused the icon is greyed and
+/// every request goes to the terminal. "Wipe history…" never wipes: it opens
+/// Settings at its confirm step (Cancel, or the armed "Delete history").
 fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Bouncer", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
-    let wipe = MenuItem::with_id(app, "wipe", "Wipe history", true, None::<&str>)?;
+    let wipe = MenuItem::with_id(app, "wipe", "Wipe history…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Bouncer", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &settings, &pause, &wipe, &quit])?;
     let icon = app
@@ -270,10 +275,12 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
                 show(app, desk.view());
                 take_keyboard(app);
             }
-            "settings" => {
-                app.state::<Island>()
-                    .settings
-                    .store(true, Ordering::Relaxed);
+            id @ ("settings" | "wipe") => {
+                let island = app.state::<Island>();
+                island.settings.store(true, Ordering::Relaxed);
+                if id == "wipe" {
+                    island.confirm_wipe.store(true, Ordering::Relaxed);
+                }
                 show(app, desk.view());
                 take_keyboard(app);
             }
@@ -286,12 +293,6 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
                     let _ = tray.set_icon(Some(icon.clone()));
                     let _ =
                         tray.set_tooltip(Some(if now_paused { TOOLTIP_PAUSED } else { TOOLTIP }));
-                }
-            }
-            "wipe" => {
-                // The pill says whether it worked.
-                if let Err(e) = desk.wipe_history() {
-                    eprintln!("Bouncer: couldn't wipe history: {e}");
                 }
             }
             "quit" => app.exit(0),
@@ -354,6 +355,7 @@ fn send(app: &AppHandle, mut view: Value) {
     view["rounded"] = ROUNDED.into();
     view["settings"] = settings.into();
     view["keyboard"] = island.focused.load(Ordering::Relaxed).into();
+    view["confirmWipe"] = island.confirm_wipe.swap(false, Ordering::Relaxed).into();
     view["prefs"] = island.prefs.lock().unwrap().to_json();
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
@@ -739,6 +741,54 @@ mod tests {
         std::thread::spawn(move || server.run(handler));
         assert!(another_bouncer_answers(&path));
         assert!(Server::bind(&path).is_err());
+    }
+
+    /// History is wiped only by the `wipe` command, which the page calls from
+    /// Settings' armed "Delete history" after its confirm. The tray's item
+    /// only opens that confirm; nothing else in the app wipes.
+    #[test]
+    fn only_the_confirmed_wipe_command_wipes() {
+        let src = include_str!("main.rs");
+        let code = &src[..src
+            .find(
+                "#[cfg(test)]
+mod tests",
+            )
+            .unwrap()];
+        let calls: Vec<usize> = code
+            .match_indices(".wipe_history(")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(calls.len(), 1, "one wipe path");
+        let caller = &code[code[..calls[0]]
+            .rfind(
+                "
+fn ",
+            )
+            .unwrap()..];
+        assert!(
+            caller.starts_with(
+                "
+fn wipe("
+            ),
+            "{}",
+            &caller[..40]
+        );
+        let tray = &code[code
+            .find(
+                "
+fn tray(",
+            )
+            .unwrap()..];
+        let tray = &tray[..tray
+            .find(
+                "
+}
+",
+            )
+            .unwrap()];
+        assert!(tray.contains(r#""wipe", "Wipe history…""#));
+        assert!(tray.contains("confirm_wipe.store(true"));
     }
 
     /// The shipped page may run only its own script and style (no inline

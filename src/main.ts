@@ -85,6 +85,8 @@ type View = {
   /** The island has the keyboard (from the OS: the page always thinks it does). */
   keyboard: boolean;
   prefs: Prefs;
+  /** Once, from the tray's "Wipe history…": open Settings at its confirm step. */
+  confirmWipe?: boolean;
 };
 
 /** Allow stays disabled this long after a card reaches the front. */
@@ -736,6 +738,8 @@ let aboutAsked = false;
 /** The "Wipe…" confirm is open, and since when (its button arms like Allow). */
 let wiping = false;
 let wipeSince = 0;
+/** The confirm came from the tray: Cancel gets the keyboard first. */
+let cancelFirst = false;
 /** The "Turn on auto-allow?" confirm is open, and since when (it arms too). */
 let confirmingAuto = false;
 let autoSince = 0;
@@ -943,6 +947,7 @@ function renderSettings(view: View, state: BallState) {
     const text = el("div");
     text.append(el("b", "", "Delete all activity history? "), "This can't be undone.");
     const cancel = el("button", "btn deny small", "Cancel");
+    cancel.dataset.key = "wipe-cancel";
     const del = armed("Delete history", wipeSince);
     del.classList.add("small");
     cancel.addEventListener("click", () => {
@@ -1001,6 +1006,12 @@ function rulesBadge(view: View): Badge | undefined {
  * drawn again; anything else starts at the top.
  * The island morphs from the box it had to the one it gets (motion below). */
 function render(view: View) {
+  // The tray's "Wipe history…" lands on the same confirm as Settings' Wipe….
+  if (view.confirmWipe && !wiping) {
+    wiping = true;
+    wipeSince = performance.now();
+    cancelFirst = true;
+  }
   const had = focusKey(document.activeElement);
   const before = front.id;
   const keyboardBefore = current?.keyboard ?? false;
@@ -1042,6 +1053,16 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
     if (now instanceof HTMLElement && island.contains(now)) now.blur();
     refocus = null;
     return;
+  }
+  if (cancelFirst) {
+    cancelFirst = false;
+    // A card up has the screen (and Deny the keyboard); no jump later.
+    const cancel = view.queue.length ? undefined : findKey("wipe-cancel");
+    if (cancel) {
+      refocus = null;
+      cancel.focus({ preventScroll: true });
+      return;
+    }
   }
   const card = view.queue[0];
   const target = card && (card.id !== before || !keyboardBefore) ? `deny:${card.id}` : had;
