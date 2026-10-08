@@ -21,6 +21,8 @@ enum Want {
 use Want::*;
 
 struct Setup {
+    /// The temp folder holding the others; deleted when the setup drops.
+    base: PathBuf,
     project: PathBuf,
     home: PathBuf,
     bouncer: PathBuf,
@@ -39,9 +41,16 @@ fn setup() -> Setup {
         std::fs::create_dir_all(dir).unwrap();
     }
     Setup {
+        base,
         project,
         home,
         bouncer,
+    }
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.base);
     }
 }
 

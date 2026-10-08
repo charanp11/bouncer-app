@@ -27,12 +27,40 @@ const ORIGINAL: &str = r#"{
   "model": "opus"
 }"#;
 
-fn temp_dir(name: &str) -> PathBuf {
+/// A test folder, deleted with everything in it when dropped.
+struct TempDir(PathBuf);
+
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TempDir {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(name: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("bouncer-install-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("bouncer-hook.exe"), "").unwrap();
-    dir
+    TempDir(dir)
 }
 
 fn bouncer(dir: &Path, args: &[&str], answer: &str) -> Output {
