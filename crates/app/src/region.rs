@@ -111,7 +111,8 @@ pub fn clear(w: &WebviewWindow) {
 /// loses the keyboard. The window has no decorations, but Tao keeps the
 /// caption style (and hides it by other means), so the default handling of
 /// `WM_NCACTIVATE` drew a pale band in the transparent margin above the
-/// island. False if it couldn't be set up (then nothing changes). Main
+/// island, and the theme's caption painting left a line after the first
+/// drag. False if it couldn't be set up (then nothing changes). Main
 /// thread only, once.
 #[cfg(windows)]
 pub fn no_caption(w: &WebviewWindow) -> bool {
@@ -175,6 +176,10 @@ mod win {
 
     const WM_NCACTIVATE: u32 = 0x0086;
     const WM_NCDESTROY: u32 = 0x0082;
+    // Undocumented: the visual-styles engine paints the caption and frame
+    // with these, bypassing WM_NCPAINT (Chromium swallows them the same way).
+    const WM_NCUAHDRAWCAPTION: u32 = 0x00AE;
+    const WM_NCUAHDRAWFRAME: u32 = 0x00AF;
     const SUBCLASS_ID: usize = 0x5D;
 
     const SWP_NOZORDER: u32 = 0x0004;
@@ -226,7 +231,10 @@ mod win {
 
     /// Every message goes on unchanged, except that `WM_NCACTIVATE` carries
     /// lParam -1: the window still learns it's (in)active, but Windows
-    /// doesn't repaint the non-client area for it (documented for -1).
+    /// doesn't repaint the non-client area for it (documented for -1); and
+    /// the two theme paint requests are answered as done without painting.
+    /// The first click on the hidden caption (a drag) sent them, leaving a
+    /// 1-px line at the caption's bottom edge (window y 30).
     unsafe extern "system" fn quiet_caption(
         hwnd: Handle,
         msg: u32,
@@ -235,6 +243,9 @@ mod win {
         _id: usize,
         _data: usize,
     ) -> isize {
+        if msg == WM_NCUAHDRAWCAPTION || msg == WM_NCUAHDRAWFRAME {
+            return 0;
+        }
         let lparam = if msg == WM_NCACTIVATE { -1 } else { lparam };
         // SAFETY: called by Windows for our window with its own message; the
         // subclass is removed as the window goes, before the message is

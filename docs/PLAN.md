@@ -2169,7 +2169,7 @@ Done when:
 - [x] Answers still reach the relay as before (existing tests; real clicks)
 - [x] Playground: No / Yes in Claude Code's prompt with the card up
   (fixtures + tests)
-- [ ] fmt, clippy, tests green locally and in CI (Windows and macOS: the
+- [x] fmt, clippy, tests green locally and in CI (Windows and macOS: the
   macOS job runs the kill test against the socket check); gitleaks rules
   checked (local: 155 Rust + 51 frontend)
 
@@ -2215,6 +2215,54 @@ backdrop, the guard as before):
 
 Found, not this PR: with a card up the WebView uses about half a core
 (15 s of CPU in 30 s): the waiting card's animations, drawn every frame.
+
+## Line after the first drag (after the relay fix, before 6)
+
+Charan, 2026-10-07. Its own small PR from the 5d finding above: a 1-px
+light line beside the island after the first drag after launch. Same
+native-code rules: only in `region.rs`, fail safe. In the same PR, a
+separate commit: a step whose tool failed got the green check.
+
+### Line audit (2026-10-07)
+
+Sources: `region.rs` (`no_caption`, the subclass), Tao's window
+procedure (undecorated windows keep `WS_CAPTION`), the 5d findings.
+
+Reproduced on a fresh test instance (black backdrop, real clicks): pill,
+then drag the title. The line is at window y 30 in every run (2 of 2 today
+plus the 5d runs), whatever row the drag grabs (y 30 and y 38: still
+y 30), so it belongs to the window, not the cursor. Window, client and the
+WebView's child windows have the same rect before and after the drag
+(window tree dumped both times), so it isn't a misplaced child. It clears
+when the island re-lays out (a new region).
+
+Cause: the window keeps `WS_CAPTION` (style `14C80000`), and y 30 is that
+hidden caption's height. The first mouse-down on it (the drag's
+`WM_NCLBUTTONDOWN`) makes the visual-styles engine paint the caption and
+frame itself with two undocumented messages, `WM_NCUAHDRAWCAPTION` (0xAE)
+and `WM_NCUAHDRAWFRAME` (0xAF), not `WM_NCPAINT`. That explains why
+swallowing `WM_NCPAINT` and disabling DWM non-client rendering did
+nothing. Its bottom edge lands in the transparent margin. Proof: answering
+both messages with 0 in the existing subclass removes the line (3 of 3
+fresh launches, 0 light pixels); the same runs without it showed the line
+every time.
+Chromium answers the same two messages the same way for its frameless
+windows.
+
+| Threat | Fix |
+| --- | --- |
+| Something else stops drawing | Only those two messages; the window has no visible caption or frame to draw |
+| Drag or activation breaks | Hit-testing and the move loop are other messages, unchanged (drag checked) |
+| Setup fails | As before: no subclass, nothing changes (the line can come back, nothing else) |
+
+Done when:
+
+- [x] Fresh launch → pill → first drag: no line (3 of 3; before: every run)
+- [x] A later drag: no line; the drag still moves the window
+- [x] The white band after losing the keyboard stays fixed (0 light pixels)
+- [x] A failed step gets its own amber warning icon, never the green
+  check (frontend test; prototype v0.18)
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
