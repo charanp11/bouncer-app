@@ -78,8 +78,8 @@ struct Session {
     started: SystemTime,
     last: SystemTime,
     /// Recent steps, oldest first, each with who let it through ("" = Claude
-    /// Code's own rules).
-    history: VecDeque<(String, &'static str)>,
+    /// Code's own rules) and whether it ran (its PostToolUse came).
+    history: VecDeque<(String, &'static str, bool)>,
     /// The code pane for the current tool call, if it has one.
     code: Option<Value>,
     /// Lines the current edit adds and removes (numbers only), for the pill.
@@ -94,11 +94,11 @@ struct Session {
 
 /// Sets how the latest step `label` that's still unsettled in the terminal
 /// (answered, or shown not run) ended.
-fn mark(history: &mut VecDeque<(String, &'static str)>, label: &str, how: &'static str) {
+fn mark(history: &mut VecDeque<(String, &'static str, bool)>, label: &str, how: &'static str) {
     if let Some(entry) = history
         .iter_mut()
         .rev()
-        .find(|(l, h)| l == label && (*h == ANSWERED || *h == NOT_RUN))
+        .find(|(l, h, _)| l == label && (*h == ANSWERED || *h == NOT_RUN))
     {
         entry.1 = how;
     }
@@ -215,7 +215,9 @@ impl State {
                 match session.history.back_mut() {
                     Some(last) if !how.is_empty() && last.0 == session.step => last.1 = how,
                     _ => {
-                        session.history.push_back((session.step.clone(), how));
+                        session
+                            .history
+                            .push_back((session.step.clone(), how, false));
                         if session.history.len() > HISTORY {
                             session.history.pop_front();
                         }
@@ -229,6 +231,17 @@ impl State {
             "Stop" => {
                 session.step = "Idle".into();
                 session.lines = None;
+            }
+            "PostToolUse" => {
+                let label = step(event);
+                if let Some(entry) = session
+                    .history
+                    .iter_mut()
+                    .rev()
+                    .find(|(l, _, ran)| *l == label && !ran)
+                {
+                    entry.2 = true;
+                }
             }
             "PostToolUseFailure" if event.is_failure() => {
                 session.failed += 1;
@@ -872,7 +885,7 @@ impl Desk {
                     "status": s.status,
                     "started_ms": epoch_ms(s.started),
                     "last_ms": epoch_ms(s.last),
-                    "history": s.history.iter().map(|(label, how)| json!({ "label": visible(label), "how": how })).collect::<Vec<_>>(),
+                    "history": s.history.iter().map(|(label, how, ran)| json!({ "label": visible(label), "how": how, "ran": ran })).collect::<Vec<_>>(),
                     "code": s.code,
                     "lines": s.lines.map(|(added, removed)| json!([added, removed])),
                     "failed": s.failed,
@@ -1219,6 +1232,41 @@ mod tests {
         assert_eq!(view["sessions"][0]["failed"], 2);
     }
 
+    /// A step counts as run only once its own PostToolUse comes: a failure,
+    /// an Esc or no event at all leave it not run (the island then never
+    /// shows the green check for it).
+    #[test]
+    fn only_a_post_tool_use_marks_a_step_run() {
+        let desk = desk(Duration::from_millis(100));
+        for e in [
+            event("a", "PreToolUse", "ls"),
+            event("a", "PreToolUse", "cat nope"),
+            event("a", "PostToolUseFailure", "cat nope"),
+            event("a", "PreToolUse", "cargo fmt"),
+            event("a", "PostToolUse", "ls"),
+            event("a", "PreToolUse", "sleep 9"),
+            event("a", "Stop", ""),
+        ] {
+            assert_eq!(desk.handle(e), None);
+        }
+        let view = desk.view();
+        let ran: Vec<(&str, bool)> = view["sessions"][0]["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| (s["label"].as_str().unwrap(), s["ran"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(
+            ran,
+            [
+                ("Running ls", true),
+                ("Running cat nope", false),
+                ("Running cargo fmt", false),
+                ("Running sleep 9", false)
+            ]
+        );
+    }
+
     /// The recorded failures (Bash 2.1.291, PowerShell 2.1.293, a non-zero
     /// exit each) mark their step "failed" after the call's own PreToolUse.
     #[test]
@@ -1400,6 +1448,7 @@ mod tests {
         let view = desk.view();
         let s = &view["sessions"][0];
         assert_eq!(s["history"][0]["how"], ALLOWED_IN_TERMINAL);
+        assert_eq!(s["history"][0]["ran"], true);
         assert_eq!(s["status"], "working");
         for e in after {
             assert_eq!(desk.handle(e), None);
@@ -1590,8 +1639,8 @@ mod tests {
         assert_eq!(
             history(&desk),
             json!([
-                { "label": "Running ls", "how": "" },
-                { "label": "Running cargo test", "how": "waiting for you" }
+                { "label": "Running ls", "how": "", "ran": false },
+                { "label": "Running cargo test", "how": "waiting for you", "ran": false }
             ])
         );
         desk.decide(&id, false).unwrap();

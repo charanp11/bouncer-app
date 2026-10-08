@@ -1,18 +1,19 @@
 // The Session detail step list: repeated steps grouped ("Searching ×3"), and
 // only the latest few shown, with a count of the earlier ones.
 
-export type Step = { label: string; how: string };
+/** `ran`: the step's own PostToolUse came. */
+export type Step = { label: string; how: string; ran: boolean };
 export type Group = Step & { count: number };
 
 /** Steps shown at most; older ones become "+N earlier". */
 export const SHOWN = 6;
 
-/** Merges runs of the same step that got through the same way. */
+/** Merges runs of the same step that got through, and ended, the same way. */
 export function group(history: Step[]): Group[] {
   const out: Group[] = [];
   for (const step of history) {
     const last = out[out.length - 1];
-    if (last && last.label === step.label && last.how === step.how) last.count++;
+    if (last && last.label === step.label && last.how === step.how && last.ran === step.ran) last.count++;
     else out.push({ ...step, count: 1 });
   }
   return out;
@@ -34,10 +35,12 @@ const OUTCOME_ICON: Record<string, string> = {
   failed: "warn",
 };
 
-/** The icon for a step: its outcome's, else a green check once done, or
- * waiting / running while it's the current step. */
-export function stepIcon(how: string, now: boolean, waiting: boolean): string {
-  return OUTCOME_ICON[how] ?? (!now ? "ok" : waiting ? "wait" : "spin");
+/** The icon for a step: its outcome's; waiting / running while it's the
+ * current step; once done, a green check only if it ran (its PostToolUse
+ * came), else the neutral ring (no event, e.g. hooks without
+ * PostToolUseFailure, or stopped with Esc). */
+export function stepIcon(how: string, ran: boolean, now: boolean, waiting: boolean): string {
+  return OUTCOME_ICON[how] ?? (now ? (waiting ? "wait" : "spin") : ran ? "ok" : "mid");
 }
 
 /** How long a request left to Claude Code's own prompt shows as running. */
