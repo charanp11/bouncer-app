@@ -6,10 +6,12 @@
 // frame is a transform for the compositor, not a new layout and paint.
 //
 // Frames run only while something moves, and never while the page is
-// hidden or the OS asks for reduced motion. The island's Bouncer keeps one
+// hidden or the OS asks for reduced motion. Motion comes in short bursts (a
+// new mood, a gesture every 8–12 s, the cursor moving near him); in between
+// the loop is stopped and he holds still. The island's Bouncer keeps one
 // Motion across re-renders, so a rebuilt island doesn't restart him.
 import { play } from "./sound.ts";
-import { advance, blink, BLINK_MS, boxes, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
+import { advance, blink, BLINK_MS, boxes, gesture, GESTURE_MIN_S, GESTURE_SPREAD_S, LOOK_MAX, lookAt, motion, moving, pose, setMood, squish, still, type Mood, type Motion, type Pose } from "./motion.ts";
 
 export type BallState = Mood;
 
@@ -25,6 +27,8 @@ const DIZZY_CLICKS = 4;
 const DIZZY_WINDOW_MS = 2000;
 /** Cursor distance (px) at which he looks fully that way. */
 const LOOK_REACH_PX = 40;
+/** Farther than this the cursor isn't near him: he looks ahead again. */
+const LOOK_NEAR_PX = 120;
 
 function part([tag, attrs, text]: Part): SVGElement {
   const node = document.createElementNS(NS, tag);
@@ -59,6 +63,7 @@ const island = motion("idle");
 let raf = 0;
 let last = 0;
 let blinkTimer = 0;
+let gestureTimer = 0;
 let clicks: number[] = [];
 
 const n = (x: number) => x.toFixed(3);
@@ -132,6 +137,18 @@ function scheduleBlink() {
   }, BLINK_MIN_MS + Math.random() * BLINK_SPREAD_MS);
 }
 
+/** One timer for every gesture between bursts (motion.ts says which); the
+ * loop runs only for the gesture itself. Stops when no Bouncer is on screen. */
+function scheduleGesture() {
+  if (gestureTimer || reduce.matches) return;
+  gestureTimer = setTimeout(() => {
+    gestureTimer = 0;
+    for (const b of live) gesture(b.m);
+    kick();
+    if ([...live].some((b) => b.wrap.isConnected)) scheduleGesture();
+  }, (GESTURE_MIN_S + Math.random() * GESTURE_SPREAD_S) * 1000);
+}
+
 function poke(b: Live) {
   if (reduce.matches) return;
   const now = performance.now();
@@ -153,7 +170,7 @@ document.addEventListener("mousemove", (e) => {
     const dx = e.clientX - (r.left + r.width / 2);
     const dy = e.clientY - (r.top + r.height / 2);
     const d = Math.hypot(dx, dy) || 1;
-    const k = Math.min(1, d / LOOK_REACH_PX) / d;
+    const k = d > LOOK_NEAR_PX ? 0 : Math.min(1, d / LOOK_REACH_PX) / d;
     lookAt(b.m, dx * k * LOOK_MAX, dy * k * LOOK_MAX);
   }
   kick();
@@ -167,6 +184,7 @@ reduce.addEventListener("change", () => {
   for (const b of live) draw(b, reduce.matches ? still() : pose(b.m));
   kick();
   scheduleBlink();
+  scheduleGesture();
 });
 
 /** The character in a mood: `big` is the 72 px detail-rail size, `sheet`
@@ -223,5 +241,6 @@ export function ball(state: BallState, size: "" | "big" | "sheet" = "", m: Motio
   });
   kick();
   scheduleBlink();
+  scheduleGesture();
   return wrap;
 }
