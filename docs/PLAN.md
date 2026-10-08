@@ -2265,6 +2265,67 @@ Done when:
 - [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   (local: 156 Rust + 52 frontend)
 
+## Card CPU (after the cleanup, before 6)
+
+Charan, 2026-10-08. Found in #15: with a card up the WebView used about
+half a core. Audit first, measure before and after (60 s, card up), keep
+the look the same, honour reduced motion.
+
+### Card CPU audit (2026-10-08)
+
+Sources: `ball.ts` (frame loop, `draw`), `motion.ts` (`moving`, `pose`),
+`styles.css` (animations). Measured on the test instance (Intel HD 620,
+GPU compositing on), CPU of the app and its WebView2 processes.
+
+- What redraws: Bouncer's frame loop. `moving()` is always true for the
+  working, needs-you, risky and dance moods, so `requestAnimationFrame`
+  runs at 60 Hz the whole time (needs-you even between its hops). CSS
+  animations are not it: the arm bar is one-shot, the spinner only shows
+  in the detail view, the caret steps once a second.
+- Why it costs so much: `draw` set SVG `transform` attributes, which makes
+  Chromium lay the SVG out again every frame (1,312 layouts in 20 s), then
+  repaint and recomposite. Moving those to CSS transforms on the same SVG
+  children changes nothing (still a layout each frame).
+- The floor: in this transparent window any 60 fps change costs about 25%
+  of a core in the GPU process, even a 4-px compositor-only box; driven
+  from `requestAnimationFrame`, about 46% in all. Under it only by drawing
+  fewer frames, which changes how smooth he moves (not done; Charan's
+  call).
+- Fix: three stacked SVG boxes with the same viewBox (shadow, body, the
+  "z" and "!"). The body and the shadow are HTML boxes on their own
+  compositor layers (`will-change`), moved with CSS transforms about the
+  same points (16, 29) and (16, 30); the face's in-SVG transforms change
+  only when he looks, blinks or gets dizzy. Every write is skipped when
+  its value hasn't changed. No layout per frame (4 in 20 s).
+
+| Case (60 s) | Before | After |
+| --- | --- | --- |
+| Working, no card | 71.8% of a core | 45.3% |
+| Normal card (needs you) | 64.3% | 43.3% |
+| Risky card | 59.0% | 44.4% |
+| Card, reduced motion | 0.65% | 0.34% |
+| (Option, not done: 30 fps, normal card) | | 28.9% |
+
+Look: a frozen copy of live frames beside the old single-SVG drawing of
+the same pose, compared pixel by pixel. Same place at the best alignment
+(offset 0) in every frame, rotated "done" hops included; at rest the same
+to the eye (mean difference 6 of 765 per lit pixel). Frames where he is
+stretched or tilted are a touch softer at the 26-px size (a layer is
+resampled, not redrawn: mean 30 of 765), the same at 72 px.
+
+| Threat | Fix |
+| --- | --- |
+| He looks different | Same points and units (test reads the origins from styles.css); pixel comparison above |
+| Reduced motion | Unchanged path: no frames, the still pose (checked: holds still) |
+| Clicks and looking break | The click and the cursor use the wrapper (checked: squish, no island open; looks at the cursor) |
+
+Done when:
+
+- [x] No layout per frame while he moves (1,312 → 4 in 20 s)
+- [x] Card up 60 s: CPU before and after measured (table)
+- [x] Same look: pixel comparison; reduced motion still
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
