@@ -599,7 +599,7 @@ function rail(session: Session | undefined, project: string, agent: string, stat
     const now = i === shown.length - 1 && session?.status !== "idle";
     // Answered (or still waiting) in Claude Code's own prompt: not running.
     const waiting = now && (step.how === "waiting for you" || stale);
-    const icon = stepIcon(step.how, now, waiting);
+    const icon = stepIcon(step.how, step.ran, now, waiting);
     const how = now && stale ? "waiting in terminal" : step.how;
     const li = el("li", now ? "now" : "done");
     li.append(el("span", `ic ${icon}`), el("span", "", title(step)));
