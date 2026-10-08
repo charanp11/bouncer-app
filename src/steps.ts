@@ -24,6 +24,21 @@ export function latest(groups: Group[], max = SHOWN): { shown: Group[]; earlier:
   return { shown: groups.slice(earlier), earlier };
 }
 
+/** Icons that follow how a step ended, not whether it's the current one:
+ * a refusal is a red cross (never a green check), a terminal answer is
+ * neutral until Bouncer knows, and one that didn't run is a grey dash. */
+const OUTCOME_ICON: Record<string, string> = {
+  "you denied": "no",
+  "answered in terminal": "mid",
+  "not run (answered in terminal)": "skip",
+};
+
+/** The icon for a step: its outcome's, else a green check once done, or
+ * waiting / running while it's the current step. */
+export function stepIcon(how: string, now: boolean, waiting: boolean): string {
+  return OUTCOME_ICON[how] ?? (!now ? "ok" : waiting ? "wait" : "spin");
+}
+
 /** How long a request left to Claude Code's own prompt shows as running. */
 export const STALE_MS = 120_000;
 

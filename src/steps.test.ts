@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { group, latest, STALE_MS, title, waitingInTerminal } from "./steps.ts";
+import { group, latest, STALE_MS, stepIcon, title, waitingInTerminal } from "./steps.ts";
 
 const s = (label: string, how = "") => ({ label, how });
 
@@ -34,4 +34,19 @@ test("a request left in the terminal stops spinning after two quiet minutes", ()
   for (const status of ["working", "needs you", "idle"]) {
     assert.equal(waitingInTerminal(status, asked, asked + 10 * STALE_MS), false, status);
   }
+});
+
+test("a denied step never gets the green check; only allowed outcomes do", () => {
+  for (const now of [false, true]) {
+    for (const waiting of [false, true]) {
+      assert.equal(stepIcon("you denied", now, waiting), "no", `now ${now}, waiting ${waiting}`);
+      assert.notEqual(stepIcon("not run (answered in terminal)", now, waiting), "ok");
+      assert.notEqual(stepIcon("answered in terminal", now, waiting), "ok");
+    }
+  }
+  for (const allowed of ["you allowed", "auto-allowed by rule", "allowed in terminal", ""]) {
+    assert.equal(stepIcon(allowed, false, false), "ok", allowed);
+  }
+  assert.equal(stepIcon("you allowed", true, false), "spin");
+  assert.equal(stepIcon("waiting for you", true, true), "wait");
 });
