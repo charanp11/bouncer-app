@@ -2327,6 +2327,55 @@ Done when:
 - [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   (local: 158 Rust + 53 frontend)
 
+## Motion budget (after card CPU, before 6)
+
+Charan, 2026-10-08: 45% of a core while a session just works is too much
+for an app that runs for hours. Bouncer moves in short bursts, then holds
+still, so the frame loop is stopped most of the time. Targets (60 s, app +
+WebView): working with no card under 5%, card up under 8%, idle under 1%.
+
+### Motion budget audit (2026-10-08)
+
+Sources: `motion.ts` (`moving`, `step`, `pose`), `ball.ts` (frame loop,
+timers, cursor), `styles.css` (every `animation`).
+
+- The loop runs while `moving()` is true; working, needs you and risky
+  made it true forever (dance too: unused until Phase 8, left as it is).
+- Infinite CSS: the current step's spinner and the code pane's caret.
+  The arm bar runs once; the pill and the focus ring have no animation.
+- Fix (all in `motion.ts`, tested without a DOM): a new mood moves for a
+  burst (working two jumps, needs you one pair of hops, risky one puff,
+  idle one breath; done and the greeting end by themselves), then
+  `moving()` is false and the pose holds. `gesture()` gives one small
+  hop (working, 4 units), one hop (needs you) or one 0.9-s puff (risky);
+  `ball.ts` calls it every 8–12 s. A settled squash spring snaps to rest,
+  so a stopped loop stays stopped. He looks at the cursor only within
+  120 px, so the look eases once and stops. Spinner: 3 turns; caret: 4
+  blinks. Reduced motion: unchanged (no frames, no gestures, the still
+  pose). Prototype v0.19 matches (Build spec: Motion).
+
+| Case (60 s) | Before (main, v0.5.8) | After |
+| --- | --- | --- |
+| Working, no card | 41.2% of a core | 4.0% (3.6 / 4.3 / 4.2) |
+| Normal card (needs you) | 37.7% | 4.7% (4.7 / 4.6) |
+| Risky card | 37.8% | 4.7% |
+| Idle | 3.9% | 0.5% |
+| Card, reduced motion | 0.3% | 0.3% |
+
+| Threat | Fix |
+| --- | --- |
+| A card goes unnoticed | It still hops (a pair) or puffs when it appears; the sound and the "!" are unchanged; then a hop every 8–12 s |
+| The loop restarts by itself | Spring snaps to rest; test: still after the burst, and time passing changes nothing |
+| Reduced motion | Same path as before: no frames, no gestures |
+
+Done when:
+
+- [x] Each mood: one burst, then the loop stops (test)
+- [x] Gestures under ~1 s, loop stopped in between (test; CPU table)
+- [x] No CSS animation left running forever on the island
+- [x] Targets met: working 4.0% (< 5), card 4.7% (< 8), idle 0.5% (< 1)
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
