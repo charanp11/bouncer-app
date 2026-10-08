@@ -690,6 +690,68 @@ fn expand(app: AppHandle, island: State<'_, Island>, open: bool) {
 mod tests {
     use super::*;
 
+    /// The shipped page may run only its own script and style (no inline
+    /// code, no eval, nothing remote), and the window may call only our own
+    /// commands: no Tauri plugin (files, shell, HTTP) is reachable from it.
+    #[test]
+    fn strict_csp_and_only_our_commands() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let security = &conf["app"]["security"];
+        let csp = &security["csp"];
+        for (directive, want) in [
+            ("default-src", "'self'"),
+            ("script-src", "'self'"),
+            ("style-src", "'self'"),
+            ("img-src", "'self'"),
+            ("connect-src", "ipc: http://ipc.localhost"),
+            ("object-src", "'none'"),
+            ("base-uri", "'none'"),
+            ("form-action", "'none'"),
+            ("frame-ancestors", "'none'"),
+        ] {
+            assert_eq!(csp[directive], want, "{directive}");
+        }
+        let all = csp.to_string();
+        for loose in [
+            "unsafe-inline",
+            "unsafe-eval",
+            "http:",
+            "https:",
+            "*",
+            "data:",
+        ] {
+            let hits = all.matches(loose).count();
+            let allowed = usize::from(loose == "http:"); // only http://ipc.localhost
+            assert_eq!(hits, allowed, "csp allows {loose}");
+        }
+        assert_eq!(security["freezePrototype"], true);
+        let caps: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+        let ours = [
+            "subscribe",
+            "decide",
+            "always",
+            "expand",
+            "drag",
+            "fit",
+            "settings",
+            "set-prefs",
+            "wipe",
+            "about",
+            "set-mode",
+            "keyboard",
+        ];
+        let granted: Vec<&str> = caps["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        assert_eq!(granted, ours.map(|c| format!("allow-{c}")));
+        assert_eq!(caps["windows"], serde_json::json!(["main"]));
+    }
+
     #[test]
     fn island_stays_on_screen() {
         let area = ((0, 0), (1920, 1040));

@@ -238,3 +238,49 @@ fn claude_config_dir_is_the_default_target() {
     assert!(written.contains("bouncer-hook.exe"));
     assert!(!dir.join(".claude").exists());
 }
+
+/// install-hooks and uninstall-hooks write the target and its dated backup,
+/// and nothing else: the other files beside it keep their exact bytes.
+#[test]
+fn only_the_target_and_its_backup_are_written() {
+    let dir = temp_dir("only-target");
+    fs::write(dir.join("settings.json"), ORIGINAL).unwrap();
+    fs::write(dir.join("settings.local.json"), "{\"keep\": true}").unwrap();
+    fs::write(dir.join("other.json"), "untouched").unwrap();
+    let snapshot = |dir: &Path| {
+        let mut files: Vec<(String, Vec<u8>)> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .map(|p| {
+                (
+                    p.file_name().unwrap().to_string_lossy().into_owned(),
+                    fs::read(&p).unwrap(),
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    };
+    let before = snapshot(&dir);
+    assert!(install(&dir, "y\n").status.success());
+    assert!(bouncer(&dir, &["uninstall-hooks"], "y\n").status.success());
+    let after = snapshot(&dir);
+    for (name, bytes) in &before {
+        let now = &after.iter().find(|(n, _)| n == name).unwrap().1;
+        if name != "settings.json" {
+            assert_eq!(now, bytes, "{name} changed");
+        }
+    }
+    let added: Vec<&String> = after
+        .iter()
+        .map(|(n, _)| n)
+        .filter(|n| !before.iter().any(|(b, _)| b == *n))
+        .collect();
+    assert_eq!(added.len(), 2, "{added:?}");
+    assert!(
+        added
+            .iter()
+            .all(|n| n.starts_with("settings.json.bouncer-backup-")),
+        "{added:?}"
+    );
+}
