@@ -2394,6 +2394,56 @@ The first try named its keyframes `running`, a CSS keyword (the play
 state), so it never ran; found by this check, now guarded by the test. On
 the rerun (real clicks): settled at 2.4 s, still afterwards.
 
+## Regression gate (after the motion budget, before 6)
+
+Charan, 2026-10-08: every scenario Bouncer supports listed and proven, so
+nothing breaks going forward. The list is `docs/TESTS.md`; CI runs every
+automated row on Windows and macOS and `scripts/check-tests.mjs` fails a PR
+whose table names a test that doesn't exist.
+
+### Regression gate audit (2026-10-08)
+
+Mapped the 159 Rust and 57 frontend tests to the scenarios. Unproven:
+the app dying with a card up, the wait budgets' order, re-install from a
+new place, a dropped session coming back, install touching only its
+target, two cards from one session, the CSP and the window's commands, a
+burst of simultaneous hooks, a second launch. Each got a test; the real-
+click rows were run on the test instance. Three bugs, each shown failing
+first, then fixed in its own commit:
+
+1. **Events lost in a burst of hooks** (the flaky
+   `two_sessions_stream_while_one_waits_for_a_decision`). Cause: a
+   fire-and-forget relay exited right after writing; the app checks who
+   sent an event before reading it, and when the relay was already gone the
+   event was lost. Under load the app's thread starts later, so it was
+   flaky (1 in 20 under full CPU load). A new test sends 32 relays at once:
+   26–31 of 32 arrived (3 in 6 runs failed, still missing after 5 s). Fix:
+   the relay waits for the app to close the connection (bounded by its
+   2-s fire-and-forget budget); 0 in 20 failed after, full suite 5 times
+   clean. No timeout raised.
+2. **A second launch stayed as a dead island**: the pipe was taken, so it
+   logged a line and kept a second island and tray icon that never heard
+   anything. Shown on the test instance (main's build: still running after
+   8 s). Fix: if the endpoint is taken by this user's Bouncer, the second
+   launch quits at once; the first keeps working (checked).
+3. **An empty away summary**: sessions that only started or stopped opened
+   "While you were away" with all zeros. Fix: no tool call and no request
+   means no summary (test).
+
+Found, not changed (decision for Charan): the live island shows commands
+exactly as sent, secrets included (you approve what you see; nothing is
+written; the log and the away summary are redacted). `docs/TESTS.md` L5.
+
+Done when:
+
+- [x] `docs/TESTS.md`: 82 scenarios, 73 automated in CI, 5 real-click only
+  (run 2026-10-08), 3 hand checks (about 15 minutes), M3 waits for Phase 9
+- [x] Every row with no proof got a test, or a real-click run, or a hand check
+- [x] CI checks every named test exists, on Windows and macOS
+- [x] The flaky relay test: cause found, shown failing, fixed without
+  raising a timeout
+- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
 - **Audit:** Claude Code's headless mode (`claude -p`): flags, output formats,
