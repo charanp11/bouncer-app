@@ -1258,10 +1258,33 @@ pre.cmd {
   --body-deep: var(--sun-deep);
 }
 
+.ball > * {
+  grid-area: 1 / 1;
+}
+
+.ball .shade,
+.ball .lift {
+  display: block;
+}
+
 .ball svg {
+  display: block;
   width: 26px;
   height: 26px;
   overflow: visible;
+}
+
+/* The body turns and squashes about its bottom centre (16, 29 of 32), the
+   shadow about its own centre (16, 30): ball.ts moves these boxes. */
+.ball .lift {
+  transform-origin: 50% 90.625%;
+  will-change: transform;
+}
+
+.ball .shade {
+  transform-origin: 50% 93.75%;
+  opacity: 0.35;
+  will-change: transform, opacity;
 }
 
 .ball.big,
@@ -1307,7 +1330,6 @@ pre.cmd {
 
 .ball .shadow {
   fill: #000;
-  opacity: 0.35;
 }
 
 .ball .flat,
