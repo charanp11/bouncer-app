@@ -25,9 +25,22 @@ const BOUNCE = 0.5;
 /** Landings slower than this stop bouncing. */
 const SETTLE_SPEED = 12;
 const BREATHE = 3.2;
-/** Idle breathes three times after something happens, then holds still. */
-const BREATHS = 3;
+/** Idle breathes once after something happens, then holds still. */
+const BREATHS = 1;
 const PUFF = 1.4;
+/** Motion budget: a new mood moves for this long (working: two jumps;
+ * needs you: one pair of hops; risky: one puff), then the frame loop stops
+ * and he holds still. Done and the greeting end by themselves. */
+const BURST: Partial<Record<Mood, number>> = { working: 1.6, needs: 1, risky: PUFF };
+/** Between bursts, one small gesture every 8–12 s (ball.ts keeps the time). */
+export const GESTURE_MIN_S = 8;
+export const GESTURE_SPREAD_S = 4;
+/** A risky gesture: one quicker puff. */
+const PUFF_GESTURE = 0.9;
+/** Gesture hops: working's is a small one (half a jump's frames), needs
+ * you's the first of its pair. */
+const WORK_HOP = 4;
+const NEEDS_HOP = 5;
 const HOPS_EVERY = 1.6;
 const DANCE = 0.48;
 export const LOOK_MAX = 1.5;
@@ -54,6 +67,11 @@ export type Motion = {
   hop: number;
   /** Needs you: seconds to the next pair of hops. */
   cycle: number;
+  /** Seconds left of this mood's burst of motion. */
+  active: number;
+  /** A puff (risky) in progress: seconds into it, and its length. */
+  pulse: number;
+  pulseLen: number;
   bounce: number;
   look: [number, number];
   target: [number, number];
@@ -88,6 +106,9 @@ export function motion(mood: Mood = "idle"): Motion {
     hops: [],
     hop: 0,
     cycle: 0,
+    active: 0,
+    pulse: 0,
+    pulseLen: 0,
     bounce: 0,
     look: [0, 0],
     target: [0, 0],
@@ -103,6 +124,9 @@ export function setMood(m: Motion, mood: Mood) {
   m.mood = mood;
   m.t = 0;
   m.cycle = 0;
+  m.active = BURST[mood] ?? 0;
+  m.pulse = 0;
+  m.pulseLen = mood === "risky" ? PUFF : 0;
   m.bounce = 0;
   m.hops = mood === "done" ? [11, 3, 11, 3] : [];
   if (mood === "greet") {
@@ -118,6 +142,17 @@ export function squish(m: Motion, dizzy: boolean) {
   if (m.dizzy > 0) return;
   if (dizzy) m.dizzy = DIZZY;
   else m.sv -= SQUISH;
+}
+
+/** The small gesture between bursts: one small hop (working), one hop
+ * (needs you), one quick puff (risky); nothing in the other moods. Under ~1 s. */
+export function gesture(m: Motion) {
+  if (m.mood === "working") m.hops.push(WORK_HOP);
+  if (m.mood === "needs") m.hops.push(NEEDS_HOP);
+  if (m.mood === "risky") {
+    m.pulse = 0;
+    m.pulseLen = PUFF_GESTURE;
+  }
 }
 
 export const BLINK_MS = BLINK * 1000;
@@ -150,7 +185,7 @@ function step(m: Motion) {
     }
   } else {
     m.ground += STEP;
-    if (m.mood === "working" && !m.hops.length) m.hops.push(JUMP);
+    if (m.mood === "working" && m.active > 0 && !m.hops.length) m.hops.push(JUMP);
     const gap = m.mood === "working" ? LAND : 0.06;
     const next = m.hops[0];
     if (next !== undefined && m.ground >= gap) {
@@ -163,13 +198,21 @@ function step(m: Motion) {
   const target = airborne ? 1 + STRETCH * Math.min(1, Math.abs(m.v) / speed(JUMP)) : 1;
   m.sv += (-K * (m.sy - target) - C * m.sv) * STEP;
   m.sy += m.sv * STEP;
+  // Settled on the ground: exactly at rest, so a stopped loop stays stopped
+  // (the spring would otherwise wobble back over moving()'s threshold).
+  if (!airborne && Math.abs(m.sy - 1) <= 1e-3 && Math.abs(m.sv) <= 1e-2) {
+    m.sy = 1;
+    m.sv = 0;
+  }
 }
 
 /** Moves the body on by one frame of `dt` seconds. */
 export function advance(m: Motion, dt: number) {
   dt = Math.min(Math.max(dt, 0), MAX_FRAME);
   m.t += dt;
-  if (m.mood === "needs") {
+  m.active = Math.max(0, m.active - dt);
+  m.pulse = Math.min(m.pulse + dt, m.pulseLen);
+  if (m.mood === "needs" && m.active > 0) {
     m.cycle -= dt;
     if (m.cycle <= 0) {
       m.hops = [5, 3];
@@ -195,7 +238,7 @@ const breathing = (m: Motion) => m.mood === "idle" && m.t < BREATHE * BREATHS;
 /** Whether another frame would change anything. A blink needs none: it is
  * two plain repaints (shut, open), the cheapest thing that reads as one. */
 export function moving(m: Motion): boolean {
-  if (["working", "needs", "risky", "dance"].includes(m.mood)) return true;
+  if (m.mood === "dance" || m.active > 0 || m.pulse < m.pulseLen) return true;
   return (
     breathing(m) ||
     m.hops.length > 0 ||
@@ -221,8 +264,8 @@ export function pose(m: Motion): Pose {
     sx *= 1 + 0.04 * p;
     sy *= 1 - 0.03 * p;
   }
-  if (m.mood === "risky") {
-    const p = wave(PUFF);
+  if (m.mood === "risky" && m.pulse < m.pulseLen) {
+    const p = Math.sin((Math.PI * m.pulse) / m.pulseLen) ** 2;
     sx *= 1 + 0.1 * p;
     sy *= 1 + 0.04 * p;
   }

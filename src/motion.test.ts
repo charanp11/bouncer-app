@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { advance, blink, BODY_ORIGIN, boxes, lookAt, motion, moving, pose, setMood, SHADOW_ORIGIN, squish, still, VIEW, type Motion } from "./motion.ts";
+import { advance, blink, BODY_ORIGIN, boxes, gesture, lookAt, motion, moving, pose, setMood, SHADOW_ORIGIN, squish, still, VIEW, type Motion } from "./motion.ts";
 
 /** Runs `seconds` at `hz` (jittered by up to ±50% when asked); returns the poses. */
 function run(m: Motion, seconds: number, hz: number, jitter = false) {
@@ -28,16 +28,17 @@ test("the working jump is 9 units at any frame rate", () => {
   }
 });
 
-test("a jump lasts about 900 ms", () => {
+test("a jump lasts about 900 ms; a working burst is two of them", () => {
   const m = motion("working");
-  let landings = 0;
+  const landings: number[] = [];
   let airborne = false;
-  for (let i = 0; i < 9 * 60; i++) {
+  for (let i = 0; i < 4 * 60; i++) {
     advance(m, 1 / 60);
-    if (airborne && m.y === 0) landings++;
+    if (airborne && m.y === 0) landings.push(i / 60);
     airborne = m.y > 0;
   }
-  assert.ok(landings >= 9 && landings <= 11, `${landings} landings in 9 s`);
+  assert.equal(landings.length, 2, `${landings.length} landings`);
+  assert.ok(Math.abs(landings[1] - landings[0] - 0.9) < 0.05, `${landings[1] - landings[0]} s apart`);
 });
 
 test("squash and stretch stay near the spec (1.14 / 1.12)", () => {
@@ -163,4 +164,59 @@ test("the body and shadow boxes carry the pose as CSS, about the right points", 
   const pct = ([x, y]: readonly [number, number]) => [(x / VIEW) * 100, (y / VIEW) * 100];
   assert.deepEqual(origin("lift"), pct(BODY_ORIGIN));
   assert.deepEqual(origin("shade"), pct(SHADOW_ORIGIN));
+});
+
+/** Frames until the loop would stop (moving() false), at 60 Hz, capped. */
+function untilStill(m: Motion, cap = 10) {
+  let t = 0;
+  while (moving(m) && t < cap) {
+    advance(m, 1 / 60);
+    t += 1 / 60;
+  }
+  return t;
+}
+
+test("every mood moves in one short burst, then the loop stops and he holds still", () => {
+  for (const [mood, most] of [["working", 3], ["needs", 2], ["risky", 2], ["done", 3.3], ["greet", 2.5], ["idle", 3.5]] as const) {
+    const m = motion(mood);
+    advance(m, 1 / 60);
+    assert.equal(moving(m), true, `${mood} starts moving`);
+    const t = untilStill(m);
+    assert.ok(t > 0.5 && t <= most, `${mood} burst ${t.toFixed(2)} s`);
+    // Stopped: no frame needed, and time passing changes nothing.
+    const held = pose(m);
+    advance(m, 5);
+    assert.equal(moving(m), false, `${mood} stays still`);
+    const now = pose(m);
+    for (const k of ["y", "sx", "sy", "rot", "shadow", "shadowOpacity"] as const) {
+      // Under moving()'s own threshold: nothing anyone could see.
+      assert.ok(Math.abs(now[k] - held[k]) <= 1e-3, `${mood} holds its pose (${k})`);
+    }
+  }
+});
+
+test("a card's first appearance still gets its pair of hops, then only gestures", () => {
+  const m = motion("needs");
+  const apexes = run(m, 5, 60).filter((p, i, a) => i > 0 && i < a.length - 1 && p.y > a[i - 1].y && p.y >= a[i + 1].y && p.y > 0.5);
+  assert.equal(apexes.length, 2, "one pair of hops");
+  assert.equal(moving(m), false);
+});
+
+test("gestures: one jump, hop or puff under about a second, then still again", () => {
+  for (const mood of ["working", "needs", "risky"] as const) {
+    const m = motion(mood);
+    untilStill(m);
+    gesture(m);
+    assert.equal(moving(m), true, mood);
+    const t = untilStill(m);
+    assert.ok(t > 0.3 && t < 1.2, `${mood} gesture ${t.toFixed(2)} s`);
+    assert.equal(pose(m).y, 0);
+  }
+  // Moods without a gesture don't start the loop.
+  for (const mood of ["idle", "done", "paused", "greet"] as const) {
+    const m = motion(mood);
+    untilStill(m);
+    gesture(m);
+    assert.equal(moving(m), false, mood);
+  }
 });
