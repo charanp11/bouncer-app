@@ -2374,7 +2374,8 @@ Done when:
 - [x] Gestures under ~1 s, loop stopped in between (test; CPU table)
 - [x] No CSS animation left running forever on the island
 - [x] Targets met: working 4.0% (< 5), card 4.7% (< 8), idle 0.5% (< 1)
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local: 158 Rust + 56 frontend)
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
