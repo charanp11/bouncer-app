@@ -1547,6 +1547,21 @@ mod tests {
         assert_eq!(other.join().unwrap(), Some(Decision::Deny));
     }
 
+    /// A session that crashed or was closed without SessionEnd drops off
+    /// after its limit; its next event brings it back.
+    #[test]
+    fn a_dropped_session_comes_back_with_its_next_event() {
+        let desk = desk(WAIT);
+        desk.handle(event("gone", "PreToolUse", "ls"));
+        desk.lock()
+            .expire(SystemTime::now() + IDLE_LIMIT + Duration::from_secs(60));
+        assert_eq!(desk.view()["sessions"], json!([]));
+        desk.handle(event("gone", "PreToolUse", "cargo test"));
+        let view = desk.view();
+        assert_eq!(view["sessions"][0]["id"], "gone");
+        assert_eq!(view["sessions"][0]["status"], "working");
+    }
+
     #[test]
     fn quiet_sessions_drop_off() {
         let desk = desk(WAIT);

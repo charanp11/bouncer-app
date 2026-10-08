@@ -255,6 +255,28 @@ fn a_burst_of_simultaneous_relays_all_get_through() {
     wait_for(&seen, BURST);
 }
 
+/// The app quits or crashes while a card is up: the connection closes with no
+/// answer, so the relay prints nothing at once and Claude Code asks in its
+/// terminal.
+#[test]
+fn the_app_going_away_with_a_card_up_prints_nothing() {
+    let path = serve(
+        "dies",
+        Arc::new(|_: Event, _: &dyn Fn() -> bool| {
+            std::thread::sleep(Duration::from_millis(300));
+            panic!("the app went away"); // its end of the connection closes
+        }),
+    );
+    let start = Instant::now();
+    let out = relay(&path, &event("s", "PermissionRequest"));
+    assert_silent(&out);
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
 #[test]
 fn two_sessions_stream_while_one_waits_for_a_decision() {
     let seen = Arc::new(Mutex::new(Vec::new()));

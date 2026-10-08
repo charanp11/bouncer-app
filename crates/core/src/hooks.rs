@@ -207,6 +207,53 @@ mod tests {
         assert_eq!(s["hooks"]["PreToolUse"][0]["matcher"], "Bash");
     }
 
+    /// The budgets nest: the card gives up first (WAIT), then the relay
+    /// (110 s), and Claude Code's hook timeout last, so Claude Code never
+    /// kills a relay that is still waiting for an answer.
+    #[test]
+    fn the_wait_budgets_nest_inside_the_hook_timeout() {
+        let hook = EVENTS
+            .iter()
+            .find(|(e, _)| *e == "PermissionRequest")
+            .map(|&(_, t)| std::time::Duration::from_secs(t))
+            .unwrap();
+        let relay = bouncer_relay::DECISION_BUDGET;
+        let card = crate::approvals::WAIT;
+        assert!(
+            card + std::time::Duration::from_secs(5) <= relay,
+            "{card:?} vs {relay:?}"
+        );
+        assert!(
+            relay + std::time::Duration::from_secs(5) <= hook,
+            "{relay:?} vs {hook:?}"
+        );
+    }
+
+    /// Installing again after Bouncer moved replaces our entry (one per
+    /// event, the new path); the user's hooks stay.
+    #[test]
+    fn reinstall_from_a_new_place_replaces_ours() {
+        let mut s = user_settings();
+        install(&mut s, RELAY).unwrap();
+        let moved = "/Applications/Bouncer.app/Contents/MacOS/bouncer-hook";
+        install(&mut s, moved).unwrap();
+        for &(event, _) in EVENTS {
+            let ours: Vec<_> = s["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|g| g["hooks"].as_array().unwrap())
+                .filter(|h| is_ours(h))
+                .collect();
+            assert_eq!(ours.len(), 1, "{event}");
+            assert_eq!(ours[0]["command"], moved, "{event}");
+        }
+        assert_eq!(
+            s["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "notify-send done"
+        );
+    }
+
     #[test]
     fn uninstall_restores_the_original_exactly() {
         // Known limit: an empty `"hooks": {}` the user had comes back removed.
