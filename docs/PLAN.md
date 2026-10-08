@@ -1443,7 +1443,7 @@ Phase 5b is done when:
 - [x] Contrast ≥ 4.5:1 everywhere (prototype first); screen reader order
   checked by hand (Narrator reads the island in order when you go to it; it
   doesn't announce a new card by itself: accepted, Phase 9)
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 130 Rust + 36 frontend; gitleaks clean)
 
 ## Phase 5c — Island motion
@@ -1620,7 +1620,7 @@ Phase 5c is done when:
   in the activity log, never the text; old log files still read
 - [x] `line_ops` capped for huge edits
 - [x] Reduced motion: all off; idle CPU still ~0%
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   before every push (local green: 137 Rust + 41 frontend; gitleaks clean)
 
 ## Island window region (after 5c, before 5d)
@@ -1907,7 +1907,7 @@ Done when:
 - [x] Tests: recipes ≤ 1 s, the pack equals `preferences.json`'s list,
   priority, repeat drop, gates, prefs parsing, Esc isn't a failure (the
   app's recipes checked equal to the prototype's once, by hand)
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
   (local green: 150 Rust + 51 frontend)
 
 Implement (2026-10-06):
@@ -2359,6 +2359,9 @@ Phase 8 is done when:
 - **Implement:** release workflow on `v*` tags: macOS universal `.dmg`, Windows
   `.msi`, SHA-256 checksums, GitHub build attestations; README with pitch, demo GIF,
   install / verify / uninstall steps, privacy statement.
+- Settings warns when installed hooks are missing events; one click re-installs.
+  (Same rules as `install-hooks`: shows the diff, asks, dated backup, atomic
+  write; only our entries change.)
 - **Test:** install, use, uninstall on clean Windows (own PC) and macOS (friend's Mac,
   using the CI build); `settings.json` restored exactly.
 - **Verify:** only the release job can write; no secrets in logs; README alone is enough.
