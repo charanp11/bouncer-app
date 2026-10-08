@@ -2324,7 +2324,8 @@ Done when:
 - [x] No layout per frame while he moves (1,312 → 4 in 20 s)
 - [x] Card up 60 s: CPU before and after measured (table)
 - [x] Same look: pixel comparison; reduced motion still
-- [ ] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+- [x] fmt, clippy, tests green locally and in CI; gitleaks rules checked
+  (local: 158 Rust + 53 frontend)
 
 ## Phase 6 — Chat in the island (~1.5 weeks) (current)
 
