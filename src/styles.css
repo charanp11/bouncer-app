@@ -732,7 +732,8 @@ pre.cmd {
 .ic.spin {
   border: 2px solid rgba(255, 255, 255, 0.18);
   border-top-color: var(--sun);
-  animation: spin 800ms linear infinite;
+  /* a few turns when the step starts, then a still ring (motion budget) */
+  animation: spin 800ms linear 3;
 }
 
 @keyframes spin {
@@ -969,7 +970,8 @@ pre.cmd {
   height: 14px;
   background: var(--sun);
   vertical-align: -2px;
-  animation: blink 1s steps(1) infinite;
+  /* blinks a few times, then stays (motion budget) */
+  animation: blink 1s steps(1) 4;
 }
 
 @keyframes blink {

@@ -246,7 +246,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .steps .tag.auto { color: var(--ok); } .steps .tag.mine { color: var(--muted); } .steps .tag.you { color: var(--wait); } .steps .tag.flag { color: var(--risk); }
 .ic { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; }
 .ic.ok { background: var(--ok); } .ic.ok::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--island); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
-.ic.spin { border: 2px solid rgba(255,255,255,.18); border-top-color: var(--sun); animation: spin 800ms linear infinite; }
+.ic.spin { border: 2px solid rgba(255,255,255,.18); border-top-color: var(--sun); animation: spin 800ms linear 3; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .ic.wait { border: 2px solid var(--wait); }
 .ic.todo { border: 1.5px dashed rgba(255,255,255,.22); }
@@ -273,7 +273,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .ln.add { background: rgba(79,209,139,.12); box-shadow: inset 2px 0 0 var(--ok); }
 .ln.add .m, .ln.add .n { color: #7fe3ad; }
 .k { color: #c792ea; } .s { color: #a5d6a7; } .num { color: #f6c177; } .c { color: #6b7280; font-style: italic; } .ty { color: #82aaff; }
-.caret { display: inline-block; width: 7px; height: 14px; background: var(--sun); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+.caret { display: inline-block; width: 7px; height: 14px; background: var(--sun); vertical-align: -2px; animation: blink 1s steps(1) 4; }
 @keyframes blink { 50% { opacity: 0; } }
 .askbar { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); background: var(--raised); }
 .askbar .q { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -295,12 +295,14 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .ball .alert circle { fill: var(--wait); }
 .ball .alert text, .ball .zz { font: 700 7px var(--ui); fill: #fff; }
 .ball .zz { fill: var(--muted); font-size: 6px; }
+/* Motion budget: each mood moves once when it starts (1–3 s), then he holds
+   still; the build adds one small gesture every 8–12 s (see Build spec). */
 /* idle: breathes, shades glint now and then */
-.ball.idle .jumper { animation: breathe 3.2s ease-in-out infinite; }
+.ball.idle .jumper { animation: breathe 3.2s ease-in-out 1; }
 @keyframes breathe { 50% { transform: scale(1.04, 0.97); } }
 /* working: real jumps — squash on landing, stretch going up, shadow shrinks */
-.ball.working .jumper { animation: jump 900ms cubic-bezier(.3,.7,.4,1) infinite; }
-.ball.working .shadow { animation: jumpshadow 900ms cubic-bezier(.3,.7,.4,1) infinite; }
+.ball.working .jumper { animation: jump 900ms cubic-bezier(.3,.7,.4,1) 2; }
+.ball.working .shadow { animation: jumpshadow 900ms cubic-bezier(.3,.7,.4,1) 2; }
 @keyframes jump {
   0%   { transform: translateY(0) scale(1.14, 0.84); }
   18%  { transform: translateY(-4px) scale(0.9, 1.12); }
@@ -312,19 +314,19 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 @keyframes jumpshadow { 0%, 86%, 100% { transform: scaleX(1); opacity: .4; } 45% { transform: scaleX(0.55); opacity: .15; } }
 /* needs you: hops twice with an orange "!" */
 .ball.needs .alert { display: inline; }
-.ball.needs .jumper { animation: hop 1.6s ease-out infinite; }
+.ball.needs .jumper { animation: hop 1.6s ease-out 1; }
 @keyframes hop { 0%, 60%, 100% { transform: none; } 68% { transform: translateY(-5px) scale(.94,1.06); } 76% { transform: scale(1.08,.92); } 84% { transform: translateY(-3px); } 92% { transform: none; } }
 /* risky: turns red, stops smiling, puffs up like he's blocking the door */
 .ball.risky { --body: #ff5a4f; --body-deep: #d63a31; }
 .ball.risky .smile { display: none; } .ball.risky .flat { display: inline; }
-.ball.risky .jumper { animation: puff 1.4s ease-in-out infinite; }
+.ball.risky .jumper { animation: puff 1.4s ease-in-out 1; }
 @keyframes puff { 50% { transform: scale(1.1, 1.04); } }
 /* paused: grey, shades off, eyes shut, z */
 .ball.paused { --body: #8a909c; --body-deep: #6b7180; }
 .ball.paused .shades, .ball.paused .glint, .ball.paused .smile { display: none; }
 .ball.paused .sleep, .ball.paused .zz { display: inline; }
 /* done: one big happy hop */
-.ball.done .jumper { animation: cheer 1.2s cubic-bezier(.3,.7,.4,1) infinite; }
+.ball.done .jumper { animation: cheer 1.2s cubic-bezier(.3,.7,.4,1) 2; }
 @keyframes cheer { 0%,100% { transform: scale(1.1,.9); } 35% { transform: translateY(-11px) rotate(-8deg); } 60% { transform: translateY(0) scale(1.12,.88); } 75% { transform: translateY(-3px); } }
 /* music: bops side to side */
 .ball.dance .jumper { animation: dance 480ms ease-in-out infinite alternate; }
@@ -403,7 +405,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.18 · Oct 8 2026</div>
+    <div class="meta">design/prototype · v0.19 · Oct 8 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -532,9 +534,12 @@ a.chip { text-decoration: none; }
         <tr><td>Content rise</td><td>6px, only when growing</td></tr>
         <tr><td>Card arrival</td><td>never animated</td></tr>
         <tr><td>Allow arm delay</td><td>600ms from fully visible</td></tr>
-        <tr><td>Jump (working)</td><td>900ms, 9px, squash 1.14</td></tr>
-        <tr><td>Breathe (idle)</td><td>3.2s loop</td></tr>
-        <tr><td>Hop (needs you)</td><td>every 1.6s</td></tr>
+        <tr><td>Jump (working)</td><td>900ms, 9px, squash 1.14; two when work starts</td></tr>
+        <tr><td>Breathe (idle)</td><td>3.2s, once after a change</td></tr>
+        <tr><td>Hop (needs you)</td><td>a pair when the card appears</td></tr>
+        <tr><td>Puff (risky)</td><td>1.4s, once when the card appears</td></tr>
+        <tr><td>Motion budget</td><td>bursts, then still; one gesture (small 4px hop working / 5px hop needs you / 0.9s puff risky) every 8–12s; looks only while the cursor moves within 120px</td></tr>
+        <tr><td>Step spinner / caret</td><td>3 turns / 4 blinks, then still</td></tr>
         <tr><td>Cheer (done)</td><td>1.2s, 11px</td></tr>
         <tr><td>Greeting (launch)</td><td>3 bounces, 2.5s</td></tr>
         <tr><td>Reduced motion</td><td>all off, one-step resize</td></tr>
