@@ -246,8 +246,12 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .steps .tag.auto { color: var(--ok); } .steps .tag.mine { color: var(--muted); } .steps .tag.you { color: var(--wait); } .steps .tag.flag { color: var(--risk); }
 .ic { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; }
 .ic.ok { background: var(--ok); } .ic.ok::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--island); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
-.ic.spin { border: 2px solid rgba(255,255,255,.18); border-top-color: var(--sun); animation: spin 800ms linear 3; }
+/* running: 3 turns, then a still "running" mark (sun disc, three dots) */
+.ic.spin { border: 2px solid rgba(255,255,255,.18); border-top-color: var(--sun); animation: spin 800ms linear 3, settle 0s 2400ms forwards; }
+.ic.spin::after { content: ""; width: 2px; height: 2px; border-radius: 1px; background: var(--island); box-shadow: -4px 0 var(--island), 4px 0 var(--island); opacity: 0; animation: settle-dots 0s 2400ms forwards; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes settle { to { border-color: transparent; background: var(--sun); } }
+@keyframes settle-dots { to { opacity: 1; } }
 .ic.wait { border: 2px solid var(--wait); }
 .ic.todo { border: 1.5px dashed rgba(255,255,255,.22); }
 /* you denied: red cross (never a check) */
@@ -396,6 +400,7 @@ a.chip { text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  .ic.spin { border-color: transparent; background: var(--sun); } .ic.spin::after { opacity: 1; }
 }
 </style>
 
@@ -405,7 +410,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.19 · Oct 8 2026</div>
+    <div class="meta">design/prototype · v0.20 · Oct 8 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -539,7 +544,7 @@ a.chip { text-decoration: none; }
         <tr><td>Hop (needs you)</td><td>a pair when the card appears</td></tr>
         <tr><td>Puff (risky)</td><td>1.4s, once when the card appears</td></tr>
         <tr><td>Motion budget</td><td>bursts, then still; one gesture (small 4px hop working / 5px hop needs you / 0.9s puff risky) every 8–12s; looks only while the cursor moves within 120px</td></tr>
-        <tr><td>Step spinner / caret</td><td>3 turns / 4 blinks, then still</td></tr>
+        <tr><td>Step spinner / caret</td><td>3 turns, then a still "running" mark (sun disc, three dots) / 4 blinks, then still</td></tr>
         <tr><td>Cheer (done)</td><td>1.2s, 11px</td></tr>
         <tr><td>Greeting (launch)</td><td>3 bounces, 2.5s</td></tr>
         <tr><td>Reduced motion</td><td>all off, one-step resize</td></tr>

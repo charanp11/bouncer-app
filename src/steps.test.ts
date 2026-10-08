@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { group, latest, STALE_MS, stepIcon, title, waitingInTerminal } from "./steps.ts";
 
@@ -57,4 +58,29 @@ test("only a step whose PostToolUse came gets the green check", () => {
   }
   assert.equal(stepIcon("you allowed", false, true, false), "spin");
   assert.equal(stepIcon("waiting for you", false, true, true), "wait");
+});
+
+test("a long step never looks frozen: the spinner turns, then settles into a still running mark", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  // Nothing on the island animates forever (motion budget).
+  assert.doesNotMatch(css, /infinite/);
+  // The turns end exactly when the running mark appears.
+  // "running" and "paused" are play states: in the shorthand they never name
+  // a keyframes (the hand check of #19 caught a settle step that never ran).
+  for (const decl of css.match(/animation:[^;]+;/g) ?? []) assert.doesNotMatch(decl, /\b(running|paused)\b/, decl);
+  const spin = css.match(/\.ic\.spin \{[^}]*animation:\s*spin (\d+)ms linear (\d+),\s*settle 0s (\d+)ms forwards;/);
+  assert.ok(spin, "the spinner turns, then settles");
+  const [turn, turns, settle] = spin.slice(1).map(Number);
+  assert.equal(turn * turns, settle);
+  const dots = css.match(/\.ic\.spin::after \{[^}]*opacity: 0;[^}]*animation: settle-dots 0s (\d+)ms forwards;/);
+  assert.equal(Number(dots?.[1]), settle, "the dots appear with it");
+  assert.match(css, /@keyframes settle \{\s*to \{\s*border-color: transparent;\s*background: var\(--sun\);/);
+  // Reduced motion: no turns, the mark from the start.
+  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ic\.spin \{\s*border-color: transparent;\s*background: var\(--sun\);/);
+  assert.match(reduced, /\.ic\.spin::after \{\s*opacity: 1;/);
+  // Unlike done (green), waiting and neutral (hollow rings): a sun disc.
+  for (const other of ["ok", "wait", "mid"]) {
+    assert.doesNotMatch(css.match(new RegExp(String.raw`\.ic\.${other} \{[^}]*\}`))![0], /--sun/, other);
+  }
 });
