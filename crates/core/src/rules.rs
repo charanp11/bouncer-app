@@ -789,15 +789,39 @@ pub(crate) mod trust {
 pub(crate) mod tests {
     use super::*;
 
-    /// A fresh private folder under the system temp folder.
-    pub(crate) fn temp_dir(name: &str) -> PathBuf {
+    /// A folder deleted with everything in it when dropped (errors ignored).
+    pub(crate) struct TempDir(pub(crate) PathBuf);
+
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for TempDir {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A fresh private folder under the system temp folder, deleted when
+    /// the returned guard drops: bind it (`let dir = temp_dir(..)`), never
+    /// chain on it, or it's gone at the end of the statement.
+    pub(crate) fn temp_dir(name: &str) -> TempDir {
         let nanos = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("bouncer-rules-{name}-{nanos}"));
         create_private_dir(&dir).unwrap();
-        dir
+        TempDir(dir)
     }
 
     fn err(text: &str) -> String {
@@ -949,7 +973,8 @@ pub(crate) mod tests {
 
     #[test]
     fn missing_file_is_created_with_defaults() {
-        let path = temp_dir("create").join("Bouncer").join("rules.toml");
+        let tmp = temp_dir("create");
+        let path = tmp.join("Bouncer").join("rules.toml");
         let loaded = load(&path);
         assert_eq!(
             loaded,
@@ -1018,7 +1043,8 @@ pub(crate) mod tests {
 
     #[test]
     fn set_mode_changes_only_the_mode_line() {
-        let path = temp_dir("set-mode").join("rules.toml");
+        let tmp = temp_dir("set-mode");
+        let path = tmp.join("rules.toml");
         assert_eq!(load(&path).error, None);
         let before = read(&path).unwrap();
         set_mode(&path, Mode::Auto).unwrap();
@@ -1037,7 +1063,8 @@ pub(crate) mod tests {
 
     #[test]
     fn set_mode_adds_a_missing_line_and_keeps_tables_and_line_endings() {
-        let path = temp_dir("set-mode-add").join("rules.toml");
+        let tmp = temp_dir("set-mode-add");
+        let path = tmp.join("rules.toml");
         replace(&path, "# mine\r\n[[allow]]\r\ncommand = \"ls\"\r\n").unwrap();
         set_mode(&path, Mode::Auto).unwrap();
         assert_eq!(
@@ -1056,7 +1083,8 @@ pub(crate) mod tests {
 
     #[test]
     fn set_mode_refuses_a_broken_file_and_leaves_it() {
-        let path = temp_dir("set-mode-broken").join("rules.toml");
+        let tmp = temp_dir("set-mode-broken");
+        let path = tmp.join("rules.toml");
         let broken = "mode = \"auto\"\n[[allow]]\nnope = 1\n";
         replace(&path, broken).unwrap();
         assert!(set_mode(&path, Mode::Observe).is_err());
@@ -1065,7 +1093,8 @@ pub(crate) mod tests {
 
     #[test]
     fn add_appends_one_rule_atomically() {
-        let path = temp_dir("add").join("rules.toml");
+        let tmp = temp_dir("add");
+        let path = tmp.join("rules.toml");
         fs::write(&path, "mode = \"auto\" # mine\n[[allow]]\ncommand = \"ls\"").unwrap();
         let rule = Rule::command(vec!["cargo".into(), "test".into()]);
         add(&path, &rule).unwrap();
@@ -1119,7 +1148,8 @@ pub(crate) mod tests {
     #[cfg(windows)]
     #[test]
     fn own_files_pass_the_windows_access_check() {
-        let path = temp_dir("acl").join("rules.toml");
+        let tmp = temp_dir("acl");
+        let path = tmp.join("rules.toml");
         fs::write(&path, "mode = \"auto\"\n").unwrap();
         assert_eq!(load(&path).error, None, "{:?}", trust::check(&path));
     }

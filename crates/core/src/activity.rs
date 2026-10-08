@@ -425,7 +425,8 @@ pub(crate) mod tests {
 
     #[test]
     fn writes_and_reads_back_skipping_bad_lines() {
-        let dir = temp_dir("log").join("history");
+        let tmp = temp_dir("log");
+        let dir = tmp.join("history");
         let mut log = Log::new(dir.clone());
         let day = 20_729 * DAY_MS;
         let entries: Vec<Entry> = (0..3)
@@ -488,7 +489,8 @@ pub(crate) mod tests {
 
     #[test]
     fn no_fake_secret_reaches_the_file() {
-        let dir = temp_dir("secrets").join("history");
+        let tmp = temp_dir("secrets");
+        let dir = tmp.join("history");
         let mut log = Log::new(dir.clone());
         let fakes = crate::redact::tests::fakes();
         for (i, (_, text)) in fakes.iter().enumerate() {
@@ -526,7 +528,8 @@ pub(crate) mod tests {
 
     #[test]
     fn old_days_are_deleted_and_wipe_deletes_all() {
-        let dir = temp_dir("retention").join("history");
+        let tmp = temp_dir("retention");
+        let dir = tmp.join("history");
         create_private_dir(&dir).unwrap();
         let today = 20_729;
         for n in [
@@ -567,7 +570,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_full_day_stops_logging_with_a_note() {
-        let dir = temp_dir("full").join("history");
+        let tmp = temp_dir("full");
+        let dir = tmp.join("history");
         let day = 20_729 * DAY_MS;
         create_private_dir(&dir).unwrap();
         let path = dir.join(name(20_729));
@@ -615,7 +619,8 @@ pub(crate) mod tests {
     #[cfg(windows)]
     #[test]
     fn shared_folders_are_refused() {
-        let dir = temp_dir("shared").join("history");
+        let tmp = temp_dir("shared");
+        let dir = tmp.join("history");
         create_private_dir(&dir).unwrap();
         // Give Everyone write access to the folder.
         let status = std::process::Command::new("icacls")

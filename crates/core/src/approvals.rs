@@ -1033,6 +1033,7 @@ pub fn visible(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::tests::{TempDir, temp_dir};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::thread::JoinHandle;
@@ -1699,24 +1700,24 @@ mod tests {
         );
     }
 
-    /// A desk reading a fresh rules file with `text` in a private temp folder.
-    fn desk_with_rules(name: &str, text: &str) -> (Arc<Desk>, PathBuf) {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("bouncer-desk-{name}-{nanos}"));
-        std::fs::create_dir_all(&dir).unwrap();
+    /// A desk reading a fresh rules file with `text` in a private temp
+    /// folder, deleted when the returned guard drops.
+    fn desk_with_rules(name: &str, text: &str) -> (Arc<Desk>, PathBuf, TempDir) {
+        let dir = temp_dir(&format!("desk-{name}"));
         let path = dir.join("rules.toml");
         std::fs::write(&path, text).unwrap();
-        (Arc::new(Desk::new(WAIT, Some(path.clone()), |_| {})), path)
+        (
+            Arc::new(Desk::new(WAIT, Some(path.clone()), |_| {})),
+            path,
+            dir,
+        )
     }
 
     const AUTO: &str = "mode = \"auto\"\n[[allow]]\ncommand = \"ls\"\n";
 
     #[test]
     fn auto_mode_answers_what_a_rule_allows() {
-        let (desk, _) = desk_with_rules("auto", AUTO);
+        let (desk, _, _dir) = desk_with_rules("auto", AUTO);
         desk.handle(event("a", "PreToolUse", "ls src"));
         let answer = desk.handle(event("a", "PermissionRequest", "ls src"));
         assert_eq!(answer, Some(Decision::Allow), "answered without a card");
@@ -1769,7 +1770,7 @@ mod tests {
 
     #[test]
     fn set_mode_writes_the_file_and_the_island_shows_it() {
-        let (desk, path) = desk_with_rules("set-mode", "mode = \"observe\"\n");
+        let (desk, path, _dir) = desk_with_rules("set-mode", "mode = \"observe\"\n");
         desk.set_mode(Mode::Auto).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "mode = \"auto\"\n");
         let view = desk.view();
@@ -1781,7 +1782,7 @@ mod tests {
 
     #[test]
     fn always_allow_adds_the_offered_rule_then_allows() {
-        let (desk, path) = desk_with_rules("always", "mode = \"auto\"\n");
+        let (desk, path, _dir) = desk_with_rules("always", "mode = \"auto\"\n");
         let a = ask(&desk, "a", "cargo run --release");
         let id = queued(&desk, 1).remove(0);
         assert_eq!(desk.always(&id), Err("too soon to allow"));
@@ -1851,7 +1852,7 @@ mod tests {
 
     #[test]
     fn always_allow_in_observe_mode_flashes_no_auto_allow() {
-        let (desk, path) = desk_with_rules("always-observe", "mode = \"observe\"\n");
+        let (desk, path, _dir) = desk_with_rules("always-observe", "mode = \"observe\"\n");
         let a = ask(&desk, "a", "cargo run --release");
         let id = queued(&desk, 1).remove(0);
         std::thread::sleep(ARM);
@@ -1869,7 +1870,7 @@ mod tests {
     #[test]
     fn questions_go_to_the_terminal_and_flag_the_session() {
         // Auto mode and a rule set: still never answered, never queued.
-        let (desk, _) = desk_with_rules("question", AUTO);
+        let (desk, _, _dir) = desk_with_rules("question", AUTO);
         for tool in ["AskUserQuestion", "ExitPlanMode"] {
             let mut e = event("q", "PreToolUse", "");
             e.tool = Some(tool.into());
@@ -1906,7 +1907,7 @@ mod tests {
 
     #[test]
     fn rule_changes_and_errors_reach_the_island() {
-        let (desk, path) = desk_with_rules("reload", "mode = \"observe\"\n");
+        let (desk, path, _dir) = desk_with_rules("reload", "mode = \"observe\"\n");
         desk.reload_rules();
         assert_eq!(desk.view()["rules"]["notice"], json!(null), "unchanged");
         // The stamp includes the size, so a same-second edit is still seen.
@@ -1951,7 +1952,7 @@ mod tests {
 
     #[test]
     fn every_event_and_answer_is_logged() {
-        let (desk, path) = desk_with_rules("log", AUTO);
+        let (desk, path, _dir) = desk_with_rules("log", AUTO);
         let dir = path.parent().unwrap().join("history");
         desk.handle(event("a", "PreToolUse", "ls"));
         assert_eq!(
@@ -1986,7 +1987,7 @@ mod tests {
 
     #[test]
     fn coming_back_shows_a_summary_until_closed_and_wipe_empties_it() {
-        let (desk, _) = desk_with_rules("away", AUTO);
+        let (desk, _, _dir) = desk_with_rules("away", AUTO);
         let since = activity::ms(SystemTime::now()) - 1;
         assert!(!desk.came_back(since), "nothing happened");
         desk.handle(event("a", "PreToolUse", "ls"));
@@ -2015,7 +2016,7 @@ mod tests {
 
     #[test]
     fn a_broken_file_at_start_shows_its_error() {
-        let (desk, _) = desk_with_rules(
+        let (desk, _, _dir) = desk_with_rules(
             "start",
             "mode = \"auto\"\n[[allow]]\ncommand = \"ls; rm x\"\n",
         );

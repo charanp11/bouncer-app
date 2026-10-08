@@ -183,7 +183,8 @@ mod tests {
 
     #[test]
     fn missing_file_gives_defaults_and_save_reads_back() {
-        let path = temp_dir("prefs-roundtrip").join("preferences.json");
+        let tmp = temp_dir("prefs-roundtrip");
+        let path = tmp.join("preferences.json");
         assert_eq!(load(&path), Prefs::default());
         let prefs = Prefs {
             size: Size::Large,
@@ -237,7 +238,8 @@ mod tests {
         assert!(p.on("poke") && !p.on("needs") && p.on("done") && p.on("risky"));
         assert!(!p.on("nope"));
         assert_eq!(v(r#"{"sounds":["poke"]}"#), default);
-        let path = temp_dir("prefs-broken").join("preferences.json");
+        let tmp = temp_dir("prefs-broken");
+        let path = tmp.join("preferences.json");
         rules::replace(&path, "{ not json").unwrap();
         assert_eq!(load(&path), default);
     }
