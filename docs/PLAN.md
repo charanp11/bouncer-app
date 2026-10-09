@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 6 — Chat in the island (Phase 5d sound pack in review)**
+**Current phase: Phase 6 — Chat in the island (6a: chat runner)**
 
 ## MVP scope
 
@@ -2464,6 +2464,7 @@ Done when:
   `claude -p` as a child process (exec form, no shell, prompt on stdin, never in
   argv); streamed answer shown with `textContent`; locked-down tool permissions
   for chat runs; cancel button; clear "this runs your Claude Code" note.
+  (The audit below replaces the details: one live process per chat.)
 - **Model picker** (Charan, 2026-10-03): chooses the model for chat runs,
   passed with `claude -p`'s model option (exact flag confirmed in the Audit),
   from a fixed list, never free text into argv. Default: the user's own
@@ -2474,21 +2475,171 @@ Done when:
 - **Verify:** Bouncer itself makes no network calls; no API key read or stored;
   chat history kept only if the user opts in, redacted like the activity log.
 
+### Phase 6 audit (2026-10-08, decisions 2026-10-09)
+
+Checked on Claude Code 2.1.295 (the npm install's native `claude.exe`) against
+`claude --help`, the CLI reference, the headless, sessions and env-vars docs,
+and five real runs in `../bouncer-playground` and an empty scratch folder
+(read-only tools, Haiku, then one run with no `--model`; this session's own
+`CLAUDE_*` variables removed first).
+
+**Plan corrections**
+
+- "Its requests still go through Bouncer" is wrong. With the locked flags
+  below a chat run reads no settings files, so no hooks fire (none were
+  recorded) and nothing ever prompts: what it may not do is denied by Claude
+  Code and shows in the stream as `permission_denied`. No Bouncer cards, so no
+  loop or deadlock. (Without `--restricted`, run 1 fired the user's hooks,
+  inherited 328 `permissions.allow` rules, loaded the claude.ai connectors
+  — Gmail and Slack send among them — and read a file outside its folder.)
+- "Default: the user's own Claude Code default" can't hold: `--restricted`
+  ignores `settings.json`, and the variables below are removed, so Default is
+  Claude Code's built-in default for the plan (`claude-opus-5-5` on Pro today,
+  read from the stream's `init.model`). The picker shows that real name.
+- `--bare` can't be used: it never reads the subscription login.
+- Cancel is a kill, not SIGINT (Windows has none for a hidden child). With no
+  session saved, a cancelled chat's context is gone: the panel says "New chat".
+
+**The locked command line** (a constant; never built from input, never
+weakened):
+
+```
+claude.exe -p --input-format stream-json --output-format stream-json --verbose
+  --include-partial-messages --restricted --tools Read,Grep,Glob
+  --disallowedTools mcp__* --strict-mcp-config --permission-mode dontAsk
+  --permission-prompts none --max-turns 8 --no-session-persistence
+  [--model haiku|sonnet|opus|fable]
+```
+
+- `--restricted`: no user / project / local settings (hooks, allow rules,
+  `apiKeyHelper`), file tools confined to the working folder (an outside read
+  is refused: "path outside the working directory"), no `bypassPermissions`.
+- `--tools Read,Grep,Glob`: no Bash, Edit, Write, Web, Agent. `--tools` doesn't
+  cover MCP, hence `--disallowedTools mcp__*` and `--strict-mcp-config` (the
+  init event then lists no MCP servers).
+- `dontAsk` + `--permission-prompts none`: anything that would prompt is
+  denied, Claude is told not to retry, `AskUserQuestion` is removed.
+- `--max-turns 8` is real (`-p` only) though `--help` doesn't list it.
+- One live process per chat: each message is one stream-json line on stdin,
+  one `result` per turn; context carries across turns (checked with two turns)
+  and `--no-session-persistence` leaves no transcript (checked).
+- If the installed `claude` rejects any flag (stderr `error: unknown option …`,
+  exit 1, before any stream event), the panel says "This Claude Code version
+  isn't supported for chat (2.1.x)" and never retries without it.
+
+**Auth, keys and the environment.** Every run reported `apiKeySource: none`
+(the claude.ai login, `auth status`: `claude.ai`, `pro`). Bouncer never reads,
+stores or passes a key or token. The child's environment drops, by name only
+(values never looked at, stored or logged), every variable that can change
+auth, endpoint, provider, billing or which login is used: all `ANTHROPIC_*`
+(API key, auth token, base URLs, custom headers, model pins, Foundry / AWS
+keys), all `CLAUDE_CODE_*` (`USE_BEDROCK`, `USE_VERTEX`, `USE_FOUNDRY`,
+`USE_ANTHROPIC_AWS`, `USE_MANTLE`, `SKIP_*_AUTH`, `OAUTH_TOKEN`,
+`OAUTH_REFRESH_TOKEN`, `CLIENT_CERT` / `KEY`, `PROVIDER_MANAGED_BY_HOST`,
+`SIMPLE`, `ENTRYPOINT` …), `CLAUDECODE`, `CLAUDE_CONFIG_DIR`, all `AWS_*`
+(`AWS_BEARER_TOKEN_BEDROCK`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` …), all
+`GOOGLE_*`, `CLOUD_ML_REGION`, `VERTEX_REGION_*`. Prefixes, so new variables
+are covered too. Kept: `HTTP(S)_PROXY` / `NO_PROXY` (they route, they don't
+authenticate or bill). A run whose `init` reports any `apiKeySource` other
+than `none` is stopped at once.
+
+**The binary.** On Windows `claude` on PATH is npm's `claude.cmd` / `.ps1`
+shim; spawning a `.cmd` runs cmd.exe, a shell. Only a native executable is
+accepted (npm's `node_modules/@anthropic-ai/claude-code/bin/claude.exe`, or the
+native installer's `~/.local/bin/claude.exe`; `claude` on macOS);
+`.cmd`/`.ps1`/`.bat` and anything else are refused. The full path is shown and
+must be confirmed; a changed path (or file) asks again.
+
+**Spawning.** `Command::new(exe)` with the constant argv, the working folder
+and the scrubbed environment, no window on Windows, stdin/stdout/stderr piped.
+The prompt goes only on stdin, as one line built with `serde_json` (never
+string formatting). Model only from the fixed list; an unknown name is refused
+before spawning. If the plan can't use a model, Claude Code's error text is
+shown.
+
+**Killing the tree.** Windows: the child goes into a Job Object with
+`KILL_ON_JOB_CLOSE`; cancel, timeout and quit close it, and so does a Bouncer
+crash (the kernel closes the handle). The short gap between spawn and
+assignment is harmless: the child starts nothing before a model round trip.
+macOS: `process_group(0)` (std), then `kill(-pgid, SIGTERM)` and SIGKILL after
+2 s (`kill` declared like `getpeereid` in `relay/unix.rs`); a crash closes
+stdin and `claude -p` exits on EOF.
+
+**Limits.** `--max-turns 8`; 5 minutes per message; stopped after 60 s with no
+stream event of any kind (thinking, partial and status events count).
+
+**Working folder.** `Bouncer/chat` next to the rules file: created owner-only,
+checked like the rules folder (no link, nobody else can write), and refused
+unless empty. Picking a project comes in Phase 7.
+
+**Output.** Rust reads the line-delimited JSON (1 MB per line cap; garbage and
+unknown types skipped) and sends the page only typed events: text deltas,
+tool use as a chip (tool name and target, hidden characters made visible),
+denials, turn end with its error kind, the model name, and plan usage.
+Thinking, tool results (file contents) and raw stderr never reach the page;
+a failure shows its exit code or Claude Code's error line. The page renders
+with `textContent` (`pre-wrap`), never HTML.
+
+**History.** None in Phase 6: chats live in memory only, nothing on disk.
+
+**Cost.** Chat counts against the Claude plan. The stream's `rate_limit_event`
+carries the plan's 5-hour and 7-day usage (3% / 67% in the audit runs); the
+panel shows "Runs your Claude Code · counts against your plan" with those two
+numbers. `total_cost_usd` is an API-price estimate, misleading on a plan: not
+shown.
+
+**Starting from an existing session (6d, checked, not built).** `-p --resume
+<session-id> --fork-session` with the locked flags, from the empty chat folder:
+the copy got a new session ID and knew the original's context; the original
+transcript was byte-identical (same SHA-256 and mtime) and no new transcript
+appeared (`--no-session-persistence`); tools stayed Read / Grep / Glob in the
+empty folder. Bouncer never reads the transcript: Claude Code loads it by ID
+(any project on the machine). Docs: forking a session still running in the
+background resumes a copy with these flags; an interactive one is only read.
+The ID comes from the session list (hook events), must be a UUID (checked
+before spawning), and is the only variable argv. The copy re-sends that
+session's whole history, so a big session costs more usage: the panel says so.
+
 | Threat | Fix |
 | --- | --- |
-| Command / argument injection through the prompt | Exec form, prompt on stdin, fixed argv |
-| Chat run takes actions on the machine | Locked-down permission mode / tool allow-list for chat runs; its requests still go through Bouncer |
+| Command / argument injection through the prompt | Constant argv; prompt only on stdin as a `serde_json` line; model from a fixed list; session ID must be a UUID |
+| Chat run takes actions on the machine | `--restricted`, `--tools Read,Grep,Glob`, `dontAsk`, `--permission-prompts none`: nothing prompts, the rest is denied |
+| Connectors / MCP act for the chat (Gmail, Slack send) | `--strict-mcp-config`, `--disallowedTools mcp__*` |
+| The user's allow rules or hooks apply to chat | `--restricted` ignores the settings files |
+| Chat reads outside its folder | `--restricted`; an empty owner-only folder |
+| Billed through an API key or another provider | Auth / endpoint / billing variables removed; any `apiKeySource` but `none` stops the run |
+| A flag silently dropped by an older `claude` | Unknown option → "isn't supported for chat", never a retry without it |
+| A shell runs (`.cmd` shim) | Native executable only; full path shown and confirmed |
 | Model output injects markup | `textContent` only, same as agent text |
-| Hung or runaway child | Timeout, cancel, killed on quit |
-| Secrets in chat history | Off by default; redacted, owner-only, wipe |
-| Wrong binary named `claude` on PATH | Resolve once, show the path, user confirms |
+| Hung or runaway child, left-over children | 5 min / 60 s silent deadlines, cancel, quit: the whole tree is killed (Job Object / process group) |
+| Output flood | 1 MB per line, garbage skipped |
+| Secrets in chat history | No history in Phase 6; tool results never kept |
+| Transcripts written | `--no-session-persistence`; a fork leaves the original untouched |
+
+PRs:
+
+- **6a — chat runner (core).** Binary check, locked argv, environment
+  scrubbing, spawn, prompt line, stream parser, deadlines, tree kill. Tests
+  against a fake `claude` (an example binary that records argv, stdin and
+  environment names, replays fixtures, hangs, floods, or starts a grandchild)
+  and the parser against the recorded audit runs. TESTS.md C1–C12.
+- **6b — chat panel.** Panel, cancel, "New chat", model picker with the real
+  Default name, usage line, the note, `claude` missing / unsupported / path
+  confirm in Settings, new commands in the allow-list. C13–C14.
+- **6c — checks.** Real clicks on the test instance, hand check (a real chat),
+  docs. C15.
+- **6d — start from a session.** Fork a session from the list, read-only as
+  above. Its own rows.
 
 Phase 6 is done when:
 
-- [ ] Chat round-trip through `claude -p` with no API key
-- [ ] Injection, hostile-output, cancel and timeout tests pass
-- [ ] Chat runs can't act without approval
-- [ ] fmt, clippy, tests green locally and in CI
+- [ ] Chat round-trip through `claude -p` with no API key (`apiKeySource: none`)
+- [ ] Injection, hostile-output, cancel, timeout and quit tests pass on Windows and macOS
+- [ ] Chat runs can't act: no tool but Read / Grep / Glob in an empty folder, nothing prompts
+- [ ] No auth / endpoint / billing variable reaches the child; a key source stops the run
+- [ ] A rejected flag shows "isn't supported for chat" and never retries without it
+- [ ] Nothing about a chat is written to disk
+- [ ] fmt, clippy, tests and `check-tests` green locally and in CI
 
 ## Phase 7 — File drop (~1 week)
 
