@@ -135,6 +135,30 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | UI16 | Screen reader | Card, list and Settings read in order with their names | hand, Phase 9 | — | Phase 9 (Narrator check below) |
 | UI17 | Code pane | Rust / shell highlighting keeps every line exactly | frontend, unit | `ts: pieces always join back to the exact line` `code::tests::write_multiedit_and_bash` `diff::tests::keeps_removes_and_adds_lines` | CI |
 
+## Chat (Phase 6)
+
+The runner (6a) against a fake `claude` (`crates/core/examples/fake_claude.rs`);
+the panel's rows come with 6b.
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| C1 | A prompt with quotes, newlines, backslashes, ` `, shell characters or a fake second JSON line | One stdin line built by `serde_json`; arrives whole and literal as one message; argv never changes | unit, integration | `chat::tests::prompts_are_one_serde_json_line` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
+| C2 | Model choice | Only Default, Haiku, Sonnet, Opus, Fable; anything else refused; Default passes no `--model` | unit | `chat::tests::models_come_from_a_fixed_list` `chat::tests::every_run_has_every_locked_flag` | CI |
+| C3 | The `claude` binary | Only a native `claude.exe` / `claude` by full path; `.cmd`, `.ps1`, `.bat`, scripts, folders and other names refused; a missing one named plainly; npm's and the native installer's places searched | unit | `chat::tests::only_native_claude_executables_pass` `chat::tests::a_missing_claude_is_refused_plainly` `chat::tests::candidates_cover_npm_and_the_native_installer` | CI |
+| C4 | Cancel | The whole tree dies, grandchildren too; the chat is over | integration | `cancel_kills_the_whole_tree` | CI |
+| C5 | Deadlines | No stream event of any kind for 60 s → stopped; a message past 5 min → stopped; status and thinking events count as activity | integration | `a_silent_run_is_stopped_after_the_quiet_limit` `a_message_that_runs_too_long_is_stopped` | CI |
+| C6 | App quit (the chat dropped) | The whole tree dies | integration | `dropping_a_chat_kills_the_whole_tree` | CI |
+| C7 | Garbage, oversized (> 1 MB) lines, unknown events | Skipped; the chat goes on; recorded real runs parse | unit, integration, fixture | `garbage_and_oversized_lines_are_skipped` `chat::tests::recorded_runs_parse_into_events` | CI |
+| C8 | Hostile model output | Markup stays text, hidden characters made visible (the page's `textContent`: 6b) | unit | `chat::tests::model_text_keeps_markup_as_text_and_shows_hidden_characters` | CI |
+| C9 | Tool results, thinking, subagent text, hooks | Never shown or kept | unit | `chat::tests::tool_results_and_thinking_never_reach_the_page` | CI |
+| C10 | The locked flags | Every run has all of them, nothing that weakens them | unit, integration | `chat::tests::every_run_has_every_locked_flag` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
+| C11 | Not on the login, or not locked down | The stream reports an API key source, a tool beyond Read / Grep / Glob, an MCP server or another mode → stopped at once | unit, integration | `chat::tests::a_key_source_or_unlocked_run_stops_it` `a_run_on_an_api_key_or_unlocked_is_stopped` | CI |
+| C12 | The child's environment | Every auth, endpoint, provider and billing variable removed by name (`ANTHROPIC_*`, `CLAUDE*`, `AWS_*`, `GOOGLE_*`, Vertex regions); PATH and proxies kept | unit, integration | `chat::tests::auth_endpoint_and_billing_variables_never_reach_the_child` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
+| C13 | A `claude` that rejects a locked flag | "Not supported for chat" with its version; never retried without the flag | integration | `a_rejected_flag_means_unsupported_never_a_retry` | CI |
+| C14 | The working folder | Only an empty, private folder; a file in it → refused; nothing written there | unit, integration | `chat::tests::chat_runs_only_in_an_empty_private_folder` `a_chat_never_starts_in_a_folder_with_files` | CI |
+| C15 | Errors | Claude Code's own error (a model the plan lacks, max turns) shown as written; a crash shows its exit code and error line | unit, integration | `chat::tests::a_plan_error_is_shown_as_claude_code_wrote_it` `a_crash_shows_its_exit_code_and_error_line` | CI |
+| C16 | The real `claude` | Haiku on the login; the C1 prompt is one message; context kept across messages; a read outside the folder denied; nothing written | integration (ignored; run by hand, see the test) | `real_claude_round_trip` | Local 2026-10-09 (2.1.295, Windows) |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |
