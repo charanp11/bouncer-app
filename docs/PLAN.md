@@ -2622,12 +2622,12 @@ PRs:
   scrubbing, spawn, prompt line, stream parser, deadlines, tree kill. Tests
   against a fake `claude` (an example binary that records argv, stdin and
   environment names, replays fixtures, hangs, floods, or starts a grandchild)
-  and the parser against the recorded audit runs. TESTS.md C1–C12.
+  and the parser against the recorded audit runs. TESTS.md C1–C16.
 - **6b — chat panel.** Panel, cancel, "New chat", model picker with the real
   Default name, usage line, the note, `claude` missing / unsupported / path
-  confirm in Settings, new commands in the allow-list. C13–C14.
+  confirm in Settings, new commands in the allow-list. C17 on.
 - **6c — checks.** Real clicks on the test instance, hand check (a real chat),
-  docs. C15.
+  docs.
 - **6d — start from a session.** Fork a session from the list, read-only as
   above. Its own rows.
 
