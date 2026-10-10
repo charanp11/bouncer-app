@@ -137,8 +137,8 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 
 ## Chat (Phase 6)
 
-The runner (6a) against a fake `claude` (`crates/core/examples/fake_claude.rs`);
-the panel's rows come with 6b.
+The runner (6a) against a fake `claude` (`crates/core/examples/fake_claude.rs`)
+and the panel (6b, C17–C31).
 
 | ID | Scenario | Expected | Proof | Test | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -151,13 +151,28 @@ the panel's rows come with 6b.
 | C7 | Garbage, oversized (> 1 MB) lines, unknown events | Skipped; the chat goes on; recorded real runs parse | unit, integration, fixture | `garbage_and_oversized_lines_are_skipped` `chat::tests::recorded_runs_parse_into_events` | CI |
 | C8 | Hostile model output | Markup stays text, hidden characters made visible (the page's `textContent`: 6b) | unit | `chat::tests::model_text_keeps_markup_as_text_and_shows_hidden_characters` | CI |
 | C9 | Tool results, thinking, subagent text, hooks | Never shown or kept | unit | `chat::tests::tool_results_and_thinking_never_reach_the_page` | CI |
-| C10 | The locked flags | Every run has all of them, nothing that weakens them | unit, integration | `chat::tests::every_run_has_every_locked_flag` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
+| C10 | The locked flags | Every run has all of them, nothing that weakens them; the fixed read-only line (`--append-system-prompt`, a constant: read-only chat in Bouncer, Read / Grep / Glob in an empty folder, no edits, commands or web) once, unchanged | unit, integration | `chat::tests::every_run_has_every_locked_flag` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
 | C11 | Not on the login, or not locked down | The stream reports an API key source, a tool beyond Read / Grep / Glob, an MCP server or another mode → stopped at once | unit, integration | `chat::tests::a_key_source_or_unlocked_run_stops_it` `a_run_on_an_api_key_or_unlocked_is_stopped` | CI |
 | C12 | The child's environment | Every auth, endpoint, provider and billing variable removed by name (`ANTHROPIC_*`, `CLAUDE*`, `AWS_*`, `GOOGLE_*`, Vertex regions); PATH and proxies kept | unit, integration | `chat::tests::auth_endpoint_and_billing_variables_never_reach_the_child` `a_hostile_prompt_reaches_stdin_as_one_literal_line` | CI |
 | C13 | A `claude` that rejects a locked flag | "Not supported for chat" with its version; never retried without the flag | integration | `a_rejected_flag_means_unsupported_never_a_retry` | CI |
 | C14 | The working folder | Only an empty, private folder; a file in it → refused; nothing written there | unit, integration | `chat::tests::chat_runs_only_in_an_empty_private_folder` `a_chat_never_starts_in_a_folder_with_files` | CI |
 | C15 | Errors | Claude Code's own error (a model the plan lacks, max turns) shown as written; a crash shows its exit code and error line | unit, integration | `chat::tests::a_plan_error_is_shown_as_claude_code_wrote_it` `a_crash_shows_its_exit_code_and_error_line` | CI |
-| C16 | The real `claude` | Haiku on the login; the C1 prompt is one message; context kept across messages; a read outside the folder denied; nothing written | integration (ignored; run by hand, see the test) | `real_claude_round_trip` | Local 2026-10-09 (2.1.295, Windows) |
+| C16 | The real `claude` | Haiku on the login; the C1 prompt is one message; context kept across messages; a read outside the folder denied; it doesn't claim to edit, run commands or use the web; nothing written | integration (ignored; run by hand, see the test) | `real_claude_round_trip` | Local 2026-10-09 (2.1.295, Windows) |
+| C17 | Answers in the panel | Text only: markup stays text, hidden characters show as tags; a streamed answer joins into one bubble; tool and "Not allowed" chips between | frontend, integration, real-click | `ts: chat: a streamed answer joins into one bubble, markup stays text, tools and denials sit between` `frontend_never_parses_strings_as_html` `chat::tests::chat_events_have_the_shape_the_page_reads` | CI; real-click 2026-10-09 |
+| C18 | Send | Enter sends; Shift+Enter (or an IME still composing) makes a new line | frontend, real-click | `ts: chat: Enter sends, Shift+Enter and an IME still composing make a new line` | CI; real-click 2026-10-09 |
+| C19 | Cancel and New chat | Cancel kills the tree: "Cancelled." and a "New chat" line, the next message starts a new chat; the head's New chat clears; a chat left behind is ignored | frontend, real-click | `ts: chat: cancel ends the chat with a New chat line; the next message starts a new one` `ts: chat: events for another chat are ignored` `ts: chat: switching model starts a new chat, said with a line; New chat clears` | CI; real-click 2026-10-09 |
+| C20 | Model picker | The fixed list; Default named by its first reply (`init`); another model starts a new chat ("New chat · Sonnet") | frontend, real-click | `ts: chat: the Default model is named by its first reply` `ts: chat: switching model starts a new chat, said with a line; New chat clears` | CI; real-click 2026-10-09 |
+| C21 | Usage line | "Runs your Claude Code · counts against your plan" and the plan's 5-hour and 7-day use from Claude Code ("—" until reported) | frontend, real-click | `ts: chat: the usage line shows the plan's 5-hour and 7-day use` | CI; real-click 2026-10-09 |
+| C22 | Errors | Not found, an unsupported version (with it), the plan not allowing a model (Claude Code's words), a crash (exit code and line) | frontend, real-click | `ts: chat: errors read as Claude Code wrote them or say plainly what's wrong` | CI; real-click 2026-10-09 |
+| C23 | First run and the claude path | No chat before the found `claude`'s full path is confirmed in Settings; a changed path asks again; only the path shown can be confirmed; the file must be only the user's | unit, real-click | `chat::tests::only_the_confirmed_claude_runs` `chat::tests::the_page_sees_which_claude_and_whether_it_is_confirmed` | CI; real-click 2026-10-09 |
+| C24 | A card while chatting | The card replaces the panel; the chat keeps streaming behind it; the draft is kept; the panel is back after | real-click | (6b check: 294 → 4066 characters behind the card) | real-click 2026-10-09 |
+| C25 | Typing when a card arrives | The keyboard goes nowhere, through the card's re-renders: a space, typing or Enter answer nothing; Tab reaches Deny on purpose; never Allow | frontend, real-click | `ts: chat: a card arriving while you type takes the keyboard nowhere, else to Deny (never Allow)` `ts: chat: a card that came while you typed keeps the keyboard off through its re-renders` | CI; real-click 2026-10-09 |
+| C26 | Motion and CPU while chatting | Fixed height (the window never resizes while streaming); nothing moves forever (a steady caret, the spinner settles); streamed text sent twice a second at most | frontend, integration, real-click | `ts: chat: the panel never resizes while streaming and nothing in it moves forever` `waiting_a_little_never_ends_the_chat_but_the_limits_still_hold` | CI; real-click 2026-10-09 (CPU in PLAN) |
+| C27 | Keyboard in the panel | Opens with the keyboard in the message box; Tab: message, Send, New chat, ×, the models, round again; Esc closes it (the chat keeps running) and gives the keyboard back | real-click | (kb check) | real-click 2026-10-09 |
+| C28 | The chat commands | Seven chat commands granted, nothing else; same CSP | unit | `tests::strict_csp_and_only_our_commands` | CI |
+| C29 | Quit or crash with a chat open | The chat's whole tree dies with the app (Job Object; force-stopped twice: no `claude` left) | integration, real-click | `dropping_a_chat_kills_the_whole_tree` | CI; real-click 2026-10-09 |
+| C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295) |
+| C31 | Esc in Settings opened from the chat | Closes only Settings: back to the chat, the keyboard in the message box; Esc again closes the panel | frontend, real-click | `ts: chat: Esc in Settings opened from the chat closes only Settings` | CI; real-click 2026-10-09 |
 
 ## macOS
 

@@ -2508,6 +2508,7 @@ claude.exe -p --input-format stream-json --output-format stream-json --verbose
   --include-partial-messages --restricted --tools Read,Grep,Glob
   --disallowedTools mcp__* --strict-mcp-config --permission-mode dontAsk
   --permission-prompts none --max-turns 8 --no-session-persistence
+  --append-system-prompt <the fixed read-only line, SYSTEM_LINE>
   [--model haiku|sonnet|opus|fable]
 ```
 
@@ -2583,7 +2584,7 @@ with `textContent` (`pre-wrap`), never HTML.
 **History.** None in Phase 6: chats live in memory only, nothing on disk.
 
 **Cost.** Chat counts against the Claude plan. The stream's `rate_limit_event`
-carries the plan's 5-hour and 7-day usage (3% / 67% in the audit runs); the
+carries the plan's 5-hour and 7-day usage; the
 panel shows "Runs your Claude Code · counts against your plan" with those two
 numbers. `total_cost_usd` is an API-price estimate, misleading on a plan: not
 shown.
@@ -2630,6 +2631,81 @@ PRs:
   docs.
 - **6d — start from a session.** Fork a session from the list, read-only as
   above. Its own rows.
+
+**6b plan (2026-10-09, after #21 / v0.6.0).** Prototype v0.21 has the
+panel's states (first run, empty, answering, tool and denial, errors,
+cancelled, Settings' claude path). Decisions inside Charan's brief:
+
+- The panel has a fixed height (400 × 460, under the open max height): a
+  streaming answer never resizes the window, and only the log scrolls. Text
+  deltas are appended in place; the island isn't rebuilt per delta.
+- The confirmed path lives in `Bouncer/claude-path.txt` (owner-only, checked
+  like the rules file, written atomically). A send re-finds `claude` and
+  runs only if it's the confirmed file; otherwise the panel asks again.
+- One chat at a time, one worker thread owning it; the page holds the
+  transcript (memory only). Switching model ends the chat (a "New chat · Sonnet"
+  line); the head's "New chat" clears it. Quitting kills the chat's tree.
+- Default's real name shows after its first reply (the stream's `init`): a
+  probe would cost a run.
+- A card arriving while you type in the chat: the keyboard goes nowhere
+  (not to Deny), so a space or Enter in mid-sentence can't answer the card.
+- Entry: a chat button next to the gear in the session list; opened on
+  purpose, it takes the keyboard. Esc closes it; the chat keeps running.
+
+**6b checks (2026-10-09).** Test instance A (scratch rules, its own pipe,
+WebView2 folder and debug port, the fake `claude` first on PATH) and B
+(playground rules, the real `claude`), real clicks and keys behind the guard
+on a black backdrop. Screenshots: `design/screenshots/chat/`.
+
+CPU, % of one core, app + WebView2 (the `claude` child left out), 60 s:
+
+| Case | Result |
+| --- | --- |
+| Session list open, idle (baseline) | 1.7% |
+| Chat panel open, idle, keyboard in the message box | 2.6% with a blinking caret → **1.1%** (`caret-animation: manual`) |
+| Streaming (fake, 20 deltas/s, 75 s answer) | 81.2% one update per word → 30.5% page batching 4/s → **15.0%** worker batches 2/s + the log scrolls on its own layer |
+| Streaming, by process (20 s) | app 1.4, WebView2 browser 0.3, GPU 4.8, renderer 5.9 |
+
+Every update is a frame of the whole transparent window (the cost the motion
+budget found); streaming lasts only as long as an answer.
+
+Real-click results: open via the chat button (keyboard in the message box);
+first run shows the full path, Send disabled; Settings' Confirm writes the
+canonical path, × goes back to the chat; Shift+Enter a new line, Enter sends;
+tool chip, denial, answer, plan use and Default's name (the fake's); Cancel:
+"Cancelled.", "New chat", no `claude` left; Fable / plan error, unsupported,
+crash; Tab order and Esc; a card mid-stream (below); the app force-stopped
+with a chat open: no `claude` left (twice). Real chat (B, Haiku): tool chip,
+denial, answer, plan use; the playground's `chat` folder still
+empty, no transcript, no history written; the `claude-path.txt` the test
+confirmed in the playground was deleted afterwards.
+
+Found by these checks and fixed:
+
+- A card arriving while typing: the card's arm re-render put the keyboard on
+  Deny and the typed space denied it. Now it stays nowhere for that card
+  (`heldCard`, tested); Tab still reaches Deny.
+- One update per streamed word cost 60–80% of a core (above).
+- A blinking caret repaints for as long as the box has focus (above).
+- A real run's long path widened the log: answers stopped wrapping. The log's
+  column is capped (`minmax(0, 1fr)`, tested); a cut chip shows all on hover.
+- The message box was skipped by focus restore and Tab (`textarea` missing
+  from the lists); a disabled control could take the restore and strand the
+  keyboard.
+
+Review of #22 (Charan), fixed:
+
+- Haiku described itself as able to edit and run commands. Every run now
+  gets one fixed line (`--append-system-prompt`, a constant in the locked
+  command line, C10): a read-only chat inside Bouncer, Read / Grep / Glob in
+  an empty folder, no edits, commands or web. Real Haiku, asked: "I can't
+  edit or write files, run commands, or use the web."
+- Esc in Settings opened from the chat closed both; now it closes Settings
+  and returns to the chat with the keyboard in the message box (C31).
+- Privacy: the screenshots that showed a real path or plan use were retaken
+  with the path and plan use covered and labelled; the prototype's sample
+  paths and the chat fixtures' plan use are neutral now; the PR branch was
+  rewritten so no commit holds the old images.
 
 Phase 6 is done when:
 
