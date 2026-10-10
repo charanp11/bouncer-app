@@ -12,6 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
+import { apply, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import "./styles.css";
@@ -68,6 +69,8 @@ type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: st
 type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>> };
 /** Read-only facts for the settings screen (asked for when it opens). */
 type About = { rules: string | null; hooks: "installed" | "missing" | "unknown" };
+/** Which claude chat would run (asked for when the panel or Settings opens). */
+type ChatStatus = { state: "missing" | "unconfirmed" | "changed" | "confirmed"; path: string | null; defaultModel?: string | null };
 type View = {
   open: boolean;
   hidden: boolean;
@@ -82,6 +85,8 @@ type View = {
   history: { note: string | null };
   /** The settings screen is open. */
   settings: boolean;
+  /** The chat panel is open (a card and Settings still come first). */
+  chat: boolean;
   /** The island has the keyboard (from the OS: the page always thinks it does). */
   keyboard: boolean;
   prefs: Prefs;
@@ -339,21 +344,31 @@ function head(state: BallState, title: string, sub = "", onClose?: () => void, e
 
 const SVG = "http://www.w3.org/2000/svg";
 
-/** The settings gear (drawn in code, as the prototype's icon). */
-function gearButton(): HTMLElement {
+/** An icon button drawn in code (the prototype's icons): `d` is the path,
+ * plus a centre circle of radius `dot` for the gear. */
+function iconButton(label: string, d: string, dot = 0): HTMLButtonElement {
   const button = el("button", "iconbtn");
-  button.setAttribute("aria-label", "Settings");
+  button.setAttribute("aria-label", label);
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  const circle = document.createElementNS(SVG, "circle");
-  circle.setAttribute("cx", "12");
-  circle.setAttribute("cy", "12");
-  circle.setAttribute("r", "3");
+  if (dot) {
+    const circle = document.createElementNS(SVG, "circle");
+    circle.setAttribute("cx", "12");
+    circle.setAttribute("cy", "12");
+    circle.setAttribute("r", String(dot));
+    svg.append(circle);
+  }
   const path = document.createElementNS(SVG, "path");
-  path.setAttribute("d", "M10.32 5.00 L10.37 2.64 L13.63 2.64 L13.68 5.00 L15.76 5.86 L17.46 4.23 L19.77 6.54 L18.14 8.24 L19.00 10.32 L21.36 10.37 L21.36 13.63 L19.00 13.68 L18.14 15.76 L19.77 17.46 L17.46 19.77 L15.76 18.14 L13.68 19.00 L13.63 21.36 L10.37 21.36 L10.32 19.00 L8.24 18.14 L6.54 19.77 L4.23 17.46 L5.86 15.76 L5.00 13.68 L2.64 13.63 L2.64 10.37 L5.00 10.32 L5.86 8.24 L4.23 6.54 L6.54 4.23 L8.24 5.86Z");
-  svg.append(circle, path);
+  path.setAttribute("d", d);
+  svg.append(path);
   button.append(svg);
+  return button;
+}
+
+/** The settings gear. */
+function gearButton(): HTMLElement {
+  const button = iconButton("Settings", "M10.32 5.00 L10.37 2.64 L13.63 2.64 L13.68 5.00 L15.76 5.86 L17.46 4.23 L19.77 6.54 L18.14 8.24 L19.00 10.32 L21.36 10.37 L21.36 13.63 L19.00 13.68 L18.14 15.76 L19.77 17.46 L17.46 19.77 L15.76 18.14 L13.68 19.00 L13.63 21.36 L10.37 21.36 L10.32 19.00 L8.24 18.14 L6.54 19.77 L4.23 17.46 L5.86 15.76 L5.00 13.68 L2.64 13.63 L2.64 10.37 L5.00 10.32 L5.86 8.24 L4.23 6.54 L6.54 4.23 L8.24 5.86Z", 3);
   button.addEventListener("click", () => {
     invoke("settings", { open: true });
     invoke("keyboard", { on: true });
@@ -617,7 +632,7 @@ function rail(session: Session | undefined, project: string, agent: string, stat
 type Shape = "hidden" | "pill" | "open" | "wide";
 
 function setShape(next: Shape) {
-  island.classList.remove("hidden", "open", "wide");
+  island.classList.remove("hidden", "open", "wide", "chat");
   // One scale for the whole island (the Size preference), kept under 40% of
   // this screen's width; the open island never passes the work area's height.
   const scale = islandScale(WIDTH[next], screen.availWidth, scaleOf(current?.prefs?.size));
@@ -770,6 +785,12 @@ function savePrefs(prefs: Prefs) {
 
 function closeSettings() {
   aboutAsked = false;
+  chatAsked = false;
+  if (current?.chat) {
+    // Back to the chat: the keyboard goes to the message box.
+    (document.activeElement as HTMLElement | null)?.blur();
+    refocus = CHAT_INPUT;
+  }
   wiping = false;
   confirmingAuto = false;
   invoke("settings", { open: false });
@@ -908,6 +929,7 @@ function renderSettings(view: View, state: BallState) {
       })
       .catch(() => {});
   }
+  askChatStatus();
   const prefs = view.prefs;
   const list = el("div", "setlist");
 
@@ -972,6 +994,8 @@ function renderSettings(view: View, state: BallState) {
     history.append(box);
   }
   list.append(history);
+
+  list.append(claudeRow());
 
   const rules = setRow("Rules file", []);
   rules.append(el("pre", "cmd", about?.rules ?? "…"));
@@ -1065,11 +1089,23 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
     }
   }
   const card = view.queue[0];
-  const target = card && (card.id !== before || !keyboardBefore) ? `deny:${card.id}` : had;
+  const newCard = card && (card.id !== before || !keyboardBefore);
+  // Typing a chat message when the card came: the keyboard stays nowhere for
+  // that card (its re-renders too), so a space or Enter mid-sentence can't
+  // answer it; Tab still reaches Deny on purpose.
+  heldFor = heldCard(heldFor, card?.id ?? null, !!newCard, had);
+  if (heldFor) {
+    const now = document.activeElement;
+    if (now instanceof HTMLElement) now.blur();
+    refocus = null;
+    return;
+  }
+  const target = newCard ? `deny:${card.id}` : had;
   let next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
   // Nothing to go back to (the keyboard just arrived, or the focused control
   // went, e.g. a row that opened its detail): the first control (in the body
   // if there is one), so the keyboard is never stranded.
+  if (!next && !island.contains(document.activeElement) && view.chat && !card) next = findKey(CHAT_INPUT);
   if (!next && !island.contains(document.activeElement)) {
     next = controls(island.querySelector<HTMLElement>(".body") ?? island)[0] ?? controls(island)[0];
   }
@@ -1080,13 +1116,15 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
 /** The controls Tab moves through, in order: only ones you can see (a
  * closed list's switches are skipped). */
 function controls(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), summary, [tabindex='0']")].filter((n) =>
+  return [...root.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), summary, [tabindex='0']")].filter((n) =>
     n.checkVisibility(),
   );
 }
 
 /** Where focus goes when the focused control disappears (a confirm closed). */
 let refocus: string | null = null;
+/** The card that came while a chat message was being typed: no focus for it. */
+let heldFor = "";
 
 /** What identifies a control across re-renders. */
 function focusKey(node: Element | null): string | null {
@@ -1095,7 +1133,10 @@ function focusKey(node: Element | null): string | null {
 }
 
 function findKey(key: string): HTMLElement | undefined {
-  return [...island.querySelectorAll<HTMLElement>("button, [tabindex], input, summary")].find((n) => focusKey(n) === key);
+  // A disabled control can't take focus: then the usual fallback applies.
+  return [...island.querySelectorAll<HTMLElement>("button, [tabindex], input, textarea, summary")].find(
+    (n) => focusKey(n) === key && !n.matches(":disabled"),
+  );
 }
 
 const announcer = document.getElementById("announce")!;
@@ -1162,6 +1203,13 @@ function draw(view: View) {
   wiping = false;
   confirmingAuto = false;
 
+  if (view.chat) {
+    renderChat(view, done);
+    return;
+  }
+  chatAsked = false;
+  liveBubble = null;
+
   if (greeting(view, now, greetUntil, REDUCED.matches)) {
     // Just Bouncer dropping in: no words (Charan).
     setShape("pill");
@@ -1215,7 +1263,7 @@ function draw(view: View) {
       invoke("expand", { open: false });
     };
     const sub = view.sessions.length ? `· ${plural(view.sessions.length, "session")}` : "";
-    island.replaceChildren(head(mood(view, done), "Bouncer", sub, close, [gearButton()]), body);
+    island.replaceChildren(head(mood(view, done), "Bouncer", sub, close, [chatButton(), gearButton()]), body);
     later(CLOCK_MS);
     return;
   }
@@ -1251,6 +1299,289 @@ function draw(view: View) {
   const n = view.sessions.length;
   // Always opens the island, so the gear (Settings) is reachable with no sessions too.
   island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", true, badge));
+}
+
+// ---- chat (Phase 6) --------------------------------------------------------
+// Your own Claude Code, locked down (crates/core/src/chat.rs). The transcript
+// is held here in memory only and drawn with textContent; a streaming answer
+// is appended in place, so the island isn't rebuilt per word and the panel's
+// fixed height means the window never resizes while it streams.
+
+let chat = fresh();
+let chatStatus: ChatStatus | null = null;
+let chatAsked = false;
+/** The message being typed, kept across re-renders. */
+let draft = "";
+/** The answer bubble on screen that text deltas go into. */
+let liveBubble: HTMLElement | null = null;
+/** The log is scrolled to its end (new text keeps it there). */
+let pinned = true;
+let logScroll = 0;
+
+const CHAT_ICON = "M5 5h14v10H9l-4 4z";
+const PLUS_ICON = "M12 5v14M5 12h14";
+
+function askChatStatus() {
+  if (chatAsked) return;
+  chatAsked = true;
+  invoke<ChatStatus>("chat_status")
+    .then((s) => {
+      chatStatus = s;
+      if (s.defaultModel && !chat.defaultName) chat = { ...chat, defaultName: s.defaultModel };
+      if (current) render(current);
+    })
+    .catch(() => {});
+}
+
+function chatButton(): HTMLElement {
+  const button = iconButton("Ask Claude", CHAT_ICON);
+  button.addEventListener("click", () => {
+    refocus = CHAT_INPUT;
+    invoke("chat_open", { open: true });
+    invoke("keyboard", { on: true });
+  });
+  return button;
+}
+
+function closeChat() {
+  chatAsked = false;
+  invoke("chat_open", { open: false });
+}
+
+function newChat() {
+  if (chat.busy || chat.items.length) invoke("chat_new");
+  chat = clear(chat);
+  pinned = true;
+  refocus = CHAT_INPUT;
+  if (current) render(current);
+}
+
+function sendChat() {
+  const text = draft;
+  if (!text.trim() || chat.busy || chatStatus?.state !== "confirmed") return;
+  chat = begin(chat, text);
+  const id = chat.id;
+  draft = "";
+  pinned = true;
+  invoke("chat_send", { chat: id, prompt: text, model: chat.model }).catch((code) => {
+    if (chat.id === id) chat = refused(chat, String(code));
+    if (code === "missing" || code === "unconfirmed") {
+      chatAsked = false;
+      askChatStatus();
+    }
+    if (current) render(current);
+  });
+  if (current) render(current);
+}
+
+/** A chat event: kept even while a card or Settings has the screen, drawn
+ * now if the panel is showing. */
+function onChat(e: ChatEvent) {
+  const before = chat;
+  chat = apply(chat, e);
+  if (chat === before || !current?.chat || current.queue.length || current.settings || toast) return;
+  if (e.kind === "text" && liveBubble?.isConnected && before.items.at(-1)?.kind === "ai") {
+    // The backend sends text in batches (twice a second at most).
+    agentText(liveBubble, e.text);
+    keepPinned();
+    return;
+  }
+  if (e.kind === "done" && !e.error) {
+    const answer = chat.items.at(-1);
+    if (answer?.kind === "ai") announcer.textContent = `Claude: ${answer.text}`;
+  }
+  render(current);
+}
+
+function keepPinned() {
+  const log = island.querySelector<HTMLElement>(".log");
+  if (log && pinned) log.scrollTop = log.scrollHeight;
+}
+
+function chatItem(item: Item): HTMLElement {
+  switch (item.kind) {
+    case "me":
+      return el("div", "msg me", item.text);
+    case "ai": {
+      const bubble = el("div", "msg ai");
+      agentText(bubble, item.text);
+      return bubble;
+    }
+    case "tool": {
+      const chip = el("div", item.denied ? "tool no" : "tool");
+      const what = el("span");
+      agentText(what, item.denied ? `${item.name} · ${item.target}` : item.target);
+      chip.append(el("b", "", item.denied ? "Not allowed" : item.name), what);
+      // Cut with "…" when long: the whole of it on hover.
+      chip.title = item.target;
+      return chip;
+    }
+    case "error": {
+      const box = el("div", "reason");
+      agentText(box, item.text);
+      return box;
+    }
+    case "stop":
+      return el("div", "stopline", item.text);
+    case "new":
+      return el("div", "newchat", item.text);
+  }
+}
+
+/** Before any chat: what it is, and the claude it would run (confirmed in Settings). */
+function firstRun(status: ChatStatus): HTMLElement {
+  const box = el("div", "firstrun");
+  box.append(
+    el("b", "", "Chat runs your own Claude Code."),
+    el("div", "", "Each message counts against your Claude plan. It can only read its own empty folder: no commands, no edits, no connectors."),
+    el("div", "", status.state === "changed" ? "The claude it runs has changed. Confirm it again:" : "First confirm which claude it runs:"),
+  );
+  const path = el("pre", "cmd");
+  agentText(path, status.path ?? "");
+  const go = el("button", "btn", "Open Settings");
+  go.dataset.key = "chat-settings";
+  go.addEventListener("click", () => invoke("settings", { open: true }));
+  box.append(path, go);
+  return box;
+}
+
+function renderChat(view: View, done: boolean) {
+  setShape("open");
+  island.classList.add("chat");
+  askChatStatus();
+  const ready = chatStatus?.state === "confirmed";
+
+  const models = el("div", "models");
+  const seg = el("div", "seg");
+  seg.setAttribute("role", "radiogroup");
+  seg.setAttribute("aria-label", "Model");
+  for (const m of MODELS) {
+    const b = el("button", "", m);
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(chat.model === m));
+    b.dataset.key = `model-${m}`;
+    b.addEventListener("click", () => {
+      if (m === chat.model) return;
+      if (chat.busy || chat.items.length) invoke("chat_new");
+      chat = switchModel(chat, m);
+      pinned = true;
+      if (current) render(current);
+    });
+    seg.append(b);
+  }
+  const which = el("div", "which");
+  const note = defaultNote(chat.defaultName);
+  if (chat.defaultName) which.append(note.slice(0, -chat.defaultName.length), el("b", "", chat.defaultName));
+  else which.textContent = note;
+  models.append(seg, which);
+
+  const log = el("div", "log");
+  // Not a live region (it changes several times a second while streaming);
+  // a finished answer is announced once instead.
+  log.setAttribute("aria-label", "Chat");
+  if (!chatStatus) log.append(el("p", "chatnone", "Looking for Claude Code…"));
+  else if (chatStatus.state === "missing") log.append(el("div", "reason", "Claude Code wasn't found. Install it, then open chat again."));
+  else if (!ready) log.append(firstRun(chatStatus));
+  else if (!chat.items.length) log.append(el("p", "chatnone", "Ask anything. Claude reads only its own empty folder: it can't change files or run commands."));
+  liveBubble = null;
+  for (const item of chat.items) {
+    const node = chatItem(item);
+    log.append(node);
+    liveBubble = item.kind === "ai" ? node : null;
+  }
+  if (chat.busy) {
+    const wait = el("div", "answering");
+    wait.append(el("span", "ic spin"), el("span", "", "Claude is answering…"));
+    log.append(wait);
+  }
+  log.addEventListener("scroll", () => {
+    pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 8;
+    logScroll = log.scrollTop;
+  });
+
+  const compose = el("div", "compose");
+  const input = el("textarea");
+  input.rows = 1;
+  input.dataset.key = CHAT_INPUT;
+  input.setAttribute("aria-label", "Message");
+  input.placeholder = ready ? "Ask Claude" : "Confirm the claude path first";
+  // Disabled only once it's known chat can't run (sending checks again), so
+  // the keyboard can land here as the panel opens.
+  input.disabled = chatStatus !== null && !ready;
+  input.value = draft;
+  input.addEventListener("input", () => (draft = input.value));
+  input.addEventListener("keydown", (e) => {
+    if (messageKey(e) !== "send") return;
+    e.preventDefault();
+    sendChat();
+  });
+  let action: HTMLButtonElement;
+  if (chat.busy) {
+    action = el("button", "btn stop", "Cancel");
+    action.dataset.key = "chat-cancel";
+    action.addEventListener("click", () => invoke("chat_cancel"));
+  } else {
+    action = el("button", "btn send", "Send");
+    action.dataset.key = "chat-send";
+    action.disabled = !ready;
+    action.addEventListener("click", sendChat);
+  }
+  compose.append(input, action);
+
+  const usage = el("div", "usage");
+  const nums = el("div");
+  nums.append("Plan use: 5-hour ", el("b", "", percent(chat.usage?.five)), " · 7-day ", el("b", "", percent(chat.usage?.seven)));
+  usage.append(el("div", "", "Runs your Claude Code · counts against your plan"), nums);
+
+  const body = el("div", "body chat");
+  body.dataset.screen = "chat";
+  body.append(models, log, compose, usage);
+  const fresh = iconButton("New chat", PLUS_ICON);
+  fresh.addEventListener("click", newChat);
+  const state: BallState = chat.busy ? "working" : mood(view, done);
+  island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
+  // A conversation stays at its end; the first-run note starts at its top.
+  log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+}
+
+/** Settings' row for the claude chat runs: its full path, confirmed or not. */
+function claudeRow(): HTMLElement {
+  const s = chatStatus;
+  const state = s?.state;
+  const label =
+    state === "confirmed" ? "Confirmed" : state === "missing" ? "Not found" : state === "changed" ? "Changed" : state ? "Not confirmed" : "…";
+  const hint =
+    state === "missing"
+      ? "Install Claude Code, then open Settings again."
+      : state === "changed"
+        ? "It changed since you confirmed it: confirm it again."
+        : "Chat runs only this file; it asks again if the path changes.";
+  const row = setRow("Claude Code for chat", [el("span", `status${state === "confirmed" ? "" : " off"}`, label)], hint);
+  if (s?.path) {
+    const path = el("pre", "cmd");
+    agentText(path, s.path);
+    row.append(path);
+    if (state !== "confirmed") {
+      const ok = el("button", "btn send small", "Confirm this path");
+      ok.dataset.key = "path-ok";
+      ok.addEventListener("click", () => {
+        ok.disabled = true;
+        invoke<ChatStatus>("chat_confirm", { path: s.path })
+          .then((now) => (chatStatus = { ...now, defaultModel: chatStatus?.defaultModel }))
+          .catch(() => {
+            // It changed meanwhile: show the claude found now.
+            chatAsked = false;
+            askChatStatus();
+          })
+          .finally(() => {
+            refocus = "path-ok";
+            if (current) render(current);
+          });
+      });
+      row.append(ok);
+    }
+  }
+  return row;
 }
 
 // Enter never approves: not Allow, Allow edit, "Add rule and allow", "Turn
@@ -1293,7 +1624,13 @@ island.addEventListener(
 // stays (it can only be answered), but the keyboard goes back anyway.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (current && escapeCloses(current) === "settings") {
+    // Settings opened from the chat: back to the chat, keyboard kept.
+    closeSettings();
+    return;
+  }
   if (current?.settings) closeSettings();
+  if (current?.chat) closeChat();
   if (current?.open && !current.queue.length) {
     detail = null;
     invoke("expand", { open: false });
@@ -1449,6 +1786,10 @@ function report() {
     .catch(() => {});
 }
 new ResizeObserver(report).observe(stage);
+
+const chatFeed = new Channel<ChatEvent>();
+chatFeed.onmessage = onChat;
+invoke("chat_subscribe", { feed: chatFeed });
 
 const feed = new Channel<View>();
 feed.onmessage = render;
