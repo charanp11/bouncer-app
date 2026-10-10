@@ -286,8 +286,60 @@ fn real_claude_round_trip() {
     let outs = answer(&mut chat, "Read ../README.md and tell me its first line.");
     println!("{outs:#?}");
     assert!(outs.iter().any(|o| matches!(o, Out::Denied { .. })) || !text(&outs).contains('#'));
+    // The fixed read-only line: it doesn't claim powers it hasn't got.
+    let outs = answer(
+        &mut chat,
+        "In two sentences: what can you do in this chat? Can you edit files, run commands or use the web?",
+    );
+    let said = text(&outs).to_lowercase();
+    println!("{said}");
+    for claim in [
+        "i can edit",
+        "i can run",
+        "i can write",
+        "i can use the web",
+        "i can browse",
+    ] {
+        assert!(!said.contains(claim), "claimed: {claim}");
+    }
     assert!(
         fs::read_dir(&dir).unwrap().next().is_none(),
         "nothing written"
     );
+}
+
+#[test]
+fn waiting_a_little_never_ends_the_chat_but_the_limits_still_hold() {
+    // The app gathers streamed text by waiting a little at a time.
+    let (dir, bin) = setup("recv-by");
+    let limits = Limits {
+        per_message: Duration::from_secs(30),
+        quiet: Duration::from_millis(600),
+    };
+    let mut chat = start(&dir, &bin, Model::Default, limits);
+    chat.send("slow 1").unwrap();
+    let (mut early, mut words) = (0, 0);
+    loop {
+        match chat.recv_by(Some(Instant::now() + Duration::from_millis(10))) {
+            None => early += 1,
+            Some(Out::Text(_)) => words += 1,
+            Some(Out::Done { error: None }) => break,
+            Some(Out::Ready { .. }) => {}
+            Some(other) => panic!("{other:?}"),
+        }
+    }
+    assert!(early > 0, "it came back early while the words trickled in");
+    assert_eq!(words, 20, "and missed none");
+    // Coming back early doesn't reset the quiet limit.
+    chat.send("hang").unwrap();
+    let begun = Instant::now();
+    let stop = loop {
+        if let Some(out @ Out::Stopped(_)) =
+            chat.recv_by(Some(Instant::now() + Duration::from_millis(10)))
+        {
+            break out;
+        }
+        assert!(begun.elapsed() < Duration::from_secs(10), "never stopped");
+    };
+    assert_eq!(stop, Out::Stopped(Stop::Silent));
 }

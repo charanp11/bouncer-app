@@ -10,6 +10,8 @@
 //!   20 ms, and says its pid
 //! - `flood`: a 2 MB line, garbage, then an answer; `exit`: dies with code 3
 //! - `error`: answers with Claude Code's plan error
+//! - `slow N`: streams a word every 50 ms for N seconds (the panel's CPU check)
+//! - `demo`: a tool, a denial, then an answer (the panel's screenshots)
 //! - anything else: echoes argv, the environment's names, the prompt and the
 //!   raw stdin line as the answer text
 
@@ -108,6 +110,51 @@ fn main() {
             "exit" => {
                 eprintln!("\n  boom: something broke\nmore");
                 std::process::exit(3);
+            }
+            "slow" => {
+                init(&mut out, "none", &tools);
+                let secs: u64 = prompt
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(5);
+                for n in 0..secs * 20 {
+                    text(
+                        &mut out,
+                        if n % 12 == 11 {
+                            "word.
+"
+                        } else {
+                            "word "
+                        },
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                done(&mut out, None);
+            }
+            "demo" => {
+                init(&mut out, "none", &tools);
+                say(
+                    &mut out,
+                    json!({"type": "assistant", "parent_tool_use_id": null, "message": {"content": [
+                        {"type": "tool_use", "name": "Read", "input": {"file_path": "notes.txt"}}]}}),
+                );
+                say(
+                    &mut out,
+                    json!({"type": "system", "subtype": "permission_denied", "tool_name": "Read",
+                        "decision_reason": "--restricted: path outside the working directory"}),
+                );
+                say(
+                    &mut out,
+                    json!({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
+                        "five_hour": {"utilization": 0.23}, "seven_day": {"utilization": 0.7}}}}),
+                );
+                text(
+                    &mut out,
+                    "notes.txt isn't in my folder (it's empty), and I can't read outside it. ",
+                );
+                text(&mut out, "Paste the text here and I'll take a look.");
+                done(&mut out, None);
             }
             "error" => {
                 init(&mut out, "none", &tools);
