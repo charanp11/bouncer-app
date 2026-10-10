@@ -14,6 +14,13 @@ fn main() {
         "about",
         "set_mode",
         "keyboard",
+        "chat_open",
+        "chat_subscribe",
+        "chat_status",
+        "chat_confirm",
+        "chat_send",
+        "chat_cancel",
+        "chat_new",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");

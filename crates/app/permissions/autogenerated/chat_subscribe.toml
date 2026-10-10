@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-subscribe"
+description = "Enables the chat_subscribe command without any pre-configured scope."
+commands.allow = ["chat_subscribe"]
+
+[[permission]]
+identifier = "deny-chat-subscribe"
+description = "Denies the chat_subscribe command without any pre-configured scope."
+commands.deny = ["chat_subscribe"]

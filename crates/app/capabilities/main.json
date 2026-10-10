@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "The island window: our own commands only, nothing else.",
   "windows": ["main"],
-  "permissions": ["allow-subscribe", "allow-decide", "allow-always", "allow-expand", "allow-drag", "allow-fit", "allow-settings", "allow-set-prefs", "allow-wipe", "allow-about", "allow-set-mode", "allow-keyboard"]
+  "permissions": ["allow-subscribe", "allow-decide", "allow-always", "allow-expand", "allow-drag", "allow-fit", "allow-settings", "allow-set-prefs", "allow-wipe", "allow-about", "allow-set-mode", "allow-keyboard", "allow-chat-open", "allow-chat-subscribe", "allow-chat-status", "allow-chat-confirm", "allow-chat-send", "allow-chat-cancel", "allow-chat-new"]
 }
