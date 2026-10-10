@@ -48,7 +48,13 @@ pub const LOCKED: &[&str] = &[
     "--max-turns",
     "8",
     "--no-session-persistence",
+    "--append-system-prompt",
+    SYSTEM_LINE,
 ];
+
+/// Told to every chat run (appended to Claude Code's own system prompt), so
+/// it never offers what it can't do. Constant: never built from input.
+pub const SYSTEM_LINE: &str = "You are a read-only chat inside Bouncer. You can only use Read, Grep and Glob, and only inside your own empty folder. You cannot edit or write files, run commands or use the web, so never offer to.";
 
 /// The only tools a chat run may have.
 const TOOLS: &[&str] = &["Read", "Grep", "Glob"];
@@ -259,6 +265,55 @@ pub fn folder() -> Option<PathBuf> {
     rules::path().map(|p| p.with_file_name("chat"))
 }
 
+/// Where the confirmed `claude` path is kept: `Bouncer/claude-path.txt`.
+pub fn confirmed_file() -> Option<PathBuf> {
+    rules::path().map(|p| p.with_file_name("claude-path.txt"))
+}
+
+/// Which `claude` chat may run. Only `Confirmed` runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Claude {
+    /// No native `claude` was found.
+    Missing,
+    /// Found, never confirmed (or the file is missing, broken or not only
+    /// the user's).
+    Unconfirmed(Binary),
+    /// Found, but not the file the user confirmed: ask again.
+    Changed(Binary),
+    Confirmed(Binary),
+}
+
+impl Claude {
+    /// `found` against what `file` says was confirmed.
+    pub fn of(found: Option<Binary>, file: Option<&Path>) -> Claude {
+        let Some(bin) = found else {
+            return Claude::Missing;
+        };
+        let saved = file.and_then(|f| rules::read(f).ok());
+        match saved.as_deref().map(str::trim) {
+            None | Some("") => Claude::Unconfirmed(bin),
+            Some(path) if Path::new(path) == bin.path() => Claude::Confirmed(bin),
+            Some(_) => Claude::Changed(bin),
+        }
+    }
+
+    /// Finds `claude` now and checks it against the saved confirmation.
+    pub fn now() -> Claude {
+        Claude::of(Binary::find(), confirmed_file().as_deref())
+    }
+}
+
+/// Remembers `bin` as the `claude` chat may run (atomic, user-only).
+pub fn confirm(file: &Path, bin: &Binary) -> Result<(), String> {
+    let path = bin.path().to_str().ok_or("that path isn't plain text")?;
+    if let Some(dir) = file.parent() {
+        rules::create_private_dir(dir)
+            .map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    }
+    rules::replace(file, &format!("{path}\n"))
+        .map_err(|e| format!("can't save {}: {e}", file.display()))
+}
+
 /// Creates `dir` private if missing, then insists it's ours, not a link,
 /// writable by nobody else, and empty: a chat run can read only there.
 pub fn prepare(dir: &Path) -> Result<(), String> {
@@ -455,6 +510,8 @@ pub struct Chat {
     bin: Binary,
     limits: Limits,
     deadline: Option<Instant>,
+    /// The last stream event (or the send): the quiet limit counts from it.
+    heard: Instant,
     stopped: Option<Stop>,
 }
 
@@ -524,6 +581,7 @@ impl Chat {
             bin: bin.clone(),
             limits,
             deadline: None,
+            heard: Instant::now(),
             stopped: None,
         })
     }
@@ -544,7 +602,8 @@ impl Chat {
         if let Some(input) = &self.input {
             let _ = input.send(prompt_line(prompt));
         }
-        self.deadline = Some(Instant::now() + self.limits.per_message);
+        self.heard = Instant::now();
+        self.deadline = Some(self.heard + self.limits.per_message);
         Ok(())
     }
 
@@ -552,30 +611,54 @@ impl Chat {
     /// answered; after `Stopped` the chat is over and stays so.
     pub fn recv(&mut self) -> Out {
         loop {
+            if let Some(out) = self.recv_by(None) {
+                return out;
+            }
+        }
+    }
+
+    /// Like `recv`, but returns `None` at `by` if nothing came by then (to
+    /// send what's gathered so far); the message and the chat go on, and the
+    /// deadlines apply as in `recv`.
+    pub fn recv_by(&mut self, by: Option<Instant>) -> Option<Out> {
+        loop {
             if let Some(stop) = &self.stopped {
-                return Out::Stopped(stop.clone());
+                return Some(Out::Stopped(stop.clone()));
             }
             if let Some(out) = self.pending.pop_front() {
                 match out {
-                    Out::Stopped(stop) => return self.stop(stop),
+                    Out::Stopped(stop) => return Some(self.stop(stop)),
                     Out::Done { .. } => self.deadline = None,
                     _ => {}
                 }
-                return out;
+                return Some(out);
             }
-            let now = Instant::now();
-            let left = self
-                .deadline
-                .map_or(self.limits.quiet, |d| d.saturating_duration_since(now));
-            match self.events.recv_timeout(left.min(self.limits.quiet)) {
-                Ok(Msg::Line(outs)) => self.pending.extend(outs),
+            let quiet_at = self.heard + self.limits.quiet;
+            let until = [self.deadline, by]
+                .into_iter()
+                .flatten()
+                .fold(quiet_at, Instant::min);
+            match self
+                .events
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+            {
+                Ok(Msg::Line(outs)) => {
+                    self.heard = Instant::now();
+                    self.pending.extend(outs);
+                }
                 Ok(Msg::Eof) | Err(RecvTimeoutError::Disconnected) => {
                     let stop = self.ended();
-                    return self.stop(stop);
+                    return Some(self.stop(stop));
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    let late = self.deadline.is_some_and(|d| Instant::now() >= d);
-                    return self.stop(if late { Stop::TimedOut } else { Stop::Silent });
+                    let now = Instant::now();
+                    if self.deadline.is_some_and(|d| now >= d) {
+                        return Some(self.stop(Stop::TimedOut));
+                    }
+                    if now >= quiet_at {
+                        return Some(self.stop(Stop::Silent));
+                    }
+                    return None;
                 }
             }
         }
@@ -908,6 +991,23 @@ mod tests {
         ] {
             assert!(joined.contains(must), "{must}");
         }
+        // The read-only line: once, constant, last before the model.
+        for model in Model::ALL {
+            let argv = argv(model);
+            let at: Vec<_> = argv
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| **a == "--append-system-prompt")
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(at.len(), 1);
+            assert_eq!(argv[at[0] + 1], SYSTEM_LINE);
+            assert_eq!(at[0] + 2, LOCKED.len());
+        }
+        assert_eq!(
+            SYSTEM_LINE,
+            "You are a read-only chat inside Bouncer. You can only use Read, Grep and Glob, and only inside your own empty folder. You cannot edit or write files, run commands or use the web, so never offer to."
+        );
         for never in [
             "bypass",
             "dangerously",
@@ -1146,6 +1246,54 @@ mod tests {
             fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
             assert!(prepare(&open).unwrap_err().contains("others can write"));
         }
+    }
+
+    #[test]
+    fn only_the_confirmed_claude_runs() {
+        let dir = temp_dir("chat-confirm");
+        let file = dir.0.join("Bouncer").join("claude-path.txt");
+        let bin = Binary(dir.0.join("npm").join(EXE));
+        let other = Binary(dir.0.join("local").join(EXE));
+        assert_eq!(Claude::of(None, Some(&file)), Claude::Missing);
+        assert_eq!(
+            Claude::of(Some(bin.clone()), None),
+            Claude::Unconfirmed(bin.clone())
+        );
+        assert_eq!(
+            Claude::of(Some(bin.clone()), Some(&file)),
+            Claude::Unconfirmed(bin.clone())
+        );
+        confirm(&file, &bin).unwrap();
+        assert_eq!(
+            Claude::of(Some(bin.clone()), Some(&file)),
+            Claude::Confirmed(bin.clone())
+        );
+        // Another claude (moved, reinstalled elsewhere): ask again.
+        assert_eq!(
+            Claude::of(Some(other.clone()), Some(&file)),
+            Claude::Changed(other.clone())
+        );
+        assert_eq!(Claude::of(None, Some(&file)), Claude::Missing);
+        fs::write(&file, "\n").unwrap();
+        assert_eq!(
+            Claude::of(Some(bin.clone()), Some(&file)),
+            Claude::Unconfirmed(bin.clone())
+        );
+        confirm(&file, &other).unwrap();
+        assert_eq!(
+            Claude::of(Some(other.clone()), Some(&file)),
+            Claude::Confirmed(other.clone())
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o666)).unwrap();
+            assert_eq!(
+                Claude::of(Some(other.clone()), Some(&file)),
+                Claude::Unconfirmed(other)
+            );
+        }
+        assert!(confirmed_file().is_some_and(|f| f.ends_with("claude-path.txt")));
     }
 
     fn outs(line: &str) -> Vec<Out> {

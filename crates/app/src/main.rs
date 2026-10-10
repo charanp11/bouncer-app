@@ -1,6 +1,7 @@
 // No console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod chat;
 mod region;
 
 use std::io::Read;
@@ -46,6 +47,9 @@ struct Island {
     moved: Mutex<mpsc::Sender<()>>,
     /// The settings screen is open (gear or tray); a card still comes first.
     settings: AtomicBool,
+    /// The chat panel is open (its button in the session list); a card and
+    /// Settings come first, and the chat keeps running behind them.
+    chat: AtomicBool,
     /// The island has the keyboard: taken on purpose (gear, tray), until
     /// another window is clicked or Esc. The page can't tell by itself: in
     /// WebView2 it always thinks it has focus.
@@ -110,8 +114,25 @@ fn main() {
     clear_webview_args(!cfg!(debug_assertions));
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            subscribe, decide, always, expand, drag, fit, settings, set_prefs, wipe, about,
-            set_mode, keyboard
+            subscribe,
+            decide,
+            always,
+            expand,
+            drag,
+            fit,
+            settings,
+            set_prefs,
+            wipe,
+            about,
+            set_mode,
+            keyboard,
+            chat_open,
+            chat::chat_subscribe,
+            chat::chat_status,
+            chat::chat_confirm,
+            chat::chat_send,
+            chat::chat_cancel,
+            chat::chat_new
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -149,6 +170,7 @@ fn main() {
                 frame: Mutex::new(LogicalSize::new(320.0, 44.0)),
                 moved: Mutex::new(settle_after_moves(app.handle().clone())),
                 settings: AtomicBool::new(false),
+                chat: AtomicBool::new(false),
                 focused: AtomicBool::new(false),
                 confirm_wipe: AtomicBool::new(false),
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
@@ -165,11 +187,18 @@ fn main() {
                 // the event loop and is ignored, so leave at once).
                 std::process::exit(0);
             }
+            app.manage(chat::Chats::default());
             tray(app, desk)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Bouncer");
+        .build(tauri::generate_context!())
+        .expect("error while running Bouncer")
+        .run(|app, event| {
+            // Quitting ends the chat: its whole process tree is killed.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<chat::Chats>().end();
+            }
+        });
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -339,14 +368,16 @@ fn send(app: &AppHandle, mut view: Value) {
     let has = |key: &str| view[key].as_array().is_some_and(|a| !a.is_empty());
     let away = !view["away"].is_null();
     let settings = island.settings.load(Ordering::Relaxed);
+    let chat = island.chat.load(Ordering::Relaxed);
     // Opened on purpose (the pill) it stays open with no sessions too, so
     // Settings is always reachable.
     let expanded = island.expanded.load(Ordering::Relaxed);
-    let open = has("queue") || settings || expanded;
+    let open = has("queue") || settings || chat || expanded;
     let hidden = !has("queue")
         && !has("sessions")
         && !away
         && !settings
+        && !chat
         && !expanded
         && view["paused"] != true;
     island.hidden.store(hidden, Ordering::Relaxed);
@@ -354,6 +385,7 @@ fn send(app: &AppHandle, mut view: Value) {
     view["hidden"] = hidden.into();
     view["rounded"] = ROUNDED.into();
     view["settings"] = settings.into();
+    view["chat"] = chat.into();
     view["keyboard"] = island.focused.load(Ordering::Relaxed).into();
     view["confirmWipe"] = island.confirm_wipe.swap(false, Ordering::Relaxed).into();
     view["prefs"] = island.prefs.lock().unwrap().to_json();
@@ -628,6 +660,14 @@ fn settings(app: AppHandle, island: State<'_, Island>, open: bool) {
     show(&app, island.desk.view());
 }
 
+/// Opens or closes the chat panel (its button, its ×, or Esc). Closing it
+/// leaves the chat running.
+#[tauri::command]
+fn chat_open(app: AppHandle, island: State<'_, Island>, open: bool) {
+    island.chat.store(open, Ordering::Relaxed);
+    show(&app, island.desk.view());
+}
+
 /// Saves the island size and sound. Only known sizes are accepted.
 #[tauri::command]
 fn set_prefs(
@@ -842,6 +882,13 @@ fn tray(",
             "about",
             "set-mode",
             "keyboard",
+            "chat-open",
+            "chat-subscribe",
+            "chat-status",
+            "chat-confirm",
+            "chat-send",
+            "chat-cancel",
+            "chat-new",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()

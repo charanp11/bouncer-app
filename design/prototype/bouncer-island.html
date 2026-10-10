@@ -35,6 +35,7 @@
   --open-w: 400px;
   --open-max-h: 520px;
   --detail-w: 720px;
+  --chat-h: 460px;
   --r-pill: 18px;
   --r-open: 22px;
   --r-card: 14px;
@@ -201,6 +202,8 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .seg button:focus-visible, .toggle:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
 .status { display: inline-flex; align-items: center; gap: 6px; }
 .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.status.off::before { background: var(--faint); }
+.head .buttons { display: flex; align-items: center; gap: 2px; }
 .confirm { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--island); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
 .confirm b { color: var(--text); font-weight: 500; }
 .btn.small { height: 30px; font-size: 12.5px; }
@@ -216,12 +219,45 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .ctrl { display: flex; gap: 2px; }
 .bar { height: 3px; border-radius: 2px; background: var(--raised); overflow: hidden; }
 .bar i { display: block; height: 100%; width: 38%; background: var(--text); }
-.chat { display: grid; gap: 8px; }
-.msg { max-width: 85%; padding: 7px 10px; border-radius: 12px; font-size: 13px; }
+/* chat (Phase 6): a fixed-height panel, so streaming never resizes the window;
+   only the log scrolls. Everything from the model is text (textContent). */
+.island.chat { height: min(var(--chat-h), var(--open-max-h)); display: grid; grid-template-rows: var(--pill-h) minmax(0, 1fr); }
+.body.chat { max-height: none; min-height: 0; overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.models { display: grid; gap: 3px; }
+.models .seg { display: flex; }
+.models .seg button { flex: 1; padding: 0 6px; }
+.models .which { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.models .which b { color: var(--muted); font: 500 11.5px var(--mono); }
+.log { min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; padding: 2px 2px 2px 0; user-select: text; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
+.msg { max-width: 85%; padding: 7px 10px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.me { justify-self: end; background: var(--text); color: var(--island); border-bottom-right-radius: 4px; }
-.msg.ai { background: var(--raised); border-bottom-left-radius: 4px; }
-.compose { display: flex; gap: 6px; }
-.compose input { flex: 1; min-width: 0; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--island); color: var(--text); padding: 0 10px; font: 13px var(--ui); }
+.msg.ai { justify-self: start; background: var(--raised); border-bottom-left-radius: 4px; }
+.tool { justify-self: start; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 11.5px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+.tool b { flex: none; font: 600 11px var(--ui); color: var(--text); }
+.tool span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool.no { border-style: dashed; color: var(--faint); border-radius: 10px; align-items: baseline; }
+.tool.no span { white-space: normal; overflow-wrap: anywhere; }
+.tool.no b { color: var(--wait); }
+.answering { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.stopline { text-align: center; font-size: 12px; color: var(--muted); }
+.newchat { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; font-size: 11.5px; color: var(--faint); }
+.newchat::before, .newchat::after { content: ""; height: 1px; background: var(--line); }
+.compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end; }
+.compose textarea { resize: none; field-sizing: content; min-height: 34px; max-height: 96px; border-radius: 9px; border: 1px solid var(--line); background: var(--raised); color: var(--text); padding: 6px 10px; font: 13px/1.5 var(--ui); user-select: text; caret-animation: manual; }
+.compose textarea::placeholder { color: var(--faint); }
+.compose textarea:disabled { opacity: 0.5; }
+.compose textarea:focus-visible { outline: 2px solid var(--sun); outline-offset: 1px; }
+.btn.send { background: var(--text); color: var(--island); border-color: var(--text); padding: 0 14px; }
+.btn.send:hover:not(:disabled) { background: #fff; }
+.btn.send:disabled { cursor: default; background: rgba(238,240,244,0.18); color: var(--muted); border-color: transparent; }
+.btn.stop { padding: 0 14px; }
+.usage { font-size: 11.5px; line-height: 1.4; color: var(--faint); text-align: center; }
+.usage div + div { color: var(--muted); }
+.usage b { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.firstrun { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-card); padding: 12px; display: grid; gap: 8px; font-size: 12.5px; color: var(--muted); align-self: start; }
+.firstrun b { color: var(--text); font-weight: 500; }
+.firstrun .btn { justify-self: start; height: 30px; padding: 0 12px; font-size: 12.5px; }
+.chatnone { color: var(--faint); font-size: 12.5px; text-align: center; padding: 18px 8px 0; }
 
 
 /* session detail: the wide "dashboard" island */
@@ -410,7 +446,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.20 · Oct 8 2026</div>
+    <div class="meta">design/prototype · v0.21 · Oct 9 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -444,8 +480,16 @@ a.chip { text-decoration: none; }
       <button class="chip" data-t="slow" aria-pressed="false">Slow ×4</button>
       <button class="chip" data-t="reduced" aria-pressed="false">Reduced motion</button>
     </div>
-    <div class="group"><span class="label">Phase 6–8</span>
-      <button class="chip" data-s="chat">Chat</button>
+    <div class="group"><span class="label">Phase 6</span>
+      <button class="chip" data-s="chatfirst">Chat · first run</button>
+      <button class="chip" data-s="chatempty">Chat · empty</button>
+      <button class="chip" data-s="chat">Chat · answering</button>
+      <button class="chip" data-s="chatdone">Chat · tool and denial</button>
+      <button class="chip" data-s="chaterror">Chat · errors</button>
+      <button class="chip" data-s="chatstop">Chat · cancelled</button>
+      <button class="chip" data-s="settingsclaude">Settings · claude path</button>
+    </div>
+    <div class="group"><span class="label">Phase 7–8</span>
       <button class="chip" data-s="drop">File drop</button>
       <button class="chip" data-s="music">Music</button>
     </div>
@@ -494,6 +538,8 @@ a.chip { text-decoration: none; }
         <tr><td>Radius: pill / open / card</td><td>18 / 22 / 14</td></tr>
         <tr><td>Button height / radius</td><td>34 / 9</td></tr>
         <tr><td>Character in island</td><td>26 × 26</td></tr>
+        <tr><td>Chat panel</td><td>400 × 460, fixed; the log scrolls</td></tr>
+        <tr><td>Chat message box</td><td>34 to 96 high, then scroll</td></tr>
       </table>
       <p class="meta" style="margin:10px 0 0">Sizes are at 100%; the island is drawn at the scale. A view never passes 40% of its screen's width or its work area's height (then it scrolls), and never goes under 100%.</p>
     </section>
@@ -565,6 +611,7 @@ a.chip { text-decoration: none; }
         <li><b>Hidden means hidden</b>: no animation runs and CPU stays near zero.</li>
         <li><b>Turning auto-allow on is a deliberate step:</b> a confirm that scrolls fully into view, focus on Cancel (never on "Turn on auto-allow"), Esc cancels, Enter never turns it on, and the button arms after 600ms.</li>
         <li><b>A card is never animated in.</b> It appears at full size once the window has grown to hold it, and its 600ms arm starts only then. Nothing morphs while a card is in front, so its buttons never move.</li>
+        <li><b>Chat is text, locked down and second:</b> answers stream in with <code>textContent</code>; no chat runs before the claude path is confirmed; a permission card always replaces the chat panel, which keeps streaming behind it; streaming never resizes the window and starts no endless animation.</li>
         <li><b>The ticker is numbers only:</b> <code>+N −M</code> lines for Edit / MultiEdit, <code>+N</code> for Write (the old file is never read). The label shortens first; the numbers are never cut.</li>
       </ol>
     </section>
@@ -701,13 +748,13 @@ function card(req, opts = {}) {
 }
 
 const S = {
-  a: { name: "bouncer-app", path: "C:\\Users\\chara\\Desktop\\Full Time\\bouncer-app", cls: "working", step: "Editing crates/core/src/rules.rs", time: "12m" },
-  b: { name: "carbon-scheduler", path: "C:\\Users\\chara\\code\\carbon-scheduler", cls: "needs", step: "Needs you · wants to run go test ./...", time: "3m" },
-  c: { name: "resume-latex", path: "C:\\Users\\chara\\Documents\\resume-latex", cls: "terminal", step: "Asking in the terminal · Bash", time: "40s" },
-  d: { name: "playground", path: "C:\\Users\\chara\\Desktop\\Full Time\\bouncer-playground", cls: "", step: "Idle", time: "1h" },
+  a: { name: "bouncer-app", path: "C:\\Users\\dev\\Desktop\\Full Time\\bouncer-app", cls: "working", step: "Editing crates/core/src/rules.rs", time: "12m" },
+  b: { name: "carbon-scheduler", path: "C:\\Users\\dev\\code\\carbon-scheduler", cls: "needs", step: "Needs you · wants to run go test ./...", time: "3m" },
+  c: { name: "resume-latex", path: "C:\\Users\\dev\\Documents\\resume-latex", cls: "terminal", step: "Asking in the terminal · Bash", time: "40s" },
+  d: { name: "playground", path: "C:\\Users\\dev\\Desktop\\Full Time\\bouncer-playground", cls: "", step: "Idle", time: "1h" },
 };
 const REQ = {
-  write: { agent: "Claude Code", folder: "bouncer-playground", what: "Write a file", rule: '[[allow]]\ntool = "Write"\npath = "hello.txt"\nproject = "bouncer-playground"', text: "C:\\Users\\chara\\Desktop\\Full Time\\bouncer-playground\\hello.txt\n\nhi" },
+  write: { agent: "Claude Code", folder: "bouncer-playground", what: "Write a file", rule: '[[allow]]\ntool = "Write"\npath = "hello.txt"\nproject = "bouncer-playground"', text: "C:\\Users\\dev\\Desktop\\Full Time\\bouncer-playground\\hello.txt\n\nhi" },
   test: { agent: "Claude Code", folder: "carbon-scheduler", what: "Run a command", text: "go test ./... -race -count=1",
     rule: '[[allow]]\nbash = "go test ./... -race -count=1"\nproject = "carbon-scheduler"' },
   risky: { agent: "Claude Code", folder: "bouncer-app", what: "Run a command", risky: true,
@@ -779,18 +826,6 @@ const STATES = {
       b.append(stats, stuck, sessions([S.b, S.a]));
       island.append(b);
     }, notes: ["Appears when you come back after 10+ idle minutes.", "Numbers first, then where something got stuck, then sessions that need you.", "Everything here comes from the local history; nothing leaves the machine."] },
-  chat: { phase: "Phase 6", title: "Chat", render() {
-      island.className = "island open";
-      island.append(head("working", "Ask Claude"));
-      const b = el("div", "body chat");
-      b.append(el("div", "msg me", "What does the relay do if the app is closed?"),
-        el("div", "msg ai", "It prints nothing and exits 0 within about 25ms, so Claude Code shows its normal permission prompt."));
-      const c = el("div", "compose");
-      const i = el("input"); i.id = "chat-input"; i.placeholder = "Ask anything"; i.setAttribute("aria-label", "Message");
-      const s = el("button", "btn allow"); s.textContent = "Send"; s.style.padding = "0 14px";
-      c.append(i, s); b.append(c);
-      island.append(b);
-    }, notes: ["Answered by your local Claude Code in headless mode, on your subscription.", "Nothing is sent until you press Send.", "Replies are plain text, rendered with textContent like everything else."] },
   drop: { phase: "Phase 7", title: "File drop", render() {
       island.className = "island open";
       island.append(head("needs", "Drop a file"));
@@ -817,8 +852,11 @@ const STATES = {
 
 
 function withGear(h) {
+  const c = el("button", "iconbtn"); c.innerHTML = ICONS.chat; c.setAttribute("aria-label", "Ask Claude");
+  c.addEventListener("click", (e) => { e.stopPropagation(); show("chatempty"); });
   const g = el("button", "iconbtn"); g.innerHTML = ICONS.gear; g.setAttribute("aria-label", "Settings");
   g.addEventListener("click", (e) => { e.stopPropagation(); show("settings"); });
+  h.insertBefore(c, h.lastChild);
   h.insertBefore(g, h.lastChild);
   return h;
 }
@@ -882,7 +920,7 @@ function settings(confirming) {
   const wipe = el("button", "btn deny small", "Wipe…"); wipe.style.padding = "0 12px";
   list.append(setRow("Activity history", [wipe], "30 days, on this computer, redacted."));
   const rules = setRow("Rules file", [], null);
-  rules.append(el("pre", "cmd", "C:\\Users\\chara\\AppData\\Roaming\\Bouncer\\rules.toml"));
+  rules.append(el("pre", "cmd", "C:\\Users\\dev\\AppData\\Roaming\\Bouncer\\rules.toml"));
   list.append(rules);
   list.append(setRow("Claude Code hooks", [el("span", "status", "Installed")], "Remove: bouncer uninstall-hooks"));
   b.append(list);
@@ -993,6 +1031,110 @@ Object.assign(STATES, {
       d.append(rail("needs", "ask"), pane);
       island.append(d);
     }, notes: ["Edits are approved with the exact change in view, not just a file name.", "Same rules as every card: Allow arms after 600ms, never the default focus, Enter doesn't approve.", "Long diffs scroll inside the code pane; the ask bar stays pinned at the bottom."] },
+});
+
+// ---- chat (Phase 6) ---------------------------------------------------------
+const CLAUDE_PATH = "C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe";
+function chatHead(state, sub) {
+  const h = el("div", "head");
+  const t = el("div", "title");
+  t.append(ball(state), el("span", "", "Ask Claude"));
+  if (sub) t.append(el("span", "sub", sub));
+  const btns = el("div", "buttons");
+  const fresh = el("button", "iconbtn"); fresh.innerHTML = ICONS.plus; fresh.setAttribute("aria-label", "New chat");
+  fresh.addEventListener("click", () => show("chatempty"));
+  const close = el("button", "iconbtn", "×"); close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => show("sessions"));
+  btns.append(fresh, close); h.append(t, btns);
+  return h;
+}
+function models(active, defaultName) {
+  const m = el("div", "models");
+  const seg = el("div", "seg"); seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "Model");
+  ["Default", "Haiku", "Sonnet", "Opus", "Fable"].forEach((n) => {
+    const x = el("button", "", n); x.setAttribute("role", "radio"); x.setAttribute("aria-checked", String(n === active)); seg.append(x);
+  });
+  const which = el("div", "which");
+  if (defaultName) which.append(document.createTextNode("Default is "), el("b", "", defaultName));
+  else which.textContent = "Default is your plan's default; named after its first reply.";
+  m.append(seg, which);
+  return m;
+}
+function compose(busy, disabled) {
+  const c = el("div", "compose");
+  const t = el("textarea"); t.rows = 1; t.placeholder = disabled ? "Confirm the claude path first" : "Ask Claude"; t.setAttribute("aria-label", "Message");
+  t.disabled = !!disabled;
+  const b = busy ? el("button", "btn stop", "Cancel") : el("button", "btn send", "Send");
+  if (disabled) b.disabled = true;
+  c.append(t, b);
+  return c;
+}
+function usage(five, seven) {
+  const u = el("div", "usage");
+  const nums = el("div");
+  nums.append(document.createTextNode("Plan use: 5-hour "), el("b", "", five), document.createTextNode(" · 7-day "), el("b", "", seven));
+  u.append(el("div", "", "Runs your Claude Code · counts against your plan"), nums);
+  return u;
+}
+function tool(name, target, no) {
+  const t = el("div", "tool" + (no ? " no" : ""));
+  t.append(el("b", "", no ? "Not allowed" : name), el("span", "", no ? `${name} · ${target}` : target));
+  return t;
+}
+function chatPanel({ state = "idle", sub = "· Haiku", model = "Haiku", defaultName = "claude-opus-5-5", items = [], busy = false, first = false, five = "23%", seven = "70%" }) {
+  island.className = "island open chat";
+  island.append(chatHead(state, sub));
+  const b = el("div", "body chat");
+  const log = el("div", "log"); log.setAttribute("aria-label", "Chat"); log.setAttribute("aria-live", "polite");
+  if (first) {
+    const f = el("div", "firstrun");
+    f.append(el("b", "", "Chat runs your own Claude Code."),
+      el("div", "", "Each message counts against your Claude plan. It can only read its own empty folder: no commands, no edits, no connectors."),
+      el("div", "", "First confirm which claude it runs:"), commandBox(CLAUDE_PATH));
+    const go = el("button", "btn", "Open Settings"); go.addEventListener("click", () => show("settingsclaude"));
+    f.append(go); log.append(f);
+  } else if (!items.length) {
+    log.append(el("p", "chatnone", "Ask anything. Claude reads only its own empty folder: it can't change files or run commands."));
+  }
+  for (const it of items) log.append(it);
+  b.append(models(model, defaultName), log, compose(busy, first), usage(five, seven));
+  island.append(b);
+}
+function msg(who, text) { return el("div", "msg " + who, text); }
+function answering() { const a = el("div", "answering"); a.append(el("span", "ic spin"), el("span", "", "Claude is answering…")); return a; }
+function errorBox(text) { return el("div", "reason", text); }
+function newChat(label = "New chat") { return el("div", "newchat", label); }
+Object.assign(STATES, {
+  chatfirst: { phase: "Phase 6", title: "Chat · first run", render() { chatPanel({ first: true, sub: "", five: "—", seven: "—", defaultName: null, model: "Default" }); },
+    notes: ["Opens from the chat button in the session list. Opened on purpose, it takes the keyboard.", "No chat runs before you confirm, in Settings, the full path of the claude it runs. A changed path asks again.", "Only a native claude.exe (or claude on macOS); npm's .cmd / .ps1 shims are refused."] },
+  chatempty: { phase: "Phase 6", title: "Chat · empty", render() { chatPanel({ items: [], five: "—", seven: "—", defaultName: null, model: "Default", sub: "· Default" }); },
+    notes: ["The model comes from a fixed list. Default passes no model: Claude Code picks the plan's default, named here after its first reply.", "Switching model starts a new chat (a \"New chat\" line).", "Enter sends, Shift+Enter makes a new line, Esc closes. Tab: the head's buttons, model, message, Send.", "The usage line shows the plan's 5-hour and 7-day use once Claude Code reports it."] },
+  chat: { phase: "Phase 6", title: "Chat · answering", render() {
+      chatPanel({ state: "working", busy: true, items: [msg("me", "What does the relay do if the app is closed?"), msg("ai", "It prints nothing and exits 0 within about 25 ms, so Claude Code shows"), answering()] });
+    }, notes: ["Answered by your own Claude Code (claude -p), locked down: Read, Grep and Glob in an empty folder, nothing else.", "The answer streams in as text (textContent); the panel has a fixed height, so the window never resizes while it streams. Only the log scrolls.", "\"Claude is answering…\" uses the step spinner: 3 turns, then a still mark. Bouncer jumps once when the answer starts, then holds still.", "Cancel stops it and kills the whole process tree."] },
+  chatdone: { phase: "Phase 6", title: "Chat · tool and denial", render() {
+      chatPanel({ items: [msg("me", "What's in notes.txt, and in ../bouncer/README.md?"), tool("Read", "notes.txt"), tool("Read", "path outside the working directory", true),
+        msg("ai", "notes.txt isn't in my folder (it's empty), and I can't read outside it. Paste the text here and I'll take a look.")] });
+    }, notes: ["Each tool the run uses is a chip: its name and what it touched. Tool results (file contents) are never shown or kept.", "A refusal by Claude Code shows as \"Not allowed\" with its reason: the lock working.", "Nothing about a chat is written to disk."] },
+  chaterror: { phase: "Phase 6", title: "Chat · errors", render() {
+      chatPanel({ model: "Fable", sub: "· Fable", items: [msg("me", "Hi"), errorBox("Claude Fable isn't available on your plan."),
+        errorBox("This Claude Code version isn't supported for chat (2.1.120). Update Claude Code, then start a new chat."),
+        errorBox("Claude Code wasn't found. Install it, then open chat again."), newChat()] });
+    }, notes: ["Claude Code's own errors (a model the plan can't use, max turns) show as it wrote them.", "Unsupported: the installed claude rejected a locked flag; Bouncer never retries without it.", "Not found, not on your login (an API key), or not locked down: chat stops at once and says why.", "Errors are text in a red box, like a risky reason."] },
+  chatstop: { phase: "Phase 6", title: "Chat · cancelled", render() {
+      chatPanel({ items: [msg("me", "Summarise every file you can read"), msg("ai", "I'll start by listing the folder"), el("div", "stopline", "Cancelled."), newChat()] });
+    }, notes: ["Cancel, the 5-minute limit per message, or 60 s with no word from Claude Code stop the chat and kill its whole process tree.", "A stopped chat's context is gone: the \"New chat\" line says the next message starts fresh.", "A permission card always comes first: the chat keeps streaming behind it and is back when the card is answered."] },
+  settingsclaude: { phase: "Phase 6", title: "Settings · claude path", render() {
+      settings(false);
+      const list = island.querySelector(".setlist");
+      const row = setRow("Claude Code for chat", [el("span", "status off", "Not confirmed")], "Chat runs only this file; it asks again if the path changes.");
+      row.append(commandBox(CLAUDE_PATH));
+      const ok = el("button", "btn send small", "Confirm this path"); ok.style.justifySelf = "start"; ok.style.marginTop = "6px";
+      ok.addEventListener("click", () => show("chatempty"));
+      row.append(ok);
+      list.insertBefore(row, list.children[list.children.length - 2]);
+      requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
+    }, notes: ["The full path of the claude chat will run, found on PATH, next to npm's shim or where the native installer puts it.", "Confirm once; Bouncer asks again if the path changes. Until then no chat runs.", "Not found: says so, with nothing to confirm."] },
 });
 
 // ---- motion (Phase 5c) ------------------------------------------------------
