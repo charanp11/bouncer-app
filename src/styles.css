@@ -522,6 +522,82 @@ pre.cmd {
   gap: 8px;
 }
 
+/* "Explain this command" (roadmap b): below the card's buttons, a fixed
+   height so they never move and the window never resizes while it streams.
+   The text is built from text nodes (Markdown as in chat answers). */
+.explain {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--island);
+  border: 1px solid var(--line);
+}
+
+.explain .xhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.explain .xhead b {
+  color: var(--text);
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.explain .xbody {
+  height: 132px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.explain .xbody:focus-visible {
+  outline: 2px solid var(--sun);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.explain .xfoot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.explain .xstate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.explain .xstate.err {
+  color: #ffb4ae;
+  overflow-wrap: anywhere;
+}
+
+.explain .btn.small {
+  padding: 0 12px;
+}
+
+/* The box is already the island's dark: code sits on the raised tone. */
+.explain .xbody code,
+.explain .xbody pre.md-code {
+  background: var(--raised);
+}
+
 .rulebox .lbl {
   font-size: 12.5px;
   color: var(--muted);
@@ -1505,39 +1581,48 @@ pre.cmd {
 }
 
 /* Markdown in answers (roadmap a): elements built from text, links as text. */
-.msg.ai > * {
+.msg.ai > *,
+.explain .xbody > * {
   margin: 0;
 }
 
-.msg.ai > * + * {
+.msg.ai > * + *,
+.explain .xbody > * + * {
   margin-top: 6px;
 }
 
 .msg.ai ul,
-.msg.ai ol {
+.explain .xbody ul,
+.msg.ai ol,
+.explain .xbody ol {
   padding-left: 18px;
 }
 
-.msg.ai li + li {
+.msg.ai li + li,
+.explain .xbody li + li {
   margin-top: 2px;
 }
 
-.msg.ai .md-h {
+.msg.ai .md-h,
+.explain .xbody .md-h {
   font-weight: 600;
 }
 
-.msg.ai .md-h1 {
+.msg.ai .md-h1,
+.explain .xbody .md-h1 {
   font-size: 14px;
 }
 
-.msg.ai code {
+.msg.ai code,
+.explain .xbody code {
   font: 12px var(--mono);
   background: var(--island);
   border-radius: 4px;
   padding: 0 4px;
 }
 
-.msg.ai pre.md-code {
+.msg.ai pre.md-code,
+.explain .xbody pre.md-code {
   font: 12px/1.5 var(--mono);
   color: #dfe3ea;
   background: var(--island);
@@ -1549,13 +1634,15 @@ pre.cmd {
   max-height: 220px;
 }
 
-.msg.ai blockquote {
+.msg.ai blockquote,
+.explain .xbody blockquote {
   border-left: 2px solid rgba(255, 255, 255, 0.18);
   padding-left: 8px;
   color: var(--muted);
 }
 
-.msg.ai hr {
+.msg.ai hr,
+.explain .xbody hr {
   border: 0;
   border-top: 1px solid var(--line);
 }
