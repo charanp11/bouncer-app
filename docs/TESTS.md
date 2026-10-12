@@ -171,7 +171,7 @@ and the panel (6b, C17–C31).
 | C27 | Keyboard in the panel | Opens with the keyboard in the message box; Tab: message, Send, New chat, ×, the models, round again; Esc closes it (the chat keeps running) and gives the keyboard back | real-click | (kb check) | real-click 2026-10-09 |
 | C28 | The chat commands | Seven chat commands granted, nothing else; same CSP | unit | `tests::strict_csp_and_only_our_commands` | CI |
 | C29 | Quit or crash with a chat open | The chat's whole tree dies with the app (Job Object; force-stopped twice: no `claude` left) | integration, real-click | `dropping_a_chat_kills_the_whole_tree` | CI; real-click 2026-10-09 |
-| C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295) |
+| C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295); Hand 3 |
 | C31 | Esc in Settings opened from the chat | Closes only Settings: back to the chat, the keyboard in the message box; Esc again closes the panel | frontend, real-click | `ts: chat: Esc in Settings opened from the chat closes only Settings` | CI; real-click 2026-10-09 |
 
 ## macOS
@@ -184,7 +184,7 @@ and the panel (6b, C17–C31).
 
 ## Hand checks
 
-What a person has to do (about 8 minutes). Use the dev app and the
+What a person has to do (about 13 minutes). Use the dev app and the
 playground (`../bouncer-playground`, its own `.claude/settings.local.json`);
 never the real `~/.claude/settings.json`.
 
@@ -202,6 +202,38 @@ never the real `~/.claude/settings.json`.
    history…" again → wait for "Delete history" to arm → click it → the pill
    says "History wiped". Quit → the island goes; a request in the playground
    is asked in the terminal. Expected: each as said.
+3. **A real chat (about 5 min).** Not run yet. Dev app with the playground
+   rules (its chat folder is `bouncer-playground\chat`, which must be empty).
+   Before you start, open Task Manager → Details and count the `claude.exe`
+   lines: those are your own Claude Code sessions.
+   1. Click the pill (or tray → Open Bouncer), then the speech-bubble button
+      next to the gear. Expected: "Chat runs your own Claude Code" and the
+      full path of your `claude.exe`
+      (`…\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe`);
+      Send is greyed out.
+   2. Click **Open Settings**. Under "Claude Code for chat", check the path
+      is your Claude Code and click **Confirm this path**: it says
+      Confirmed. Press **Esc**: back in the chat, the cursor in the message
+      box.
+   3. Click **Haiku**. Type `What can you do in this chat?` and press
+      **Enter**. Expected: the answer streams in and says it's read-only
+      (it can't edit files, run commands or use the web); the line at the
+      bottom shows your plan's 5-hour and 7-day use; Task Manager shows one
+      more `claude.exe`.
+   4. Type `Read ../rules.toml and tell me its first line.` and press
+      **Enter**. Expected: a "Read …rules.toml" chip, then a dashed
+      "Not allowed · Read · --restricted: path outside the working
+      directory", and Claude says it couldn't read it.
+   5. Type `Write a 400-word story about a bouncer.`, press **Enter**, and
+      while it streams click **Cancel**. Expected: it stops, then
+      "Cancelled." and a "New chat" line.
+   6. Type `What was my first question?` and press **Enter**. Expected: it
+      doesn't know (a new chat). Click **+** (New chat, top right): the
+      panel is empty again.
+   7. Tray → **Quit Bouncer**. Wait a few seconds and look at Task Manager
+      → Details again. Expected: the `claude.exe` count is back to what it
+      was before step 1 (none of Bouncer's left).
+   8. Check `bouncer-playground\chat` is still empty.
 ### Phase 9 hand checks
 
 - **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
