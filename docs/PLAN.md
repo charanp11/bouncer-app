@@ -2762,6 +2762,17 @@ where it matters: safety, CPU and memory, reliability. Before the release PR
 installed or run): what they have, what we have, where we're better, where
 we're behind, and what to fix before release.
 
+**Roadmap a: Markdown in chat answers (2026-10-12).** `src/markdown.ts`
+reads an answer into blocks (paragraphs, headings, lists, quotes, rules,
+fenced code) and pieces (bold, italic, inline code); `main.ts` builds the
+elements and fills every piece through `agentText` (`textContent`, hidden
+characters as tags). Links come out as their words and address in plain
+text: no `<a>` anywhere. The answer so far is read again on each streamed
+batch (twice a second at most), so lists and code blocks form as it streams.
+No new dependency. Checked on the test instance (real clicks, the fake's
+`md` answer): blocks as expected, no links, the tag shown as text; 6.5% of a
+core while streaming (30 s), no worse than before. C32–C33.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to

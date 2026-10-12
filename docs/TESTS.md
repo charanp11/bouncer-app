@@ -138,7 +138,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 ## Chat (Phase 6)
 
 The runner (6a) against a fake `claude` (`crates/core/examples/fake_claude.rs`)
-and the panel (6b, C17–C31).
+and the panel (6b, C17–C31; Markdown, C32–C33).
 
 | ID | Scenario | Expected | Proof | Test | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -173,6 +173,8 @@ and the panel (6b, C17–C31).
 | C29 | Quit or crash with a chat open | The chat's whole tree dies with the app (Job Object; force-stopped twice: no `claude` left) | integration, real-click | `dropping_a_chat_kills_the_whole_tree` | CI; real-click 2026-10-09 |
 | C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295); Hand 3 passed 2026-10-12 |
 | C31 | Esc in Settings opened from the chat | Closes only Settings: back to the chat, the keyboard in the message box; Esc again closes the panel | frontend, real-click | `ts: chat: Esc in Settings opened from the chat closes only Settings` | CI; real-click 2026-10-09 |
+| C32 | Markdown in answers | Paragraphs, headings, lists (numbered from their start), quotes, rules, bold, italic, inline code, fenced code with the code pane's colors; formed while streaming (an unclosed fence is code to the end); random input never throws | frontend, real-click | `ts: markdown: paragraphs, headings, lists, quotes, rules and code blocks` `ts: markdown: what the hand check showed reads as a list with bold` `ts: markdown: an answer still streaming reads sensibly at every point` `ts: markdown: random input never throws and loses no letters outside markup` | CI; real-click 2026-10-12 |
+| C33 | Links and markup in answers | A link is its words and address as text, never clickable (no `<a>` in the panel); tags and hidden-character markers stay text | frontend, integration, real-click | `ts: markdown: links are their words and address as text, never a link` `ts: markdown: tags, hidden-character markers and odd stars stay as text` `frontend_never_parses_strings_as_html` | CI; real-click 2026-10-12 |
 
 ## macOS
 
