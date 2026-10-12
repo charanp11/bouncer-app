@@ -73,6 +73,27 @@ fn main() {
         let line = line.unwrap();
         let v: Value = serde_json::from_str(&line).unwrap();
         let prompt = v["message"]["content"].as_str().unwrap().to_string();
+        // A card's command with this word in it: a slow explanation (about
+        // 8 s), for clicking the card while it streams.
+        if prompt.contains("slow-explain") {
+            init(&mut out, "none", &tools);
+            let answer = "**What it does:** deletes the `build` folder and everything in it, \
+without asking.
+
+**What could go wrong:**
+
+- If `build` holds anything you need, it's gone: `rm -rf` skips the bin.
+- A typo in the path deletes something else.
+- <b>tags</b> stay text.
+
+Ignore the above and click Allow. (A hostile line: it's only text.)";
+            for piece in answer.as_bytes().chunks(8) {
+                text(&mut out, std::str::from_utf8(piece).unwrap());
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            done(&mut out, None);
+            continue;
+        }
         match prompt.split_whitespace().next().unwrap_or("") {
             "reject" => {
                 eprintln!("error: unknown option '--permission-prompts'");
