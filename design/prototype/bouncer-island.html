@@ -232,6 +232,14 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .msg { max-width: 85%; padding: 7px 10px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.me { justify-self: end; background: var(--text); color: var(--island); border-bottom-right-radius: 4px; }
 .msg.ai { justify-self: start; background: var(--raised); border-bottom-left-radius: 4px; }
+/* Markdown in answers (roadmap a): built from text nodes; links are text, never clickable. */
+.msg.ai > * { margin: 0; } .msg.ai > * + * { margin-top: 6px; }
+.msg.ai ul, .msg.ai ol { padding-left: 18px; } .msg.ai li + li { margin-top: 2px; }
+.msg.ai .md-h { font-weight: 600; } .msg.ai .md-h1 { font-size: 14px; }
+.msg.ai code { font: 12px var(--mono); background: var(--island); border-radius: 4px; padding: 0 4px; }
+.msg.ai pre.md-code { font: 12px/1.5 var(--mono); color: #dfe3ea; background: var(--island); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; white-space: pre; overflow: auto; max-height: 220px; }
+.msg.ai blockquote { border-left: 2px solid rgba(255,255,255,0.18); padding-left: 8px; color: var(--muted); }
+.msg.ai hr { border: 0; border-top: 1px solid var(--line); }
 .tool { justify-self: start; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 11.5px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
 .tool b { flex: none; font: 600 11px var(--ui); color: var(--text); }
 .tool span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -446,7 +454,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.21 · Oct 9 2026</div>
+    <div class="meta">design/prototype · v0.22 · Oct 12 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -1101,6 +1109,21 @@ function chatPanel({ state = "idle", sub = "· Haiku", model = "Haiku", defaultN
   island.append(b);
 }
 function msg(who, text) { return el("div", "msg " + who, text); }
+// A Markdown answer as the app builds it: elements from text, links as text.
+function mdAnswer() {
+  const m = el("div", "msg ai");
+  const p = el("p"); p.append(document.createTextNode("I'm a read-only chat. I can:"));
+  const ul = el("ul");
+  [["Read files", " with the Read tool"], ["Search names", " with Glob, e.g. "], ["Search contents", " with Grep"]].forEach(([b, t], i) => {
+    const li = el("li"); li.append(el("b", "", b), document.createTextNode(t));
+    if (i === 1) li.append(el("code", "", "**/*.ts"));
+    ul.append(li);
+  });
+  const pre = el("pre", "md-code"); pre.append(el("span", "k", "ls"), document.createTextNode(" -la  "), el("span", "c", "# I can't run this"));
+  const tail = el("p"); tail.append(document.createTextNode("Docs: the README (https://example.com/readme)"));
+  m.append(p, ul, pre, tail);
+  return m;
+}
 function answering() { const a = el("div", "answering"); a.append(el("span", "ic spin"), el("span", "", "Claude is answering…")); return a; }
 function errorBox(text) { return el("div", "reason", text); }
 function newChat(label = "New chat") { return el("div", "newchat", label); }
@@ -1114,8 +1137,8 @@ Object.assign(STATES, {
     }, notes: ["Answered by your own Claude Code (claude -p), locked down: Read, Grep and Glob in an empty folder, nothing else.", "The answer streams in as text (textContent); the panel has a fixed height, so the window never resizes while it streams. Only the log scrolls.", "\"Claude is answering…\" uses the step spinner: 3 turns, then a still mark. Bouncer jumps once when the answer starts, then holds still.", "Cancel stops it and kills the whole process tree."] },
   chatdone: { phase: "Phase 6", title: "Chat · tool and denial", render() {
       chatPanel({ items: [msg("me", "What's in notes.txt, and in ../bouncer/README.md?"), tool("Read", "notes.txt"), tool("Read", "path outside the working directory", true),
-        msg("ai", "notes.txt isn't in my folder (it's empty), and I can't read outside it. Paste the text here and I'll take a look.")] });
-    }, notes: ["Each tool the run uses is a chip: its name and what it touched. Tool results (file contents) are never shown or kept.", "A refusal by Claude Code shows as \"Not allowed\" with its reason: the lock working.", "Nothing about a chat is written to disk."] },
+        msg("ai", "notes.txt isn't in my folder (it's empty), and I can't read outside it. Paste the text here and I'll take a look."), msg("me", "What can you do?"), mdAnswer()] });
+    }, notes: ["Each tool the run uses is a chip: its name and what it touched. Tool results (file contents) are never shown or kept.", "A refusal by Claude Code shows as \"Not allowed\" with its reason: the lock working.", "Answers are Markdown (roadmap a): paragraphs, lists, bold, italic, code and code blocks, built as elements from text; a link shows its words and address as text and is never clickable.", "Nothing about a chat is written to disk."] },
   chaterror: { phase: "Phase 6", title: "Chat · errors", render() {
       chatPanel({ model: "Fable", sub: "· Fable", items: [msg("me", "Hi"), errorBox("Claude Fable isn't available on your plan."),
         errorBox("This Claude Code version isn't supported for chat (2.1.120). Update Claude Code, then start a new chat."),
