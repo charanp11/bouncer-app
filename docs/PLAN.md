@@ -2716,7 +2716,7 @@ Phase 6 is done when:
 - [x] A rejected flag shows "isn't supported for chat" and never retries without it
 - [x] Nothing about a chat is written to disk
 - [x] fmt, clippy, tests and `check-tests` green locally and in CI
-- [ ] Hand check 3 (Charan): one real chat on the dev app (`docs/TESTS.md`)
+- [x] Hand check 3 (Charan): one real chat on the dev app (`docs/TESTS.md`), 2026-10-12
 - [ ] 6d: start a chat from a copy of a session
 
 **6c (2026-10-12).** No Windows user name left in the tree: the sample
@@ -2724,6 +2724,19 @@ paths in four Rust tests now use `dev`, and the island's Phase 2 approval
 screenshot has its path covered and labelled (the chat fixtures' plan use
 was made neutral in #22). README: a Chat section. Hand check 3 written for
 Charan.
+
+Manual checks:
+
+- 2026-10-12, hand check 3 (Charan, dev app, playground rules, Claude Code
+  2.1.295, Haiku): passed. Path confirmed in Settings, Esc back to the chat;
+  asked what it can do, it said read-only (Read, Glob, Grep; no edits,
+  commands or web); `claude.exe` went from 13 to 14 with the chat open and
+  back to 13 after Quit; Cancel showed "Cancelled." and "New chat"; + cleared
+  the panel; the chat folder stayed empty. Step 4: Haiku didn't try the read
+  at all (it said `../rules.toml` is outside its folder), so no "Read" chip
+  or denial showed: the fixed read-only line makes it decline first. The
+  lock itself (a read attempt denied) is covered by C16 / C30. Seen: answers
+  show Markdown as raw text (`**bold**`, `- ` lists, backticks).
 
 ## Phase 7 — File drop (~1 week)
 
