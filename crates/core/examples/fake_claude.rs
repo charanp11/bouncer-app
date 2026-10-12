@@ -12,6 +12,7 @@
 //! - `error`: answers with Claude Code's plan error
 //! - `slow N`: streams a word every 50 ms for N seconds (the panel's CPU check)
 //! - `demo`: a tool, a denial, then an answer (the panel's screenshots)
+//! - `md`: a Markdown answer, streamed in small pieces
 //! - anything else: echoes argv, the environment's names, the prompt and the
 //!   raw stdin line as the answer text
 
@@ -129,6 +130,29 @@ fn main() {
                         },
                     );
                     std::thread::sleep(Duration::from_millis(50));
+                }
+                done(&mut out, None);
+            }
+            "md" => {
+                init(&mut out, "none", &tools);
+                let answer = "## What I can do
+
+I'm a **read-only** chat. I can:
+
+- **Read files** with the Read tool
+- **Search names** with Glob, e.g. `**/*.ts`
+- *Search contents* with Grep
+
+```shell
+ls -la  # I can't run this
+```
+
+> Paste text here and I'll look.
+
+Docs: [the README](https://example.com/readme) and <b>tags stay text</b>.";
+                for piece in answer.as_bytes().chunks(24) {
+                    text(&mut out, std::str::from_utf8(piece).unwrap());
+                    std::thread::sleep(Duration::from_millis(60));
                 }
                 done(&mut out, None);
             }
