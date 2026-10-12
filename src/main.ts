@@ -12,7 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Item } from "./chat.ts";
+import { apply, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
@@ -557,6 +557,8 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
     if (offer) actions.append(alwaysButton(request));
     c.append(actions);
   }
+  // Below the buttons, so it never moves them.
+  if (EXPLAINED_TOOLS.has(request.tool ?? "")) c.append(explainPart(request));
   const next = queue[1];
   if (next) c.append(el("div", "after", `Next: ${what(next.tool)} in ${folder(next.project)}`));
   return c;
@@ -1188,6 +1190,9 @@ function draw(view: View) {
     return;
   }
 
+  // The backend stops an explanation whose card went; forget it here too.
+  if (explaining && !view.queue.some((r) => r.id === explaining?.id)) explaining = null;
+
   const first = view.queue[0];
   if (first) {
     if (first.id !== front.id) front = { id: first.id, since: 0 };
@@ -1302,6 +1307,115 @@ function draw(view: View) {
   island.replaceChildren(pill(mood(view, done), n ? plural(n, "session") : "No sessions", " · all quiet", true, badge));
 }
 
+// ---- "Explain this command" (roadmap b) -------------------------------------
+// The locked chat explains the card's shell command (the backend takes the
+// text from the waiting request; the page sends only its ID). It never
+// decides: Deny and Allow work as always while it answers, its box sits
+// below them with a fixed height (so they never move and the window doesn't
+// resize while it streams), and its text is updated in place, so the card
+// is never rebuilt under the mouse. The keyboard stays on its Stop / Hide
+// button (one key), never Allow.
+
+let explaining: Explain | null = null;
+/** When it started: a spinner drawn again carries on from there. */
+let explainSince = 0;
+
+/** The spinner's three turns (styles.css, `.ic.spin`). */
+const SPIN_MS = 2400;
+
+/** The explanation's box opened or closed: the card's layout changed, so
+ * Allow (and an open "Add rule and allow") arms again from now. */
+function rearm(id: string) {
+  const now = performance.now();
+  if (front.id === id && front.since) front.since = now;
+  if (always.id === id) always.since = now;
+}
+
+function explainPart(request: Request): HTMLElement {
+  const key = `explain:${request.id}`;
+  const x = explaining?.id === request.id ? explaining : null;
+  if (!x) {
+    const button = el("button", "btn always explainbtn", "Explain this command");
+    button.dataset.key = key;
+    button.addEventListener("click", () => {
+      explaining = explainStart(request.id);
+      explainSince = performance.now();
+      rearm(request.id);
+      invoke("explain", { id: request.id, model: chat.model }).catch((code) => {
+        explaining = explainRefused(explaining, request.id, String(code));
+        fillExplain();
+      });
+      if (current) render(current);
+    });
+    return button;
+  }
+  const box = el("div", "explain");
+  box.dataset.explain = request.id;
+  const top = el("div", "xhead");
+  top.append(el("b", "", "Claude's explanation"), el("span", "", "Can be wrong. It never decides: you do."));
+  const body = el("div", "xbody");
+  // Reachable with Tab, so the keyboard can scroll it.
+  body.tabIndex = 0;
+  body.setAttribute("role", "region");
+  body.setAttribute("aria-label", "Explanation");
+  const foot = el("div", "xfoot");
+  const button = el("button", "btn small");
+  button.dataset.key = key;
+  button.addEventListener("click", () => {
+    if (explaining?.busy) {
+      invoke("explain_stop");
+      return;
+    }
+    explaining = null;
+    rearm(request.id);
+    if (current) render(current);
+  });
+  foot.append(el("span", "xstate"), button);
+  box.append(top, body, foot);
+  fillExplain(box);
+  return box;
+}
+
+/** Shows the explanation in its box, in place (nothing else is rebuilt). */
+function fillExplain(box = island.querySelector<HTMLElement>(".explain")) {
+  const x = explaining;
+  if (!box || !x || box.dataset.explain !== x.id) return;
+  const body = box.querySelector<HTMLElement>(".xbody")!;
+  const end = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+  if (x.text) answerInto(body, x.text);
+  else body.replaceChildren(el("p", "chatnone", x.busy ? "" : "No explanation."));
+  if (end) body.scrollTop = body.scrollHeight;
+  // The status only when it changes: a spinner made again would turn again.
+  const state = x.busy ? "busy" : x.error ? `error:${x.error}` : "done";
+  if (box.dataset.state !== state) {
+    box.dataset.state = state;
+    const status = box.querySelector<HTMLElement>(".xstate")!;
+    if (x.busy) {
+      // Three turns from the start, then still, however often the card is drawn.
+      const spin = el("span", "ic spin");
+      const t = performance.now() - explainSince;
+      spin.style.animationDelay = `${-t}ms, ${SPIN_MS - t}ms`;
+      status.replaceChildren(spin, el("span", "", "Claude is explaining…"));
+    }
+    else if (x.error) {
+      status.replaceChildren();
+      agentText(status, x.error);
+    } else status.replaceChildren("Read it, then decide.");
+    status.className = x.error ? "xstate err" : "xstate";
+    box.querySelector<HTMLElement>(".xfoot button")!.textContent = x.busy ? "Stop" : "Hide";
+  }
+}
+
+function onExplain(e: ExplainEvent) {
+  const before = explaining;
+  explaining = explainApply(explaining, e);
+  if (explaining === before) return;
+  if (explaining && !explaining.busy && !explaining.error && explaining.text) {
+    announcer.textContent = `Explanation: ${explaining.text}`;
+  }
+  fillExplain();
+}
+
 // ---- chat (Phase 6) --------------------------------------------------------
 // Your own Claude Code, locked down (crates/core/src/chat.rs). The transcript
 // is held here in memory only and drawn with textContent; a streaming answer
@@ -1377,7 +1491,11 @@ function sendChat() {
 
 /** A chat event: kept even while a card or Settings has the screen, drawn
  * now if the panel is showing. */
-function onChat(e: ChatEvent) {
+function onChat(e: ChatEvent | ExplainEvent) {
+  if ("explain" in e) {
+    onExplain(e);
+    return;
+  }
   const before = chat;
   chat = apply(chat, e);
   if (chat === before || !current?.chat || current.queue.length || current.settings || toast) return;
@@ -1839,7 +1957,7 @@ function report() {
 }
 new ResizeObserver(report).observe(stage);
 
-const chatFeed = new Channel<ChatEvent>();
+const chatFeed = new Channel<ChatEvent | ExplainEvent>();
 chatFeed.onmessage = onChat;
 invoke("chat_subscribe", { feed: chatFeed });
 

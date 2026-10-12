@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { apply, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent } from "./chat.ts";
+import { apply, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
 
 const run = (chat: Chat, events: Omit<ChatEvent, "chat">[]): Chat =>
   events.reduce((c, e) => apply(c, { ...e, chat: c.id } as ChatEvent), chat);
@@ -159,4 +159,61 @@ test("chat: Esc in Settings opened from the chat closes only Settings", () => {
   assert.equal(escapeCloses({ settings: true, chat: false, queue: [] }), "all");
   assert.equal(escapeCloses({ settings: false, chat: true, queue: [] }), "all");
   assert.equal(escapeCloses({ settings: true, chat: true, queue: [{}] }), "all", "a card up: as before");
+});
+
+test("explain: the answer joins as text; another card's events, and anything after the end, are ignored", () => {
+  let x: Explain | null = explainStart("aa");
+  const ev = (e: Omit<ExplainEvent, "explain">, id = "aa") => (x = explainApply(x, { ...e, explain: id } as ExplainEvent));
+  ev({ kind: "ready", model: "claude-haiku-5-5", version: "2.1.295" });
+  ev({ kind: "text", text: "Deletes <b>everything</b>" });
+  ev({ kind: "tool", name: "Read", target: "x" });
+  ev({ kind: "text", text: " in your home." }, "bb");
+  ev({ kind: "text", text: " under ~." });
+  assert.deepEqual(x, { id: "aa", text: "Deletes <b>everything</b> under ~.", busy: true, error: null });
+  ev({ kind: "done", error: null });
+  ev({ kind: "text", text: " late" });
+  assert.deepEqual(x, { id: "aa", text: "Deletes <b>everything</b> under ~.", busy: false, error: null });
+  assert.equal(explainApply(null, { explain: "aa", kind: "text", text: "x" }), null);
+});
+
+test("explain: Stop, a stopped run and a refused start end it in words", () => {
+  const stopped = (stop: Stop) => explainApply(explainStart("aa"), { explain: "aa", kind: "stopped", stop });
+  assert.equal(stopped({ why: "cancelled" })?.error, "Stopped.");
+  assert.equal(stopped({ why: "timeout" })?.error, "Stopped: no answer within 5 minutes.");
+  assert.equal(stopped({ why: "cancelled" })?.busy, false);
+  assert.equal(explainApply(explainStart("aa"), { explain: "aa", kind: "done", error: "Model not on your plan" })?.error, "Model not on your plan");
+  assert.equal(explainRefused(explainStart("aa"), "aa", "unconfirmed")?.error, "Confirm the claude path in Settings first.");
+  assert.equal(explainRefused(explainStart("aa"), "aa", "gone")?.error, "That request isn't waiting any more.");
+  assert.equal(explainRefused(explainStart("aa"), "aa", "tool")?.error, "Only commands can be explained.");
+  // A refusal for an explanation that's no longer on screen changes nothing.
+  const other = explainStart("bb");
+  assert.equal(explainRefused(other, "aa", "gone"), other);
+  assert.deepEqual([...EXPLAINED_TOOLS], ["Bash", "PowerShell"]);
+});
+
+test("explain: below the buttons at a fixed height, filled in place, never deciding", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  const rule = (sel: string) => {
+    const at = css.indexOf(`\n${sel} {`);
+    assert.ok(at >= 0, `no rule ${sel}`);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  // A fixed height: the window holds still while it streams; only the text scrolls.
+  assert.match(rule(".explain .xbody"), /\n  height: 132px;/);
+  assert.match(rule(".explain .xbody"), /overflow-y: auto;/);
+  assert.match(rule(".explain .xbody"), /overflow-wrap: anywhere;/);
+  // Below Deny / Allow in the card, so they never move.
+  const card = main.slice(main.indexOf("\nfunction card("), main.indexOf("\nfunction relative("));
+  assert.ok(card.indexOf("c.append(explainPart(request))") > card.indexOf("c.append(actions)"));
+  // The explanation section never answers anything, and its events never redraw the card.
+  const section = main.slice(main.indexOf("let explaining: Explain"), main.indexOf("// ---- chat (Phase 6)"));
+  for (const call of ['"decide"', '"always"', "decide(", "allow: true"]) assert.ok(!section.includes(call), call);
+  const onExplain = section.slice(section.indexOf("function onExplain"));
+  assert.ok(!onExplain.includes("render("), "filled in place");
+  // Explain, Stop and Hide are one control for the keyboard (it stays put; never on Allow).
+  assert.equal(section.match(/dataset\.key = key;/g)?.length, 2);
+  assert.match(section, /const key = `explain:\$\{request\.id\}`;/);
+  // Only the request ID goes to the backend, never the command text.
+  assert.match(section, /invoke\("explain", \{ id: request\.id, model: chat\.model \}\)/);
 });

@@ -138,6 +138,10 @@ export function sendError(code: string): string {
       return "That message is too long.";
     case "ended":
       return "That chat ended. Send again to start a new one.";
+    case "gone":
+      return "That request isn't waiting any more.";
+    case "tool":
+      return "Only commands can be explained.";
     default:
       return code;
   }
@@ -181,4 +185,57 @@ export function heldCard(held: string, card: string | null, newCard: boolean, ha
   if (card && newCard && cardFocus(had) === "nowhere") return card;
   if (!card || card !== held || (had && !newCard)) return "";
   return held;
+}
+
+// ---- "Explain this command" (roadmap b) -------------------------------------
+// The locked chat explains a waiting card's shell command. It only reads:
+// nothing here can answer the card, and the card's buttons never wait on it.
+
+/** Cards whose command can be explained (the backend checks again). */
+export const EXPLAINED_TOOLS = new Set(["Bash", "PowerShell"]);
+
+/** An explanation's event: a chat event tagged with the card's request ID. */
+export type ExplainEvent = { explain: string } & (
+  | { kind: "ready"; model: string; version: string }
+  | { kind: "text"; text: string }
+  | { kind: "tool"; name: string; target: string }
+  | { kind: "denied"; tool: string; reason: string }
+  | { kind: "usage"; fiveHour: number | null; sevenDay: number | null }
+  | { kind: "done"; error: string | null }
+  | { kind: "stopped"; stop: Stop }
+);
+
+export type Explain = {
+  /** The card's request ID. */
+  id: string;
+  text: string;
+  /** Still answering (Stop shows); else Hide. */
+  busy: boolean;
+  /** Why it stopped short, in words. */
+  error: string | null;
+};
+
+export function explainStart(id: string): Explain {
+  return { id, text: "", busy: true, error: null };
+}
+
+/** An event for the explanation on screen; anything else is ignored. */
+export function explainApply(x: Explain | null, e: ExplainEvent): Explain | null {
+  if (!x || e.explain !== x.id || !x.busy) return x;
+  switch (e.kind) {
+    case "text":
+      return { ...x, text: x.text + e.text };
+    case "done":
+      return { ...x, busy: false, error: e.error };
+    case "stopped":
+      return { ...x, busy: false, error: e.stop.why === "cancelled" ? "Stopped." : stopText(e.stop) };
+    default:
+      // Tools, usage and the model name aren't shown for an explanation.
+      return x;
+  }
+}
+
+/** Starting it was refused (`code` from explain). */
+export function explainRefused(x: Explain | null, id: string, code: string): Explain | null {
+  return x?.id === id && x.busy ? { ...x, busy: false, error: sendError(code) } : x;
 }
