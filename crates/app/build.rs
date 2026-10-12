@@ -21,6 +21,8 @@ fn main() {
         "chat_send",
         "chat_cancel",
         "chat_new",
+        "explain",
+        "explain_stop",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");

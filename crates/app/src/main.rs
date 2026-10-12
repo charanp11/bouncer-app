@@ -132,7 +132,9 @@ fn main() {
             chat::chat_confirm,
             chat::chat_send,
             chat::chat_cancel,
-            chat::chat_new
+            chat::chat_new,
+            explain,
+            explain_stop
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -196,7 +198,7 @@ fn main() {
         .run(|app, event| {
             // Quitting ends the chat: its whole process tree is killed.
             if let tauri::RunEvent::Exit = event {
-                app.state::<chat::Chats>().end();
+                app.state::<chat::Chats>().end_all();
             }
         });
 }
@@ -347,6 +349,9 @@ fn greyed(rgba: &[u8]) -> Vec<u8> {
 /// nothing to show, a pill while sessions run, open with a request or when
 /// the user opened it.
 fn show(app: &AppHandle, view: Value) {
+    if let Some(chats) = app.try_state::<chat::Chats>() {
+        chats.keep_explaining(&waiting(&view));
+    }
     send(app, view);
     // Window work happens on the main thread only: this runs on relay
     // connection threads too, and window calls from them wait for the main
@@ -360,6 +365,16 @@ fn show(app: &AppHandle, view: Value) {
         // The window is not focusable, so showing it never takes the keyboard.
         let _ = window.show();
     });
+}
+
+/// The request IDs of the cards waiting in `view`.
+fn waiting(view: &Value) -> Vec<&str> {
+    view["queue"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["id"].as_str())
+        .collect()
 }
 
 /// Sends the page the view with the island's own state added; no window work.
@@ -558,6 +573,43 @@ fn decide(island: State<'_, Island>, id: String, allow: bool) -> Result<(), Stri
 #[tauri::command]
 fn always(island: State<'_, Island>, id: String) -> Result<(), String> {
     island.desk.always(&id).map_err(str::to_owned)
+}
+
+/// "Explain this command" on the card `id`: its text is taken from the
+/// waiting request itself (never from the page) and explained by the locked
+/// chat. Only shell commands. It never answers the card; Allow and Deny keep
+/// working while it runs. Errors are the chat's short codes, or `gone`
+/// (the card isn't waiting) and `tool` (not a shell command).
+#[tauri::command(async)]
+fn explain(
+    app: AppHandle,
+    island: State<'_, Island>,
+    chats: State<'_, chat::Chats>,
+    id: String,
+    model: String,
+) -> Result<(), String> {
+    let view = island.desk.view();
+    let request = waiting_request(&view, &id).ok_or("gone")?;
+    let prompt = bouncer_core::chat::explain_prompt(
+        request["tool"].as_str().unwrap_or(""),
+        request["text"].as_str().unwrap_or(""),
+    )
+    .ok_or("tool")?;
+    chat::explain(&app, &chats, id, prompt, &model)?;
+    // The card may have gone while it started.
+    chats.keep_explaining(&waiting(&island.desk.view()));
+    Ok(())
+}
+
+/// The waiting request `id` in `view`, if it is one.
+fn waiting_request<'a>(view: &'a Value, id: &str) -> Option<&'a Value> {
+    view["queue"].as_array()?.iter().find(|r| r["id"] == id)
+}
+
+/// Stop on the card's explanation.
+#[tauri::command]
+fn explain_stop(chats: State<'_, chat::Chats>) {
+    chats.stop_explaining();
 }
 
 /// Moves the island with the mouse while the button is held (the page calls
@@ -889,6 +941,8 @@ fn tray(",
             "chat-send",
             "chat-cancel",
             "chat-new",
+            "explain",
+            "explain-stop",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()
@@ -898,6 +952,43 @@ fn tray(",
             .collect();
         assert_eq!(granted, ours.map(|c| format!("allow-{c}")));
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
+    }
+
+    /// The explanation follows the queue: only a waiting card's text is
+    /// explained, and a view without its card stops it.
+    #[test]
+    fn only_a_waiting_cards_text_is_explained() {
+        let view = json!({"queue": [
+            {"id": "aa", "tool": "Bash", "text": "ls"},
+            {"id": "bb", "tool": "Write", "text": "x"},
+        ]});
+        assert_eq!(waiting(&view), ["aa", "bb"]);
+        assert_eq!(waiting(&json!({"queue": []})), Vec::<&str>::new());
+        assert_eq!(waiting(&json!({})), Vec::<&str>::new());
+        assert_eq!(waiting_request(&view, "aa").unwrap()["text"], "ls");
+        assert!(waiting_request(&view, "cc").is_none());
+        assert!(waiting_request(&json!({}), "aa").is_none());
+        // Only shell commands get a prompt.
+        let bb = waiting_request(&view, "bb").unwrap();
+        assert!(bouncer_core::chat::explain_prompt(bb["tool"].as_str().unwrap(), "x").is_none());
+        // Every view goes through `show`, which stops an explanation whose
+        // card is gone before anything else.
+        let src = include_str!("main.rs");
+        let show = &src[src
+            .find(
+                "
+fn show(",
+            )
+            .unwrap()..];
+        let body = &show[..show
+            .find(
+                "
+}
+",
+            )
+            .unwrap()];
+        let keep = body.find("keep_explaining(&waiting(&view))").unwrap();
+        assert!(keep < body.find("send(app, view)").unwrap());
     }
 
     #[test]

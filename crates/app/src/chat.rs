@@ -4,7 +4,7 @@
 //! the page has moved on from is ignored. Nothing is written to disk but
 //! the confirmed `claude` path.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -19,6 +19,10 @@ pub struct Chats {
     run: Mutex<Option<Run>>,
     /// The plan's default model, as the last Default run named it.
     default_model: Mutex<Option<String>>,
+    /// The explanation running: its card's request ID, its run number (a
+    /// card can be explained again) and how to stop it.
+    explain: Mutex<Option<(String, u64, Cancel)>>,
+    explain_runs: AtomicU64,
 }
 
 struct Run {
@@ -36,6 +40,12 @@ impl Chats {
         if let Some(run) = self.run.lock().unwrap().take() {
             run.cancel.cancel();
         }
+    }
+
+    /// Quitting: the chat and the explanation, if any, are killed.
+    pub fn end_all(&self) {
+        self.end();
+        self.stop_explaining();
     }
 }
 
@@ -160,9 +170,8 @@ pub fn chat_new(chats: State<'_, Chats>) {
 /// 60–80% of a core.
 const BATCH: Duration = Duration::from_millis(500);
 
-/// Owns one chat: answers each message, sends its events to the page (text
-/// gathered into `BATCH`es), and ends with the chat (dropping it kills the
-/// tree).
+/// Owns one chat: answers each message, sends its events to the page, and
+/// ends with the chat (dropping it kills the tree).
 fn work(
     app: AppHandle,
     id: u32,
@@ -173,10 +182,35 @@ fn work(
 ) {
     let chats = app.state::<Chats>();
     let feed = |out: &Out| {
-        if let Some(feed) = chats.feed.lock().unwrap().as_ref() {
-            let _ = feed.send(event(id, out));
+        if let (Out::Ready { model: name, .. }, Model::Default) = (out, model) {
+            *chats.default_model.lock().unwrap() = Some(name.clone());
         }
+        chats.send(event(id, out));
     };
+    for prompt in inbox {
+        if chat.send(&prompt).is_err() {
+            break;
+        }
+        let last = answer(&mut chat, &feed);
+        // Free before the page hears, so it can send the next message at once.
+        busy.store(false, Ordering::SeqCst);
+        let ended = matches!(last, Out::Stopped(_));
+        if ended {
+            let mut run = chats.run.lock().unwrap();
+            if run.as_ref().is_some_and(|r| r.chat == id) {
+                *run = None;
+            }
+        }
+        feed(&last);
+        if ended {
+            return;
+        }
+    }
+}
+
+/// Streams one message's answer to `feed`, text gathered into `BATCH`es,
+/// and returns its last event (`Done` or `Stopped`) unsent.
+fn answer(chat: &mut Chat, feed: &dyn Fn(&Out)) -> Out {
     let mut text = String::new();
     let mut sent = Instant::now()
         .checked_sub(BATCH)
@@ -187,51 +221,114 @@ fn work(
             *sent = Instant::now();
         }
     };
-    for prompt in inbox {
-        if chat.send(&prompt).is_err() {
-            break;
-        }
-        loop {
-            let due = sent + BATCH;
-            let out = match chat.recv_by((!text.is_empty()).then_some(due)) {
-                None => {
+    loop {
+        let due = sent + BATCH;
+        match chat.recv_by((!text.is_empty()).then_some(due)) {
+            None => flush(&mut text, &mut sent),
+            Some(Out::Text(t)) => {
+                text.push_str(&t);
+                if Instant::now() >= due {
                     flush(&mut text, &mut sent);
-                    continue;
-                }
-                Some(Out::Text(t)) => {
-                    text.push_str(&t);
-                    if Instant::now() >= due {
-                        flush(&mut text, &mut sent);
-                    }
-                    continue;
-                }
-                Some(out) => {
-                    flush(&mut text, &mut sent);
-                    out
-                }
-            };
-            if let (Out::Ready { model: name, .. }, Model::Default) = (&out, model) {
-                *chats.default_model.lock().unwrap() = Some(name.clone());
-            }
-            let ended = matches!(out, Out::Stopped(_));
-            if ended || matches!(out, Out::Done { .. }) {
-                busy.store(false, Ordering::SeqCst);
-            }
-            if ended {
-                let mut run = chats.run.lock().unwrap();
-                if run.as_ref().is_some_and(|r| r.chat == id) {
-                    *run = None;
                 }
             }
-            feed(&out);
-            if ended {
-                return;
-            }
-            if matches!(out, Out::Done { .. }) {
-                break;
+            Some(out) => {
+                flush(&mut text, &mut sent);
+                if matches!(out, Out::Done { .. } | Out::Stopped(_)) {
+                    return out;
+                }
+                feed(&out);
             }
         }
     }
+}
+
+/// "Explain this command" on a permission card: one message in its own
+/// locked chat (the same command line, `claude` and folder as the panel's),
+/// streamed to the page tagged with the card's request ID. It never answers
+/// the card: it only reads its text. Ends when answered, on Stop, when the
+/// card leaves (`keep_explaining`), at quit, or when another one starts.
+pub fn explain(
+    app: &AppHandle,
+    chats: &Chats,
+    id: String,
+    prompt: String,
+    model: &str,
+) -> Result<(), String> {
+    let model = Model::parse(model).ok_or("model")?;
+    if prompt.len() > chat::MAX_PROMPT {
+        return Err("too-long".into());
+    }
+    let bin = match Claude::now() {
+        Claude::Confirmed(bin) => bin,
+        Claude::Missing => return Err("missing".into()),
+        Claude::Unconfirmed(_) | Claude::Changed(_) => return Err("unconfirmed".into()),
+    };
+    let dir = chat::folder().ok_or("no chat folder")?;
+    let mut slot = chats.explain.lock().unwrap();
+    if let Some((_, _, old)) = slot.take() {
+        old.cancel();
+    }
+    let mut run = Chat::start(&bin, &dir, model, Limits::default())?;
+    let n = chats.explain_runs.fetch_add(1, Ordering::SeqCst);
+    *slot = Some((id.clone(), n, run.cancel_handle()));
+    drop(slot);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let chats = app.state::<Chats>();
+        let feed = |out: &Out| chats.send(explained(&id, out));
+        let last = match run.send(&prompt) {
+            Ok(()) => answer(&mut run, &feed),
+            Err(e) => Out::Done { error: Some(e) },
+        };
+        {
+            let mut slot = chats.explain.lock().unwrap();
+            if slot.as_ref().is_some_and(|(_, m, _)| *m == n) {
+                *slot = None;
+            }
+        }
+        feed(&last);
+        // `run` drops here: its whole tree is killed.
+    });
+    Ok(())
+}
+
+impl Chats {
+    fn send(&self, event: Value) {
+        if let Some(feed) = self.feed.lock().unwrap().as_ref() {
+            let _ = feed.send(event);
+        }
+    }
+
+    /// Stops the explanation, if any (Stop on its card).
+    pub fn stop_explaining(&self) {
+        if let Some((_, _, run)) = self.explain.lock().unwrap().take() {
+            run.cancel();
+        }
+    }
+
+    /// Stops the explanation unless its card is still waiting (`waiting`:
+    /// the queue's request IDs). Called with every view, so it ends as soon
+    /// as the card is answered, times out or goes.
+    pub fn keep_explaining(&self, waiting: &[&str]) {
+        let mut slot = self.explain.lock().unwrap();
+        if slot
+            .as_ref()
+            .is_some_and(|(id, _, _)| !waiting.contains(&id.as_str()))
+            && let Some((_, _, run)) = slot.take()
+        {
+            run.cancel();
+        }
+    }
+}
+
+/// An explanation's event as the page reads it (`src/chat.ts`,
+/// `ExplainEvent`): a chat event tagged with the card's request ID instead
+/// of a chat number.
+fn explained(id: &str, out: &Out) -> Value {
+    let mut v = event(0, out);
+    v.as_object_mut().unwrap().remove("chat");
+    v["explain"] = id.into();
+    v
 }
 
 /// One chat event as the page reads it (`src/chat.ts`, `ChatEvent`).
@@ -338,6 +435,24 @@ mod tests {
         ] {
             assert_eq!(stopped(&stop)["why"], why);
         }
+    }
+
+    /// An explanation's events are chat events tagged with the card's
+    /// request ID, never a chat number (the panel's chat ignores them).
+    #[test]
+    fn explanation_events_carry_the_card_not_a_chat() {
+        assert_eq!(
+            explained("ab12", &Out::Text("<b>rm</b>".into())),
+            json!({"explain": "ab12", "kind": "text", "text": "<b>rm</b>"})
+        );
+        assert_eq!(
+            explained("ab12", &Out::Done { error: None }),
+            json!({"explain": "ab12", "kind": "done", "error": null})
+        );
+        assert_eq!(
+            explained("ab12", &Out::Stopped(Stop::Cancelled)),
+            json!({"explain": "ab12", "kind": "stopped", "stop": {"why": "cancelled"}})
+        );
     }
 
     #[test]
