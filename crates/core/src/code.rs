@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn edit_becomes_a_numbered_diff() {
         let input = json!({
-            "file_path": r"C:\Users\chara\Desktop\Full Time\x\crates\core\src\approvals.rs",
+            "file_path": r"C:\Users\dev\Desktop\Full Time\x\crates\core\src\approvals.rs",
             "old_string": "use x;\n\npub const ARM: u64 = 400;\nfn a() {}\n    since > ARM",
             "new_string": "use x;\n\npub const ARM: u64 = 600;\nfn a() {}\n    since >= ARM",
         });

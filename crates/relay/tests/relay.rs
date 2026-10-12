@@ -467,7 +467,7 @@ fn windows_paths_reach_the_island_intact() {
         "paths",
         Arc::new(move |e, gone| handler.handle_until(e, gone)),
     );
-    let project = r"C:\Users\chara\Desktop\Full Time\x";
+    let project = r"C:\Users\dev\Desktop\Full Time\x";
     let input = serde_json::json!({
         "session_id": "s",
         "cwd": project,

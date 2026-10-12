@@ -1631,7 +1631,7 @@ mod tests {
         desk.handle(e.clone());
         assert_eq!(desk.view()["sessions"][0]["step"], "Running cargo test");
         e.tool = Some("Edit".into());
-        e.input = Some(json!({ "file_path": r"C:\Users\chara\Desktop\Full Time\x\src\main.rs" }));
+        e.input = Some(json!({ "file_path": r"C:\Users\dev\Desktop\Full Time\x\src\main.rs" }));
         desk.handle(e.clone());
         assert_eq!(desk.view()["sessions"][0]["step"], "Editing main.rs");
         e.tool = Some("Read".into());
