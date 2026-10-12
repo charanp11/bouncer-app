@@ -15,6 +15,7 @@ import { cue, play, tune, type Heard } from "./sound.ts";
 import { apply, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
+import { markdown, type Piece } from "./markdown.ts";
 import "./styles.css";
 
 type Line = { n: number | null; mark: string; text: string };
@@ -1380,9 +1381,11 @@ function onChat(e: ChatEvent) {
   const before = chat;
   chat = apply(chat, e);
   if (chat === before || !current?.chat || current.queue.length || current.settings || toast) return;
-  if (e.kind === "text" && liveBubble?.isConnected && before.items.at(-1)?.kind === "ai") {
-    // The backend sends text in batches (twice a second at most).
-    agentText(liveBubble, e.text);
+  const answer = chat.items.at(-1);
+  if (e.kind === "text" && liveBubble?.isConnected && before.items.at(-1)?.kind === "ai" && answer?.kind === "ai") {
+    // The backend sends text in batches (twice a second at most); the answer
+    // so far is read again, so a list or code block forms as it streams.
+    answerInto(liveBubble, answer.text);
     keepPinned();
     return;
   }
@@ -1398,13 +1401,62 @@ function keepPinned() {
   if (log && pinned) log.scrollTop = log.scrollHeight;
 }
 
+/** An answer's Markdown as elements we build, every piece of text through
+ * agentText (textContent; hidden characters as tags). Links are text. */
+function answerInto(bubble: HTMLElement, text: string) {
+  const inline = (parent: HTMLElement, pieces: Piece[]) => {
+    for (const p of pieces) {
+      const node = p.kind === "bold" ? el("b") : p.kind === "italic" ? el("i") : p.kind === "code" ? el("code") : null;
+      agentText(node ?? parent, p.text);
+      if (node) parent.append(node);
+    }
+  };
+  const blocks: HTMLElement[] = [];
+  for (const block of markdown(text)) {
+    switch (block.kind) {
+      case "p":
+      case "quote":
+      case "heading": {
+        const node = el(block.kind === "quote" ? "blockquote" : "p", block.kind === "heading" ? `md-h md-h${block.level}` : "");
+        inline(node, block.pieces);
+        blocks.push(node);
+        break;
+      }
+      case "list": {
+        const list = el(block.ordered ? "ol" : "ul");
+        if (block.ordered && block.start !== 1) list.setAttribute("start", String(block.start));
+        for (const item of block.items) {
+          const li = el("li");
+          inline(li, item);
+          list.append(li);
+        }
+        blocks.push(list);
+        break;
+      }
+      case "code": {
+        const pre = el("pre", "md-code");
+        block.text.split("\n").forEach((line, i) => {
+          if (i) pre.append("\n");
+          agentText(pre, line, block.syntax);
+        });
+        blocks.push(pre);
+        break;
+      }
+      case "rule":
+        blocks.push(el("hr"));
+        break;
+    }
+  }
+  bubble.replaceChildren(...blocks);
+}
+
 function chatItem(item: Item): HTMLElement {
   switch (item.kind) {
     case "me":
       return el("div", "msg me", item.text);
     case "ai": {
       const bubble = el("div", "msg ai");
-      agentText(bubble, item.text);
+      answerInto(bubble, item.text);
       return bubble;
     }
     case "tool": {

@@ -1504,6 +1504,62 @@ pre.cmd {
   border-bottom-left-radius: 4px;
 }
 
+/* Markdown in answers (roadmap a): elements built from text, links as text. */
+.msg.ai > * {
+  margin: 0;
+}
+
+.msg.ai > * + * {
+  margin-top: 6px;
+}
+
+.msg.ai ul,
+.msg.ai ol {
+  padding-left: 18px;
+}
+
+.msg.ai li + li {
+  margin-top: 2px;
+}
+
+.msg.ai .md-h {
+  font-weight: 600;
+}
+
+.msg.ai .md-h1 {
+  font-size: 14px;
+}
+
+.msg.ai code {
+  font: 12px var(--mono);
+  background: var(--island);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.msg.ai pre.md-code {
+  font: 12px/1.5 var(--mono);
+  color: #dfe3ea;
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  white-space: pre;
+  overflow: auto;
+  max-height: 220px;
+}
+
+.msg.ai blockquote {
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  padding-left: 8px;
+  color: var(--muted);
+}
+
+.msg.ai hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
 .tool {
   justify-self: start;
   display: inline-flex;
