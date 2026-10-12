@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 6 — Chat in the island (6a–6c merged; next: roadmap a, Markdown in chat answers — see "Roadmap after Phase 6c")**
+**Current phase: Phase 6 — Chat in the island (6a–6c and roadmap a merged, v0.6.3; next: roadmap b, 6e "Explain this request" — see "Roadmap after Phase 6c")**
 
 ## MVP scope
 
@@ -2748,7 +2748,8 @@ runs the four stages (Audit → Implement → Test → Verify) with its tests,
 | --- | --- | --- |
 | a | Markdown in chat answers | Headings, paragraphs, lists, bold / italic, inline code, code blocks (the diff pane's tokenizer): elements we build, filled with `textContent` only. Links show as text and are never clickable. No new dependency. |
 | b | 6e "Explain this request" | A button on a permission card asks the read-only chat what the command does and what could go wrong. The command goes in as text (the prompt on stdin, never argv). Allow / Deny keep working (arm delay, focus rules) while it answers; it never decides anything. A card still comes first. |
-| c | Windows release | Phase 9's Windows part, pulled forward: installer, GitHub release on tags (checksums, attestations), README with a demo GIF and install / uninstall steps, the SmartScreen note. Audit first: the signing options and their cost ($0 if possible). Before this PR: `docs/COMPARE.md` (below). |
+| c | Windows release | Phase 9's Windows part, pulled forward: installer, GitHub release on tags (checksums, attestations), README with a demo GIF and install / uninstall steps. Audit first: the signing options and their cost ($0 if possible). Includes the pre-release fixes from `docs/COMPARE.md`: measure memory use (app + WebView2, idle and with a card) next to the CPU numbers; a per-user installer (no admin) with a clean uninstall (our hook entries removed only with the diff and a yes); autostart, off by default; SmartScreen and Defender notes with checksums; Settings warns when installed hooks are missing events, one click re-installs (pulled forward from Phase 9); one shortcut that jumps to the waiting card and never approves. |
+| c2 | Questions in the island | Answer Claude Code's questions (AskUserQuestion) in the island, with Allow's 600 ms arm delay (backend and page) and its keyboard rules (focus never on an answer that acts, Enter never answers, a question arriving while typing takes no keys). Today they go to the terminal (A10). |
 | d | File drop (Phase 7) | Drop a file, then choose "Is this safe to run?" or "Ask about it". Read-only; nothing is sent before Charan confirms. |
 | e | Music (Phase 8) | Within the motion and CPU budget. |
 | f | 6d "Ask about this session" | Fork a session read-only (Phase 6 audit, "Starting from an existing session"). |
@@ -2831,7 +2832,8 @@ Phase 8 is done when:
 
 ## Phase 9 — Packaging and release (~1 week)
 
-Split by the roadmap: Windows release is c, Mac release is g, Linux is i.
+Split by the roadmap: Windows release is c (with the hooks warning, pulled
+forward), Mac release is g, Linux is i.
 
 - **Audit:** document unsigned-app warnings per OS; Defender false-positive process;
   check eligibility for free SignPath Foundation signing.
@@ -2840,7 +2842,7 @@ Split by the roadmap: Windows release is c, Mac release is g, Linux is i.
   install / verify / uninstall steps, privacy statement.
 - Settings warns when installed hooks are missing events; one click re-installs.
   (Same rules as `install-hooks`: shows the diff, asks, dated backup, atomic
-  write; only our entries change.)
+  write; only our entries change.) Pulled forward into roadmap c (Windows).
 - **Test:** install, use, uninstall on clean Windows (own PC) and macOS (friend's Mac,
   using the CI build); `settings.json` restored exactly. Narrator (and VoiceOver
   on the Mac) reads the card, the list and Settings in order with their names
