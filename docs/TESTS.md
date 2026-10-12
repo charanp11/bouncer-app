@@ -171,7 +171,7 @@ and the panel (6b, C17–C31).
 | C27 | Keyboard in the panel | Opens with the keyboard in the message box; Tab: message, Send, New chat, ×, the models, round again; Esc closes it (the chat keeps running) and gives the keyboard back | real-click | (kb check) | real-click 2026-10-09 |
 | C28 | The chat commands | Seven chat commands granted, nothing else; same CSP | unit | `tests::strict_csp_and_only_our_commands` | CI |
 | C29 | Quit or crash with a chat open | The chat's whole tree dies with the app (Job Object; force-stopped twice: no `claude` left) | integration, real-click | `dropping_a_chat_kills_the_whole_tree` | CI; real-click 2026-10-09 |
-| C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295); Hand 3 |
+| C30 | A real chat | Real clicks, npm's native `claude.exe` confirmed, Haiku in `bouncer-playground/chat`: tool chip, denial, answer, plan use; asked what it can do, it says read-only (no edits, commands or web); nothing written | real-click | (6b check) | real-click 2026-10-09 (2.1.295); Hand 3 passed 2026-10-12 |
 | C31 | Esc in Settings opened from the chat | Closes only Settings: back to the chat, the keyboard in the message box; Esc again closes the panel | frontend, real-click | `ts: chat: Esc in Settings opened from the chat closes only Settings` | CI; real-click 2026-10-09 |
 
 ## macOS
@@ -202,7 +202,7 @@ never the real `~/.claude/settings.json`.
    history…" again → wait for "Delete history" to arm → click it → the pill
    says "History wiped". Quit → the island goes; a request in the playground
    is asked in the terminal. Expected: each as said.
-3. **A real chat (about 5 min).** Not run yet. Dev app with the playground
+3. **A real chat (about 5 min).** Passed 2026-10-12 (Charan, Claude Code 2.1.295). Dev app with the playground
    rules (its chat folder is `bouncer-playground\chat`, which must be empty).
    Before you start, open Task Manager → Details and count the `claude.exe`
    lines: those are your own Claude Code sessions.
