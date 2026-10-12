@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 6 — Chat in the island (6a: chat runner)**
+**Current phase: Phase 6 — Chat in the island (6c: cleanup and docs; 6d next)**
 
 ## MVP scope
 
@@ -2709,13 +2709,21 @@ Review of #22 (Charan), fixed:
 
 Phase 6 is done when:
 
-- [ ] Chat round-trip through `claude -p` with no API key (`apiKeySource: none`)
-- [ ] Injection, hostile-output, cancel, timeout and quit tests pass on Windows and macOS
-- [ ] Chat runs can't act: no tool but Read / Grep / Glob in an empty folder, nothing prompts
-- [ ] No auth / endpoint / billing variable reaches the child; a key source stops the run
-- [ ] A rejected flag shows "isn't supported for chat" and never retries without it
-- [ ] Nothing about a chat is written to disk
-- [ ] fmt, clippy, tests and `check-tests` green locally and in CI
+- [x] Chat round-trip through `claude -p` with no API key (`apiKeySource: none`; C16, C30)
+- [x] Injection, hostile-output, cancel, timeout and quit tests pass on Windows and macOS (CI, #21 and #22)
+- [x] Chat runs can't act: no tool but Read / Grep / Glob in an empty folder, nothing prompts
+- [x] No auth / endpoint / billing variable reaches the child; a key source stops the run
+- [x] A rejected flag shows "isn't supported for chat" and never retries without it
+- [x] Nothing about a chat is written to disk
+- [x] fmt, clippy, tests and `check-tests` green locally and in CI
+- [ ] Hand check 3 (Charan): one real chat on the dev app (`docs/TESTS.md`)
+- [ ] 6d: start a chat from a copy of a session
+
+**6c (2026-10-12).** No Windows user name left in the tree: the sample
+paths in four Rust tests now use `dev`, and the island's Phase 2 approval
+screenshot has its path covered and labelled (the chat fixtures' plan use
+was made neutral in #22). README: a Chat section. Hand check 3 written for
+Charan.
 
 ## Phase 7 — File drop (~1 week)
 
