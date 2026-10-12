@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 6 — Chat in the island (6c: cleanup and docs; 6d next)**
+**Current phase: Phase 6 — Chat in the island (6a–6c merged; next: roadmap a, Markdown in chat answers — see "Roadmap after Phase 6c")**
 
 ## MVP scope
 
@@ -2738,7 +2738,34 @@ Manual checks:
   lock itself (a read attempt denied) is covered by C16 / C30. Seen: answers
   show Markdown as raw text (`**bold**`, `- ` lists, backticks).
 
+## Roadmap after Phase 6c (Charan, 2026-10-12)
+
+The order from here. Each item is its own PR (one agent per PR in h), and each
+runs the four stages (Audit → Implement → Test → Verify) with its tests,
+`docs/TESTS.md` rows and green CI; nothing merges without Charan's OK.
+
+| # | What | Notes |
+| --- | --- | --- |
+| a | Markdown in chat answers | Headings, paragraphs, lists, bold / italic, inline code, code blocks (the diff pane's tokenizer): elements we build, filled with `textContent` only. Links show as text and are never clickable. No new dependency. |
+| b | 6e "Explain this request" | A button on a permission card asks the read-only chat what the command does and what could go wrong. The command goes in as text (the prompt on stdin, never argv). Allow / Deny keep working (arm delay, focus rules) while it answers; it never decides anything. A card still comes first. |
+| c | Windows release | Phase 9's Windows part, pulled forward: installer, GitHub release on tags (checksums, attestations), README with a demo GIF and install / uninstall steps, the SmartScreen note. Audit first: the signing options and their cost ($0 if possible). Before this PR: `docs/COMPARE.md` (below). |
+| d | File drop (Phase 7) | Drop a file, then choose "Is this safe to run?" or "Ask about it". Read-only; nothing is sent before Charan confirms. |
+| e | Music (Phase 8) | Within the motion and CPU budget. |
+| f | 6d "Ask about this session" | Fork a session read-only (Phase 6 audit, "Starting from an existing session"). |
+| g | Mac release | Phase 9's Mac part, tested on a real Mac (the checklist under Phase 9). |
+| h | Other agents | For each (Codex, Cursor, Gemini CLI, Copilot CLI, others): audit first whether its hooks can block a tool call. Yes: full approvals. No: watch-and-flag only, clearly labelled as such. One agent per PR. |
+| i | Linux build | Optional. |
+
+**Goal (Charan):** on Windows, Bouncer must be clearly better than Coucou
+where it matters: safety, CPU and memory, reliability. Before the release PR
+(c), `docs/COMPARE.md` sets out, from Coucou's public source (read, never
+installed or run): what they have, what we have, where we're better, where
+we're behind, and what to fix before release.
+
 ## Phase 7 — File drop (~1 week)
+
+Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
+run?" or "Ask about it"; read-only; nothing sent before he confirms.
 
 - **Audit:** Tauri drag-and-drop events (Phase 2 turned `dragDropEnabled` off);
   what a drop exposes (paths only, not contents); size and type limits; how a
@@ -2767,6 +2794,8 @@ Phase 7 is done when:
 
 ## Phase 8 — Music (~1 week)
 
+Roadmap e: within the motion and CPU budget.
+
 - **Audit:** Windows media controls (`GlobalSystemMediaTransportControlsSessionManager`
   via WinRT): what it needs (likely the `windows` crate, a new dependency to ask
   about), idle cost of listening; macOS later.
@@ -2790,6 +2819,8 @@ Phase 8 is done when:
 - [ ] fmt, clippy, tests green locally and in CI
 
 ## Phase 9 — Packaging and release (~1 week)
+
+Split by the roadmap: Windows release is c, Mac release is g, Linux is i.
 
 - **Audit:** document unsigned-app warnings per OS; Defender false-positive process;
   check eligibility for free SignPath Foundation signing.
