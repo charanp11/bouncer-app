@@ -404,7 +404,7 @@ pub(crate) mod tests {
         for text in [
             "Running cargo test --workspace",
             "Editing main.rs",
-            "C:\\Users\\chara\\Desktop\\Full Time\\bouncer-starter\\bouncer-playground",
+            "C:\\Users\\dev\\Desktop\\Full Time\\bouncer-starter\\bouncer-playground",
             "/Users/someone/Projects/bouncer-app/crates/core/src/approvals.rs",
             "git status",
             "npm run build -- --mode production",
