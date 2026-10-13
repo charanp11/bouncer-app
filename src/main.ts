@@ -67,11 +67,11 @@ type Away = {
   stuck: { minutes: number; project: string; what: string } | null;
 };
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
-type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>> };
+type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>>; shortcut: boolean };
 /** Read-only facts for the settings screen (asked for when it opens). */
 type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown";
 /** `autostart`: null where it isn't offered (macOS for now). */
-type About = { rules: string | null; hooks: HookStatus; autostart: boolean | null };
+type About = { rules: string | null; hooks: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
 type HooksChange = { id: string; path: string; diff: string };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
@@ -1017,6 +1017,7 @@ function renderSettings(view: View, state: BallState) {
 
   list.append(hooksRow(about?.hooks));
   if (typeof about?.autostart === "boolean") list.append(autostartRow(about.autostart));
+  list.append(shortcutRow(prefs.shortcut, !!about?.shortcutTaken));
 
   const body = el("div", "body");
   body.dataset.screen = "settings";
@@ -1722,6 +1723,24 @@ function renderChat(view: View, done: boolean) {
   island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
   // A conversation stays at its end; the first-run note starts at its top.
   log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+}
+
+/** Settings' shortcut switch. Ctrl+Alt+B only opens the island (the
+ * keyboard on Deny if a card is up); it never approves. */
+function shortcutRow(on: boolean, taken: boolean): HTMLElement {
+  const sw = toggle("Shortcut Ctrl+Alt+B", on, () => {
+    sw.disabled = true;
+    invoke("set_shortcut", { on: !on })
+      .catch(() => {})
+      .finally(() => {
+        aboutAsked = false; // ask again: it may be taken
+        refocus = "shortcut";
+        if (current) render(current);
+      });
+  });
+  sw.dataset.key = "shortcut";
+  const hint = on && taken ? "Another app has Ctrl+Alt+B, so it does nothing here." : "Opens Bouncer from anywhere. It never approves.";
+  return setRow("Shortcut Ctrl+Alt+B", [el("span", "", on ? "On" : "Off"), sw], hint);
 }
 
 /** Settings' "Start with Windows": off by default; the switch writes only

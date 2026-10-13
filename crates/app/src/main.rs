@@ -24,6 +24,7 @@ use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow, WindowEvent};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Shared app state: the approval desk plus what the island window needs.
 struct Island {
@@ -64,6 +65,8 @@ struct Island {
     /// The hooks change Settings is showing, under its single-use id: only
     /// that exact change can be written, once.
     hooks_change: Mutex<Option<(String, hooks::Change)>>,
+    /// Ctrl+Alt+B couldn't be registered (another app has it).
+    shortcut_taken: AtomicBool,
 }
 
 /// How long the island must stay still before it's checked for being out of
@@ -141,7 +144,8 @@ fn main() {
             explain_stop,
             hooks_preview,
             hooks_write,
-            set_autostart
+            set_autostart,
+            set_shortcut
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -185,6 +189,7 @@ fn main() {
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
                 prefs_path,
                 hooks_change: Mutex::new(None),
+                shortcut_taken: AtomicBool::new(false),
             });
             if let Some(window) = app.get_webview_window("main") {
                 // Fail safe: if it can't be set up, the window works as before.
@@ -198,6 +203,18 @@ fn main() {
                 std::process::exit(0);
             }
             app.manage(chat::Chats::default());
+            // After the second-launch check, so only the running Bouncer has it.
+            app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|app, _, event| {
+                        if event.state == ShortcutState::Pressed {
+                            open_island(app);
+                        }
+                    })
+                    .build(),
+            )?;
+            let on = app.state::<Island>().prefs.lock().unwrap().shortcut;
+            use_shortcut(app.handle(), on);
             tray(app, desk)?;
             Ok(())
         })
@@ -283,6 +300,36 @@ fn tick(app: AppHandle, desk: Arc<Desk>) {
     });
 }
 
+/// Opens the island with the keyboard: the tray's "Open Bouncer" and the
+/// shortcut. With a card up the keyboard lands on Deny (the page's arrival
+/// rule), never Allow; this only opens, it never answers anything.
+fn open_island(app: &AppHandle) {
+    let island = app.state::<Island>();
+    island.expanded.store(true, Ordering::Relaxed);
+    show(app, island.desk.view());
+    take_keyboard(app);
+}
+
+/// Ctrl+Alt+B (Settings can turn it off).
+fn shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyB)
+}
+
+/// Registers or drops the shortcut. Failing is harmless: the island works
+/// without it, and Settings says it's taken.
+fn use_shortcut(app: &AppHandle, on: bool) {
+    let shortcuts = app.global_shortcut();
+    let taken = if on {
+        !shortcuts.is_registered(shortcut()) && shortcuts.register(shortcut()).is_err()
+    } else {
+        let _ = shortcuts.unregister(shortcut());
+        false
+    };
+    app.state::<Island>()
+        .shortcut_taken
+        .store(taken, Ordering::Relaxed);
+}
+
 const TOOLTIP: &str = "Bouncer";
 const TOOLTIP_PAUSED: &str = "Bouncer (paused): Claude Code asks in the terminal";
 
@@ -307,13 +354,7 @@ fn tray(app: &tauri::App, desk: Arc<Desk>) -> tauri::Result<()> {
         .tooltip(TOOLTIP)
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
-            "open" => {
-                app.state::<Island>()
-                    .expanded
-                    .store(true, Ordering::Relaxed);
-                show(app, desk.view());
-                take_keyboard(app);
-            }
+            "open" => open_island(app),
             id @ ("settings" | "wipe") => {
                 let island = app.state::<Island>();
                 island.settings.store(true, Ordering::Relaxed);
@@ -747,6 +788,7 @@ fn set_prefs(
             .filter(|v| *v <= 100)
             .ok_or("volume is 0 to 100")?,
         sounds: Prefs::sounds_from(&sounds).ok_or("unknown sound")?,
+        shortcut: island.prefs.lock().unwrap().shortcut,
     };
     let path = island
         .prefs_path
@@ -754,6 +796,24 @@ fn set_prefs(
         .ok_or("no place to save preferences")?;
     prefs::save(path, new)?;
     *island.prefs.lock().unwrap() = new;
+    show(&app, island.desk.view());
+    Ok(())
+}
+
+/// Settings' shortcut switch: saved, then registered or dropped.
+#[tauri::command]
+fn set_shortcut(app: AppHandle, island: State<'_, Island>, on: bool) -> Result<(), String> {
+    let path = island
+        .prefs_path
+        .as_deref()
+        .ok_or("no place to save preferences")?;
+    let new = Prefs {
+        shortcut: on,
+        ..*island.prefs.lock().unwrap()
+    };
+    prefs::save(path, new)?;
+    *island.prefs.lock().unwrap() = new;
+    use_shortcut(&app, on);
     show(&app, island.desk.view());
     Ok(())
 }
@@ -779,11 +839,12 @@ fn wipe(island: State<'_, Island>) -> Result<(), String> {
 /// Read-only facts for the settings screen: where the rules file is and
 /// whether our hooks are in the user's Claude Code settings.
 #[tauri::command]
-fn about() -> Value {
+fn about(island: State<'_, Island>) -> Value {
     json!({
         "rules": rules::path().map(|p| p.display().to_string()),
         "hooks": hook_status(),
         "autostart": std::env::current_exe().ok().and_then(|exe| autostart::enabled(&exe)),
+        "shortcutTaken": island.shortcut_taken.load(Ordering::Relaxed),
     })
 }
 
@@ -1011,6 +1072,7 @@ fn tray(",
             "hooks-preview",
             "hooks-write",
             "set-autostart",
+            "set-shortcut",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()
@@ -1020,6 +1082,26 @@ fn tray(",
             .collect();
         assert_eq!(granted, ours.map(|c| format!("allow-{c}")));
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
+    }
+
+    /// The shortcut only opens the island: its handler calls `open_island`,
+    /// and neither reaches anything that answers a card.
+    #[test]
+    fn the_shortcut_only_opens_the_island() {
+        let src = include_str!("main.rs");
+        let from = |start: &str, len: usize| {
+            let i = src.find(start).unwrap();
+            &src[i..i + len.min(src.len() - i)]
+        };
+        let open = from("fn open_island(", 400);
+        let open = &open[..open.find("\n}\n").unwrap()];
+        let handler = from(".with_handler(", 250);
+        assert!(handler.contains("open_island(app)"));
+        for answer in ["decide", "answer", "always", "allow"] {
+            assert!(!open.to_lowercase().contains(answer), "{answer}");
+            assert!(!handler.to_lowercase().contains(answer), "{answer}");
+        }
+        assert_eq!(shortcut().into_string(), "control+alt+KeyB");
     }
 
     /// Settings can write only the change it showed, by its id, once.
