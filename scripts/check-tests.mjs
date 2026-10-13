@@ -2,9 +2,10 @@
 // so the table can't drift from the code. Run after `cargo test` (CI does);
 // it lists the Rust tests with `cargo test -- --list` and reads the frontend
 // test titles from src/*.test.ts. Names marked `windows:` / `macos:` are only
-// checked on that OS. Exits 1 on any problem.
+// checked on that OS; quoted paths (a CI job's workflow or script) must exist.
+// Exits 1 on any problem.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 
 const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "other";
 
@@ -31,8 +32,14 @@ for (const line of readFileSync("docs/TESTS.md", "utf8").split("\n")) {
   if (/\bCI\b/.test(status)) automated++;
   if (/real-click/.test(proof)) realClick++;
   if (/^Hand|; Hand|Phase 9/.test(status)) hand++;
-  const names = [...tests.matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((n) => !n.includes("/"));
-  if (/\bCI\b/.test(status) && !names.length && id !== "M1" && id !== "M2") problems.push(`${id}: automated but names no test`);
+  const quoted = [...tests.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  // A CI job's own files (its workflow, its script) can be the proof: they
+  // must exist. A frontend title may hold a "/" too ("100 / 112 / 125%").
+  const isFile = (n) => n.includes("/") && !/^(?:(?:windows|macos): )?ts: /.test(n);
+  const names = quoted.filter((n) => !isFile(n));
+  const files = quoted.filter(isFile);
+  for (const f of files) if (!existsSync(f)) problems.push(`${id}: no such file: ${f}`);
+  if (/\bCI\b/.test(status) && !names.length && !files.length && id !== "M1") problems.push(`${id}: automated but names no test`);
   for (const raw of names) {
     const [, only, name] = raw.match(/^(?:(windows|macos): )?(.*)$/);
     if (only && only !== os) continue;
