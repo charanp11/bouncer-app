@@ -1084,6 +1084,54 @@ fn tray(",
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
     }
 
+    /// The installer: NSIS only (no MSI, which needs admin), per user; the
+    /// relay and CLI go beside the app; the uninstall steps are guarded.
+    #[test]
+    fn the_installer_is_per_user_and_its_uninstall_steps_are_guarded() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let bundle = &conf["bundle"];
+        assert_eq!(bundle["targets"], serde_json::json!(["nsis", "app", "dmg"]));
+        assert_eq!(bundle["windows"]["nsis"]["installMode"], "currentUser");
+        assert_eq!(
+            bundle["windows"]["nsis"]["installerHooks"],
+            "installer-hooks.nsh"
+        );
+        let release: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.release.json")).unwrap();
+        assert_eq!(
+            release["bundle"]["externalBin"],
+            serde_json::json!(["binaries/bouncer-hook", "binaries/bouncer"])
+        );
+
+        let hooks = include_str!("../installer-hooks.nsh");
+        let macro_body = |name: &str| {
+            let i = hooks.find(&format!("!macro {name}")).unwrap();
+            &hooks[i..i + hooks[i..].find("!macroend").unwrap()]
+        };
+        let pre = macro_body("NSIS_HOOK_PREUNINSTALL");
+        for guard in [
+            "$UpdateMode <> 1",
+            "$PassiveMode <> 1",
+            "${AndIfNot} ${Silent}",
+        ] {
+            assert!(pre.contains(guard), "{guard}");
+        }
+        assert!(
+            pre.contains(r#"ExecWait '"$INSTDIR\bouncer.exe" uninstall-hooks --uninstalling'"#)
+        );
+        let post = macro_body("NSIS_HOOK_POSTUNINSTALL");
+        assert!(post.contains("$DeleteAppDataCheckboxState = 1"));
+        assert!(post.contains("$UpdateMode <> 1"));
+        // It deletes exactly one folder: Bouncer's own.
+        let deletes: Vec<&str> = hooks
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("RmDir") || l.starts_with("Delete"))
+            .collect();
+        assert_eq!(deletes, [r#"RmDir /r "$APPDATA\Bouncer""#]);
+    }
+
     /// The shortcut only opens the island: its handler calls `open_island`,
     /// and neither reaches anything that answers a card.
     #[test]
