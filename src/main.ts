@@ -1383,7 +1383,7 @@ function fillExplain(box = island.querySelector<HTMLElement>(".explain")) {
   const body = box.querySelector<HTMLElement>(".xbody")!;
   const end = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
   if (x.text) answerInto(body, x.text);
-  else body.replaceChildren(el("p", "chatnone", x.busy ? "" : "No explanation."));
+  else body.replaceChildren(el("p", "chatnone", x.busy || x.error ? "" : "No explanation."));
   if (end) body.scrollTop = body.scrollHeight;
   // The status only when it changes: a spinner made again would turn again.
   const state = x.busy ? "busy" : x.error ? `error:${x.error}` : "done";
