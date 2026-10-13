@@ -121,6 +121,11 @@ function Control($window, $name) {
     $window.FindAll($Scope::Descendants, $True_) |
         Where-Object { $_.Current.Name -like $name -and $_.Current.IsEnabled } | Select-Object -First 1
 }
+# A web button in the island (the page's titles share names with buttons).
+function Button($window, $name) {
+    Control $window $name | Where-Object { $_.Current.ControlType.ProgrammaticName -eq "ControlType.Button" } | Select-Object -First 1
+}
+function Press($button) { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
 function Click($control) {
     # A button's click as its dialog hears it (no mouse, no keys).
     $h = [IntPtr]$control.Current.NativeWindowHandle
@@ -182,18 +187,18 @@ try {
     # were away" covers the island until closed. Close it whenever it shows.
     $awayGone = {
         if (Control $island "While you were away") {
-            $c = Control $island "Close"
-            if ($c) { $c.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+            $c = Button $island "Close"
+            if ($c) { Press $c }
         }
     }
-    $gear = Wait-Until { & $awayGone; Control $island "Settings" } 20
+    $gear = Wait-Until { & $awayGone; Button $island "Settings" } 20
     if (-not $gear) { Dump $island "no Settings button in the island" }
-    $gear.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Press $gear
     $switch = Wait-Until {
         & $awayGone
         if (-not (Control $island "Rules file")) {  # not in Settings (the summary took over): the gear again
-            $g = Control $island "Settings"
-            if ($g) { $g.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+            $g = Button $island "Settings"
+            if ($g) { Press $g }
         }
         Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
     } 30
