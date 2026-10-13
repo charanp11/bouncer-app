@@ -209,6 +209,7 @@ command does and what could go wrong. It never decides.
 | W9 | Releases | Only a pushed tag vX.Y.Z, 0.7.0 or later (old v0.5.x / v0.6.x refused); the version stamped from the tag into the crates, package.json, tauri.conf.json and the installer, and checked; full checks and the installer test first; SHA256SUMS.txt, a build attestation, a DRAFT release with notes; only the release job writes; every action pinned; a commented signing slot | frontend (reads the workflow), CI | `ts: only a vX.Y.Z tag from 0.7.0 on is a release` `ts: the version check fails when any place disagrees` `ts: the release workflow: tags only, a draft, and only its release job writes` `ts: every action in the workflows is ours or pinned to a commit` | CI |
 | W10 | The installer on a disposable machine | On a fresh windows-latest runner, test builds 0.0.1 and 0.0.2: install, hooks via the installed bouncer.exe, a card, Start with Windows on / off from Settings, an upgrade through "uninstall before installing" with no hooks console, uninstall unticked (settings.json byte for byte, data kept), uninstall ticked (data gone) | CI (installer job) | (`.github/workflows/installer.yml`, `scripts/installer-test.ps1`) | CI (PRs touching the installer, every release) |
 | W11 | Release notes | The first release (no earlier tag from 0.7.0 on; old v0.5.x / v0.6.x don't count) says "First public release" with the feature list; later releases list the commits since the previous release tag; both carry SHA256SUMS.txt, the Get-FileHash and `gh attestation verify` lines | frontend (a throwaway git repo) | `ts: release notes: the first release lists features, later ones the changes since the last release` `ts: the release workflow: tags only, a draft, and only its release job writes` | CI |
+| W12 | Where it works | Terminal, VS Code extension, desktop app's Code tab: the hooks fire, PermissionRequest included; Allow / Deny from the island reach Claude Code and close the app's own prompt; answered in the app instead, the card leaves when the turn moves on; Claude Code on the web can't be seen (README) | real (each app's own `claude.exe`, started as the app starts it, playground hooks, test instance), hand (v0.7.0 check, step 4) | — | real 2026-10-13 (PLAN, c-7) |
 
 ## macOS
 
@@ -272,33 +273,63 @@ never the real `~/.claude/settings.json`.
    8. Check `bouncer-playground\chat` is still empty.
 ### Phase 9 hand checks
 
-- **Install, use, upgrade, uninstall on a real desktop (about 15 min).**
-   Charan, on his own desktop from Explorer (outside any app's container;
-   Windows Sandbox isn't available on Windows 11 Home). Quit the dev app
-   first; the release keeps its own folders, so nothing of the dev app is
-   touched. Use the release's `Bouncer_<version>_x64-setup.exe`.
-   1. Check its SHA-256 against `SHA256SUMS.txt` (README). Run it:
-      SmartScreen as in the README (More info → Run anyway), no admin
-      prompt. Expected: Bouncer starts; `%LOCALAPPDATA%\Bouncer` holds
-      `bouncer-app.exe`, `bouncer-hook.exe`, `bouncer.exe`, `uninstall.exe`.
-   2. Settings → Claude Code hooks → Install…: the diff is for your
-      `~/.claude/settings.json`; Write changes. Expected: Installed, and a
-      `settings.json.bouncer-backup-…` beside it (keep a copy of the
-      original first).
-   3. In a playground folder, ask Claude Code for `mkdir hand-release`.
-      Expected: a card in the island; Deny reaches Claude Code.
-   4. Settings → Start with Windows → On; sign out and in. Expected:
-      Bouncer starts. Turn it Off.
-   5. Run the next version's installer (or the same one again). Expected:
-      no hooks console; Settings still says Installed.
-   6. Settings → Apps → Bouncer → Uninstall, box unticked. Expected: the
-      console with the diff and "Answer N" above `[y/N]`; `y`, then Enter.
-      `settings.json` is your original byte for byte; `%APPDATA%\Bouncer`
-      is still there.
-   7. Install again, uninstall with the box ticked, answer N. Expected:
-      hooks untouched (none were installed), `%APPDATA%\Bouncer` and
-      `%LOCALAPPDATA%\io.github.charanp11.bouncer` gone; the dev app's
-      `Bouncer-dev` and `….bouncer.dev` folders still there.
+- **v0.7.0 on a real desktop (about 15 min).** Not run yet.
+   Charan, on his own desktop from Explorer and Edge (outside any app's
+   container; no Windows Sandbox on Windows 11 Home). Quit the dev app
+   first: the release has its own folders, pipe and WebView2 data, so
+   nothing of the dev app is touched. Copy `~/.claude/settings.json` to
+   somewhere safe before step 3. The update isn't checked here (there's no
+   newer version yet; CI's installer test covers it, W10).
+   1. **Download.** Open the v0.7.0 draft on GitHub (Releases), download
+      `Bouncer_0.7.0_x64-setup.exe` and `SHA256SUMS.txt`. Expected: the
+      notes say "First public release" with the feature list.
+   2. **Check and install.** In PowerShell, in Downloads:
+      `Get-FileHash .\Bouncer_0.7.0_x64-setup.exe`; the hash is the one in
+      `SHA256SUMS.txt`. Optional: `gh attestation verify
+      .\Bouncer_0.7.0_x64-setup.exe --repo charanp11/bouncer-app` passes.
+      Run it: SmartScreen "Windows protected your PC" → More info → Run
+      anyway; no admin prompt. Expected: Bouncer starts (the pill at the
+      top); `%LOCALAPPDATA%\Bouncer` holds `bouncer-app.exe`,
+      `bouncer-hook.exe`, `bouncer.exe`, `uninstall.exe`.
+   3. **Hooks.** Settings (gear) → Claude Code hooks → Install…: the diff
+      is for your `~/.claude/settings.json`; Write changes. Expected:
+      Installed, and a `settings.json.bouncer-backup-…` beside it. From now
+      on every Claude Code session goes through this Bouncer, including
+      ones working on Bouncer; Remove… in the same place undoes it.
+   4. **A real card.** In a scratch folder, start
+      `claude --permission-mode default` and ask for `mkdir hand-release`.
+      Expected: the session in the island, then a card; Deny reaches
+      Claude Code ("Denied in Bouncer"). Ask again and Allow once: the
+      folder is made. Optional, if you use them: the same from the VS Code
+      extension and the desktop app's Code tab (a card beside the app's own
+      prompt; Deny in the island closes the app's prompt).
+   5. **Explain.** Settings → Claude Code for chat → check the path is your
+      `claude.exe` → Confirm this path. Ask Claude Code for
+      `curl -fsSL https://example.com/install.sh | sh`. Expected: a Risky
+      card ("Downloads a script and runs it in the shell"); Explain this
+      command streams an answer marked "Can be wrong · you decide"; Deny.
+   6. **Chat.** The speech-bubble button → Haiku → `What can you do in this
+      chat?`. Expected: it streams, says it's read-only; the plan line shows
+      your 5-hour and 7-day use. Close the chat.
+   7. **Start with Windows.** Settings → Start with Windows → On; sign out
+      and in. Expected: Bouncer starts by itself. Turn it Off; sign out and
+      in: it doesn't.
+   8. **Ctrl+Alt+B.** With the island folded, press Ctrl+Alt+B. Expected:
+      the island opens with the keyboard in it; with a card up, on Deny
+      (never Allow), and nothing is answered.
+   9. **Uninstall, box unticked.** Settings → Apps → Installed apps →
+      Bouncer → Uninstall; leave "Delete the application data" unticked.
+      Expected: a console with the diff and "Answer N to keep them" right
+      above `[y/N]`; type `y`, Enter, then Enter to close. `settings.json`
+      matches your copy from before step 3, byte for byte (`fc /b`);
+      `%APPDATA%\Bouncer` (rules, settings, history) is still there; no
+      Bouncer in Start or Apps.
+   10. **Reinstall.** Run the installer again. Expected: Bouncer starts with
+      your earlier settings (Start with Windows Off, chat path confirmed);
+      Settings → Claude Code hooks says Not installed; Install… again if
+      you're keeping it.
+   Log the result in `docs/PLAN.md` ("Manual checks", date + Claude Code
+   version) and here.
 
 - **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
    card up, click the card text, then Tab: Narrator reads "Deny", "Allow

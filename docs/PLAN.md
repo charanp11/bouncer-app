@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Roadmap c — Windows release, v0.7.0 (audit done 2026-10-12; PRs c-1 to c-7 — see "Roadmap c" under "Roadmap after Phase 6c")**
+**Current phase: Roadmap c — Windows release, v0.7.0 (PRs c-1 to c-7 done 2026-10-13; next: tag v0.7.0 when Charan says, his real-desktop hand check, Publish — see "Roadmap c" under "Roadmap after Phase 6c")**
 
 ## MVP scope
 
@@ -3157,6 +3157,83 @@ kept); reinstall, uninstall ticked (data gone). Results land in the job
 summary. TESTS W9, W10. `check-tests` now also accepts a CI job's files as
 its proof (they must exist), and checks `ts:` titles that contain a "/"
 (UI1's had been skipped).
+
+**c-7: README and demo GIF (2026-10-13).**
+
+Audit. The README still said "Nothing to install yet". What it needs, from
+Charan's brief and decisions 6–7: the pitch, a demo, install with the
+SmartScreen walkthrough and both checks (SHA-256, attestation), the hooks
+from Settings, update and uninstall, where Bouncer works, what it can't do,
+privacy. The release notes listed "Changes since v0.6.4" for v0.7.0
+(`git describe` finds the old tags): the first release gets "First public
+release" and a feature list instead.
+
+| Threat | Fix |
+| --- | --- |
+| The README promises something Bouncer doesn't do | Each claim checked against the code and TESTS rows (100 s card, 600 ms arm, the uninstall console's wording, what the data box deletes); "where it works" measured, not assumed |
+| The GIF leaks a path, a name or plan use | Recorded from the test instance's page over CDP (only the page, no desktop behind it), black backdrop, a made-up project (`my-app`, `C:\Users\dev\…`), no chat panel (no plan line) |
+| Old v0.5.x / v0.6.x tags shape v0.7.0's notes | `scripts/release-notes.mjs` counts only tags from 0.7.0 on as releases; tested in a throwaway repo (W11) |
+| Users skip the checks | Install steps put the hash and attestation before running it; the release notes repeat them |
+
+Done when:
+
+- [x] README: pitch, demo GIF, install (download, Get-FileHash, gh attestation verify, SmartScreen More info → Run anyway, Smart App Control, Defender false positives), Settings → Install hooks, update, uninstall (hooks question, data box), where it works, what it can't do, privacy
+- [x] Demo GIF under 3 MB: a card, a risky flag, Explain, Deny (`docs/demo.gif`, 134 KB, 464 × 568, 21 s)
+- [x] Where it works checked (decision 6, below; TESTS W12)
+- [x] Release notes: v0.7.0 "First public release" with features; later releases the commits since the previous release tag (W11)
+- [x] Charan's v0.7.0 real-desktop hand check written (TESTS, Phase 9 hand checks)
+- [x] Roadmap order after v0.7.0 (decision 7, below)
+
+Demo GIF. The test instance (scratch target, own pipe, rules and WebView2
+folder; the fake `claude`, confirmed in its Settings, with a demo-only
+explanation built from a local edit of `fake_claude.rs` that was reverted,
+never committed). Hook fixtures for a session in `C:\Users\dev\projects\my-app`:
+`npm test` (the card says a rule would allow it) → Allow once; then
+`curl -fsSL https://get.example.dev/install.sh | sh` → Risky, "Downloads a
+script and runs it in the shell" → Explain this command → Deny ("Denied.
+Claude Code was told no."). Both answers reached the relay (`allow`,
+`deny` printed). Frames from `Page.captureScreenshot` (~6 per second),
+cropped to the island, one shared palette, identical frames merged.
+
+Where it works (decision 6, 2026-10-13), playground hooks only, the test
+instance on its own pipe (`BOUNCER_ENDPOINT`), never the user-level file.
+The desktop app (this session's own process) and the VS Code extension
+(2.1.288, its `extension.js`) both start Claude Code with
+`--input-format stream-json --output-format stream-json
+--permission-prompt-tool stdio --setting-sources user,project,local`. So
+each one's own bundled `claude.exe` was started that way in the playground
+(`--permission-mode default`, `--tools Read`, an `ask` rule for Read passed
+with `--settings`, Haiku), asked to read the repo's `LICENSE` (outside the
+playground), with a driver standing in for the app's prompt:
+
+| Claude Code | Island | Result |
+| --- | --- | --- |
+| Desktop app's, 2.1.295 | Deny | The app's prompt (`can_use_tool`) and the card came together; Deny → the app's prompt was cancelled (`control_cancel_request`), tool result "Denied in Bouncer" |
+| Desktop app's, 2.1.295 | Allow once | The app's prompt cancelled; the file was read |
+| VS Code extension's, 2.1.288 | Deny | As the desktop app's |
+| VS Code extension's, 2.1.288 | Allow once | As the desktop app's |
+| Desktop app's, 2.1.295 | (none; the app answered no) | The tool was denied; the card stayed until the turn ended (Stop), then left |
+
+Every hook fired (SessionStart, UserPromptSubmit, PreToolUse,
+PermissionRequest, Stop, SessionEnd: `bouncer-playground/recorded`
+514–519). The terminal is what every earlier hand check used. Not checked:
+the apps' own windows (the hosts' launch was reproduced, not their UI); the
+hand check below has an optional step for that. Claude Code on the web runs
+in the cloud: its hooks can't reach this PC. Found on the way: reads
+outside the project weren't prompted in 2.1.295's default mode (hence the
+`ask` rule), and Claude Code's own scratch folder is pre-allowed.
+
+Roadmap after v0.7.0 (decision 7). One feature per release:
+
+| Release | What | Roadmap item |
+| --- | --- | --- |
+| v0.8 | Answer Claude Code's questions in the island | c2 |
+| v0.9 | File drop | d (Phase 7) |
+| then | Other agents, one per release | h |
+| then | Ask about this session | f (6d) |
+| then | Mac release | g |
+| then | Music | e (Phase 8) |
+| optional | Linux | i |
 
 ## Phase 7 — File drop (~1 week)
 
