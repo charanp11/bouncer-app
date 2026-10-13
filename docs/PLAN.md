@@ -2996,6 +2996,19 @@ Prototype v0.24 ("Settings · hooks"). TESTS I8, I9.
 - [x] The CLI behaves as before (I1–I7 unchanged, its tests pass)
 - [x] Test instance (scratch `CLAUDE_CONFIG_DIR`, page-level clicks over CDP): a Write before the arm did nothing; the token in the context showed as `[redacted]`; install then remove gave back the exact bytes, a backup each time; one event removed by hand → Incomplete, Re-install → Installed; Cancel and a file changed under the open diff wrote nothing ("changed meanwhile; try again")
 
+**c-3: Start with Windows (2026-10-13).** `core::autostart`: one value,
+`Bouncer` (the quoted app path), in `HKCU\…\CurrentVersion\Run`; no
+admin. The value is the setting (nothing in `preferences.json`), so the
+switch always shows what Windows will do. Off deletes only a value whose
+program has this app's file name; someone else's `Bouncer` value stays.
+Debug builds can use another key (`BOUNCER_AUTOSTART_KEY`, ignored in
+release: R13, checked by CI in a release build), so tests and the test
+instance never touch the real `Run` key. Not offered off Windows yet (the
+row is hidden; roadmap g). Prototype v0.25. TESTS W2.
+
+- [x] Off by default; on / off from Settings; only our value (W2)
+- [x] Test instance (page-level clicks, a test key): Off → On wrote the quoted path; On → Off removed it; the real `Run` key was the same before and after
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
