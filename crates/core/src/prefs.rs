@@ -83,6 +83,8 @@ pub struct Prefs {
     pub volume: u8,
     /// Which sounds are on: one bit per [`SOUNDS`] entry.
     pub sounds: u32,
+    /// Ctrl+Alt+B opens the island (on by default; never approves).
+    pub shortcut: bool,
 }
 
 impl Default for Prefs {
@@ -93,6 +95,7 @@ impl Default for Prefs {
             style: Style::Soft,
             volume: 50,
             sounds: ON_BY_DEFAULT.iter().filter_map(|n| bit(n)).sum(),
+            shortcut: true,
         }
     }
 }
@@ -109,6 +112,7 @@ impl Prefs {
             "style": self.style.name(),
             "volume": self.volume,
             "sounds": sounds,
+            "shortcut": self.shortcut,
         })
     }
 
@@ -148,6 +152,7 @@ impl Prefs {
                 .filter(|v| *v <= 100)
                 .unwrap_or(default.volume),
             sounds,
+            shortcut: value["shortcut"].as_bool().unwrap_or(default.shortcut),
         }
     }
 }
@@ -192,6 +197,7 @@ mod tests {
             style: Style::Playful,
             volume: 80,
             sounds: Prefs::sounds_from(&["poke".into(), "wiped".into()]).unwrap(),
+            shortcut: false,
         };
         save(&path, prefs).unwrap();
         assert_eq!(load(&path), prefs);
@@ -238,6 +244,10 @@ mod tests {
         assert!(p.on("poke") && !p.on("needs") && p.on("done") && p.on("risky"));
         assert!(!p.on("nope"));
         assert_eq!(v(r#"{"sounds":["poke"]}"#), default);
+        // The shortcut: on by default; only true / false change it.
+        assert!(default.shortcut);
+        assert!(!v(r#"{"shortcut":false}"#).shortcut);
+        assert_eq!(v(r#"{"shortcut":"no"}"#), default);
         let tmp = temp_dir("prefs-broken");
         let path = tmp.join("preferences.json");
         rules::replace(&path, "{ not json").unwrap();

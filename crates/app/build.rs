@@ -26,6 +26,7 @@ fn main() {
         "hooks_preview",
         "hooks_write",
         "set_autostart",
+        "set_shortcut",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");
