@@ -178,10 +178,25 @@ try {
     foreach ($vk in 0x42, 0x12, 0x11) { [Native]::keybd_event($vk, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40 }
     $island = Wait-Until { Windows-Named "Bouncer" | Where-Object { $_.Current.ProcessId -eq $app.Id } | Select-Object -First 1 } 15
     if (-not $island) { throw "no Bouncer window" }
-    $gear = Wait-Until { Control $island "Settings" } 15
+    # A runner sits idle, so the key press counts as coming back: "While you
+    # were away" covers the island until closed. Close it whenever it shows.
+    $awayGone = {
+        if (Control $island "While you were away") {
+            $c = Control $island "Close"
+            if ($c) { $c.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        }
+    }
+    $gear = Wait-Until { & $awayGone; Control $island "Settings" } 20
     if (-not $gear) { Dump $island "no Settings button in the island" }
     $gear.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $switch = Wait-Until { Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" } } 15
+    $switch = Wait-Until {
+        & $awayGone
+        if (-not (Control $island "Rules file")) {  # not in Settings (the summary took over): the gear again
+            $g = Control $island "Settings"
+            if ($g) { $g.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        }
+        Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
+    } 30
     if (-not $switch) { Dump $island "no Start with Windows switch in Settings" }
     $flip = {
         $s = Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
