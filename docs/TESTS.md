@@ -203,8 +203,9 @@ command does and what could go wrong. It never decides.
 | W3 | Shortcut Ctrl+Alt+B | On by default; opens the island with the keyboard, on Deny with a card up (never Allow), answers nothing; Settings turns it off (keys released) and on; held by another app: harmless, the hint says so; a second launch never registers it | unit, real-click (key presses on the test instance) | `tests::the_shortcut_only_opens_the_island` `prefs::tests::unknown_or_broken_values_fall_back_per_field` | CI; real-click 2026-10-13 |
 | W4 | Installer | NSIS only (no MSI), per user in `%LOCALAPPDATA%\Bouncer`, no admin prompt; `bouncer-hook.exe` and `bouncer.exe` beside the app; uninstall entry and Start menu shortcut | unit, real (installed on this PC, 2.24 MiB) | `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
 | W5 | Install over itself (same version) | The running app is closed, files replaced, one uninstall entry; the hooks in Claude Code's settings and their path stay valid; a request waits on a card again | real | — | real 2026-10-13 |
-| W6 | Uninstall and the hooks | Offers removal in its own console: the diff, why ("Answer N if upgrading") right above the question, nothing without "y", a dated backup; "no" says what Claude Code will show; waits for Enter; skipped in update, silent and passive runs | integration, unit, real | `the_uninstaller_asks_explains_and_waits` `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
+| W6 | Uninstall and the hooks | Offers removal in its own console: the diff, why ("Installing Bouncer again next? Answer N") right above the question, "no" the default, nothing without "y", a dated backup; "no" says what Claude Code will show; waits for Enter. Never in an update, a silent or passive run, or when an installer runs the uninstaller (an upgrade's "uninstall before installing": it runs in place, beside the app) | integration, unit, real | `the_uninstaller_asks_explains_and_waits` `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 (the upgrade path: the disposable CI test, c-6) |
 | W7 | Uninstall's "Delete the application data" box (the one exception to one wipe path) | Unticked by default: `%APPDATA%\Bouncer` and the WebView2 folder stay; ticked: exactly those two go (our step deletes only `%APPDATA%\Bouncer`; Tauri's, the WebView2 folder); never in an update | unit, real | `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
+| W8 | A dev build next to an installed Bouncer | Shares nothing: identifier `….bouncer.dev` (own WebView2 folder), data folder `Bouncer-dev`, pipe / socket `bouncer-dev-…`, autostart value `Bouncer-dev`; release builds keep the plain names | unit (debug and, for the relay, release) | `tests::dev_and_release_builds_share_nothing` `tests::dev_and_release_builds_have_their_own_names` | CI |
 
 ## macOS
 
@@ -268,14 +269,33 @@ never the real `~/.claude/settings.json`.
    8. Check `bouncer-playground\chat` is still empty.
 ### Phase 9 hand checks
 
-- **Install from a real download (about 5 min).** Charan, on his own
-   desktop (outside any app's container): run the release's
-   `Bouncer_<version>_x64-setup.exe` from Explorer. Expected: SmartScreen's
-   walkthrough as in the README, no admin prompt, Bouncer in
-   `%LOCALAPPDATA%\Bouncer`; Settings → Claude Code hooks → Install… shows the
-   diff for the real `~/.claude/settings.json` (Cancel is fine); uninstall
-   from Settings → Apps: the hooks console appears only if they're
-   installed, the data box is unticked.
+- **Install, use, upgrade, uninstall on a real desktop (about 15 min).**
+   Charan, on his own desktop from Explorer (outside any app's container;
+   Windows Sandbox isn't available on Windows 11 Home). Quit the dev app
+   first; the release keeps its own folders, so nothing of the dev app is
+   touched. Use the release's `Bouncer_<version>_x64-setup.exe`.
+   1. Check its SHA-256 against `SHA256SUMS.txt` (README). Run it:
+      SmartScreen as in the README (More info → Run anyway), no admin
+      prompt. Expected: Bouncer starts; `%LOCALAPPDATA%\Bouncer` holds
+      `bouncer-app.exe`, `bouncer-hook.exe`, `bouncer.exe`, `uninstall.exe`.
+   2. Settings → Claude Code hooks → Install…: the diff is for your
+      `~/.claude/settings.json`; Write changes. Expected: Installed, and a
+      `settings.json.bouncer-backup-…` beside it (keep a copy of the
+      original first).
+   3. In a playground folder, ask Claude Code for `mkdir hand-release`.
+      Expected: a card in the island; Deny reaches Claude Code.
+   4. Settings → Start with Windows → On; sign out and in. Expected:
+      Bouncer starts. Turn it Off.
+   5. Run the next version's installer (or the same one again). Expected:
+      no hooks console; Settings still says Installed.
+   6. Settings → Apps → Bouncer → Uninstall, box unticked. Expected: the
+      console with the diff and "Answer N" above `[y/N]`; `y`, then Enter.
+      `settings.json` is your original byte for byte; `%APPDATA%\Bouncer`
+      is still there.
+   7. Install again, uninstall with the box ticked, answer N. Expected:
+      hooks untouched (none were installed), `%APPDATA%\Bouncer` and
+      `%LOCALAPPDATA%\io.github.charanp11.bouncer` gone; the dev app's
+      `Bouncer-dev` and `….bouncer.dev` folders still there.
 
 - **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
    card up, click the card text, then Tab: Narrator reads "Deny", "Allow
