@@ -38,7 +38,8 @@ jobs:
       - name: Launch, feed a session and a request, screenshot, quit
         run: |
           set -euo pipefail
-          dir="$HOME/Library/Application Support/Bouncer"
+          # A debug build: its own folder and socket (Bouncer-dev), never the installed app's.
+          dir="$HOME/Library/Application Support/Bouncer-dev"
           sock="$dir/bouncer.sock"
           fail() { echo "::error::$1"; echo "--- app log"; cat app.log || true; exit 1; }
 

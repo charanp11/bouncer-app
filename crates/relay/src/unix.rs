@@ -17,14 +17,16 @@ pub fn uid() -> u32 {
     unsafe { getuid() }
 }
 
-/// `~/Library/Application Support/Bouncer/bouncer.sock`. Fixed per user, unlike
+/// `~/Library/Application Support/Bouncer/bouncer.sock` (`Bouncer-dev` in
+/// debug builds). Fixed per user, unlike
 /// `$TMPDIR`, which a GUI app and a terminal (ssh, tmux, sudo) can see
 /// differently. Its own folder, not Tauri's app data folder, because the server
 /// insists on `0700`. `None` without an absolute `HOME`.
 pub fn socket_path(home: Option<OsString>) -> Option<PathBuf> {
     let home = PathBuf::from(home?);
     home.is_absolute().then(|| {
-        home.join("Library/Application Support/Bouncer")
+        home.join("Library/Application Support")
+            .join(crate::NAME)
             .join("bouncer.sock")
     })
 }
@@ -51,7 +53,13 @@ mod tests {
     fn socket_lives_in_a_fixed_folder_under_home() {
         assert_eq!(
             socket_path(Some("/Users/dev".into())),
-            Some("/Users/dev/Library/Application Support/Bouncer/bouncer.sock".into())
+            Some(
+                format!(
+                    "/Users/dev/Library/Application Support/{}/bouncer.sock",
+                    crate::NAME
+                )
+                .into()
+            )
         );
         assert_eq!(socket_path(None), None);
         assert_eq!(socket_path(Some("".into())), None);

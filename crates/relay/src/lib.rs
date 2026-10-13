@@ -22,6 +22,15 @@ pub use win::{Stream, connect};
 /// 120 s timeout). The app must answer well before it.
 pub const DECISION_BUDGET: Duration = Duration::from_secs(110);
 
+/// "Bouncer" in release builds, "Bouncer-dev" in debug ones: the pipe /
+/// socket, the data folder and the autostart value, so a dev build never
+/// shares anything with an installed Bouncer (Charan, 2026-10-13).
+pub const NAME: &str = if cfg!(debug_assertions) {
+    "Bouncer-dev"
+} else {
+    "Bouncer"
+};
+
 /// Overrides the endpoint path in debug and test builds only; release builds
 /// ignore it, so the environment can't point the relay elsewhere. Peer checks
 /// still apply.
@@ -38,7 +47,14 @@ fn endpoint_with(over: Option<OsString>) -> Option<PathBuf> {
         return Some(path.into());
     }
     #[cfg(windows)]
-    return Some(format!(r"\\.\pipe\bouncer-{}", win::current_user_sid()?).into());
+    return Some(
+        format!(
+            r"\\.\pipe\{}-{}",
+            NAME.to_lowercase(),
+            win::current_user_sid()?
+        )
+        .into(),
+    );
     #[cfg(unix)]
     return unix::socket_path(std::env::var_os("HOME"));
 }
@@ -55,5 +71,27 @@ mod tests {
             cfg!(debug_assertions)
         );
         assert_eq!(over.is_some(), endpoint_with(None).is_some());
+    }
+
+    /// Dev and release builds never share a pipe or socket (nor, through
+    /// `NAME`, a data folder or autostart value). CI runs this in both.
+    #[test]
+    fn dev_and_release_builds_have_their_own_names() {
+        let want = if cfg!(debug_assertions) {
+            "Bouncer-dev"
+        } else {
+            "Bouncer"
+        };
+        assert_eq!(NAME, want);
+        let path = endpoint_with(None).unwrap();
+        let path = path.to_string_lossy();
+        #[cfg(windows)]
+        assert!(
+            path.starts_with(&format!(r"\\.\pipe\{}-S-", want.to_lowercase())),
+            "{path}"
+        );
+        #[cfg(unix)]
+        assert!(path.ends_with(&format!("/{want}/bouncer.sock")), "{path}");
+        assert_eq!(path.contains("-dev"), cfg!(debug_assertions), "{path}");
     }
 }

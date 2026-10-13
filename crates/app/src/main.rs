@@ -1084,6 +1084,29 @@ fn tray(",
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
     }
 
+    /// A dev build never shares anything with an installed Bouncer: its own
+    /// identifier (so its own WebView2 folder), data folder and pipe.
+    #[test]
+    fn dev_and_release_builds_share_nothing() {
+        let dev: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let release: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.release.json")).unwrap();
+        assert_eq!(dev["identifier"], "io.github.charanp11.bouncer.dev");
+        assert_eq!(release["identifier"], "io.github.charanp11.bouncer");
+
+        // This test runs as a debug build: dev names everywhere.
+        assert_eq!(ipc::NAME, "Bouncer-dev");
+        let rules = rules::path().unwrap();
+        assert!(rules.ends_with(std::path::Path::new("Bouncer-dev").join("rules.toml")));
+        let pipe = ipc::endpoint().unwrap();
+        let pipe = pipe.to_string_lossy();
+        assert!(pipe.contains("bouncer-dev"), "{pipe}");
+        // The release names (the relay's dev_and_release_builds_have_their_own_names
+        // checks them in CI's release run) never appear in a dev build.
+        assert!(!rules.ends_with(std::path::Path::new("Bouncer").join("rules.toml")));
+    }
+
     /// The installer: NSIS only (no MSI, which needs admin), per user; the
     /// relay and CLI go beside the app; the uninstall steps are guarded.
     #[test]
@@ -1092,6 +1115,10 @@ fn tray(",
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let bundle = &conf["bundle"];
         assert_eq!(bundle["targets"], serde_json::json!(["nsis", "app", "dmg"]));
+        // The installed program is bouncer-app.exe (the package's name; no
+        // mainBinaryName): the uninstall step below tells an upgrade by it.
+        assert!(conf.get("mainBinaryName").is_none());
+        assert_eq!(env!("CARGO_PKG_NAME"), "bouncer-app");
         assert_eq!(bundle["windows"]["nsis"]["installMode"], "currentUser");
         assert_eq!(
             bundle["windows"]["nsis"]["installerHooks"],
@@ -1114,6 +1141,8 @@ fn tray(",
             "$UpdateMode <> 1",
             "$PassiveMode <> 1",
             "${AndIfNot} ${Silent}",
+            // Run by an installer (an upgrade): in place, beside the app.
+            r#"${AndIfNot} ${FileExists} "$EXEDIR\bouncer-app.exe""#,
         ] {
             assert!(pre.contains(guard), "{guard}");
         }
