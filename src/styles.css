@@ -544,6 +544,7 @@ pre.cmd {
 }
 
 .explain .xhead b {
+  flex: none;
   color: var(--text);
   font-weight: 500;
   font-size: 12.5px;

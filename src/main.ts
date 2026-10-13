@@ -1352,7 +1352,7 @@ function explainPart(request: Request): HTMLElement {
   const box = el("div", "explain");
   box.dataset.explain = request.id;
   const top = el("div", "xhead");
-  top.append(el("b", "", "Claude's explanation"), el("span", "", "Can be wrong. It never decides: you do."));
+  top.append(el("b", "", "Claude's explanation"), el("span", "", "Can be wrong · you decide"));
   const body = el("div", "xbody");
   // Reachable with Tab, so the keyboard can scroll it.
   body.tabIndex = 0;
