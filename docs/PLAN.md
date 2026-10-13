@@ -3035,16 +3035,25 @@ the app: `bouncer-app.exe`, `bouncer-hook.exe`, `bouncer.exe`,
 Uninstall (`installer-hooks.nsh`, on Tauri 2.12.1's template):
 - Before the files go: `bouncer.exe uninstall-hooks --uninstalling` in its
   own console (the CLI: diff, y / N, dated backup, atomic write). The flag
-  puts why it asks ("Bouncer is being uninstalled… Upgrading? Answer N")
+  puts why it asks ("Bouncer is being uninstalled… Installing Bouncer
+  again next? Answer N")
   right above the question, says what a "no" means, and waits for Enter.
-  Skipped in update mode and in silent / passive runs.
+  Skipped in update mode, silent / passive runs, and whenever an installer
+  runs the uninstaller (below).
 - After: Tauri's "Delete the application data" box (unticked) removes the
   WebView2 folder; our step adds `%APPDATA%\Bouncer`, only when ticked and
   never in an update. The one exception to "one wipe path" (U9, W7).
-- Known limit: Tauri's installer offers "uninstall before installing" when
-  the version changes, and runs the old uninstaller in full; our console
-  then asks, and says to answer N. A "y" there leaves Settings showing
-  "Not installed" with Install…. Same-version reinstall never uninstalls.
+- Upgrades never ask (Charan's review of #33). Tauri's installer runs the
+  previous uninstaller itself when the version changes ("uninstall before
+  installing", its reinstall page) with `_?=<install dir>` appended, and
+  NSIS then runs that uninstaller in place, from the install folder. A
+  person's uninstall (Settings > Apps) starts the uninstaller without it, so
+  NSIS first copies it to `%TEMP%\~nsuN.tmp\Un.exe` and runs the copy (seen
+  in the c-5 run). Our step asks only when the uninstaller does not sit
+  beside `bouncer-app.exe` (`$EXEDIR`), plus not /UPDATE, silent or passive.
+  The main program's name is pinned by a test. "No" stays the default.
+  Proven by reading Tauri 2.12.1's template and NSIS's documented `_?=`;
+  the upgrade run itself is in the disposable test below.
 - Tauri's uninstaller also deletes a `Run` value named `Bouncer`, i.e. our
   autostart (c-3).
 
@@ -3077,6 +3086,45 @@ been copied first and was restored from outside the container (765 files,
 55.5 MB; 10 long-path cache files didn't copy and are rebuilt by WebView2).
 The dev app and an installed Bouncer share that folder because they share
 the identifier: a real user has only one.
+
+**c-5 review fixes (Charan, 2026-10-13).**
+
+1. Dev builds share nothing with an installed Bouncer. `bouncer_relay::NAME`
+   is `Bouncer-dev` in debug builds and `Bouncer` in release builds; it
+   names the pipe (`\\.\pipe\bouncer-dev-<SID>`) or socket
+   (`~/Library/Application Support/Bouncer-dev/bouncer.sock`), the data
+   folder (`%APPDATA%\Bouncer-dev`: rules, preferences, history, chat) and
+   the autostart value. The identifier: `tauri.conf.json` (dev, tests,
+   smoke) is `io.github.charanp11.bouncer.dev`, so its own WebView2 folder;
+   `tauri.release.json` (only the installer build) sets
+   `io.github.charanp11.bouncer`. Tests: the app's
+   `dev_and_release_builds_share_nothing` (identifiers, data folder, pipe)
+   and the relay's `dev_and_release_builds_have_their_own_names`, which CI
+   also runs in a release build. The macOS smoke test uses the dev folder.
+   Charan's dev app keeps its playground rules (`BOUNCER_RULES`); its
+   WebView2 data starts fresh in the `.dev` folder (nothing of Bouncer's
+   lives there; settings are in `preferences.json`).
+2. Upgrades never offer to remove hooks: see "Upgrades never ask" above.
+3. New standing rule (`CLAUDE.md`): no uninstall, wipe or delete step that
+   can reach Charan's real profile; destructive tests only in scratch paths
+   or a disposable environment.
+4. Windows Sandbox: not on this PC. Windows 11 Home Single Language
+   (`CoreSingleLanguage`, build 26100); Sandbox needs Pro, Enterprise or
+   Education; `WindowsSandbox.exe` isn't there. The disposable environment
+   is GitHub's `windows-latest` runner (a fresh VM per job), with c-6:
+
+   | Step (CI job `installer`, after the release build) | Expected |
+   | --- | --- |
+   | Install `setup.exe /S` | Exit 0, no elevation; four files in `%LOCALAPPDATA%\Bouncer`, uninstall entry, Start menu shortcut |
+   | Hooks with the installed `bouncer.exe` into `$CLAUDE_CONFIG_DIR` | Points at the installed `bouncer-hook.exe` |
+   | Use: a permission request through that hook | Waits on a card (still running after 10 s), then stopped |
+   | Autostart: `Run` value written and read back, then removed | Only our value; uninstall also clears it |
+   | Upgrade: a second build with a higher version, interactive, "uninstall before installing" (driven with UI Automation) | Our console never opens; hooks and path kept |
+   | Uninstall from the uninstaller, box unticked, `y` in the console | Diff shown, backup, `settings.json` byte for byte; data kept |
+   | Reinstall, uninstall with the box ticked | `%APPDATA%\Bouncer` and the WebView2 folder gone |
+
+   The same steps are Charan's hand check on a real desktop (TESTS, Phase 9
+   hand checks), since the runner isn't his machine.
 
 ## Phase 7 — File drop (~1 week)
 
