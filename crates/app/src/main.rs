@@ -1101,7 +1101,11 @@ fn tray(",
         assert!(rules.ends_with(std::path::Path::new("Bouncer-dev").join("rules.toml")));
         let pipe = ipc::endpoint().unwrap();
         let pipe = pipe.to_string_lossy();
-        assert!(pipe.contains("bouncer-dev"), "{pipe}");
+        // Windows: \\.\pipe\bouncer-dev-<SID>; macOS: …/Bouncer-dev/bouncer.sock.
+        #[cfg(windows)]
+        assert!(pipe.starts_with(r"\\.\pipe\bouncer-dev-"), "{pipe}");
+        #[cfg(unix)]
+        assert!(pipe.ends_with("/Bouncer-dev/bouncer.sock"), "{pipe}");
         // The release names (the relay's dev_and_release_builds_have_their_own_names
         // checks them in CI's release run) never appear in a dev build.
         assert!(!rules.ends_with(std::path::Path::new("Bouncer").join("rules.toml")));
