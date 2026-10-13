@@ -126,6 +126,49 @@ fn install_then_uninstall_is_byte_identical() {
     }
 }
 
+/// The uninstaller's console: it says why it asks, a "no" says what Claude
+/// Code will show, and it waits for Enter before closing. Same rules.
+#[test]
+fn the_uninstaller_asks_explains_and_waits() {
+    let dir = temp_dir("uninstalling");
+    let settings = dir.join("settings.json");
+    fs::write(&settings, ORIGINAL).unwrap();
+    assert!(install(&dir, "y\n").status.success());
+    let installed = fs::read_to_string(&settings).unwrap();
+
+    let out = bouncer(&dir, &["uninstall-hooks", "--uninstalling"], "n\n\n");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{out:?}");
+    assert!(text.contains("Bouncer is being uninstalled"), "{text}");
+    assert!(text.contains("Answer N to keep them"), "{text}");
+    assert!(text.contains("- ") && text.contains("Kept."), "{text}");
+    assert!(text.trim_end().ends_with("Press Enter to close."), "{text}");
+    // The why sits right above the question, where a long diff can't push it away.
+    let why = text.find("Bouncer is being uninstalled").unwrap();
+    assert!(why > text.rfind("\n- ").unwrap(), "{text}");
+    assert!(why < text.find("Write these changes?").unwrap(), "{text}");
+    assert!(text.contains("missing hook until\nthe entries"), "{text}");
+    assert_eq!(fs::read_to_string(&settings).unwrap(), installed);
+
+    let out = bouncer(&dir, &["uninstall-hooks", "--uninstalling"], "y\n\n");
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(fs::read_to_string(&settings).unwrap(), ORIGINAL);
+
+    // Only uninstall-hooks takes it.
+    let relay = dir.join("bouncer-hook.exe");
+    let out = bouncer(
+        &dir,
+        &[
+            "install-hooks",
+            "--uninstalling",
+            "--relay",
+            relay.to_str().unwrap(),
+        ],
+        "y\n",
+    );
+    assert!(!out.status.success());
+}
+
 #[test]
 fn nothing_is_written_without_yes() {
     for answer in ["", "n\n", "no\n", "maybe\n", "\n"] {

@@ -17,17 +17,35 @@ const USAGE: &str = "usage: bouncer install-hooks [--settings FILE] [--relay PAT
 FILE defaults to ~/.claude/settings.json ($CLAUDE_CONFIG_DIR/settings.json if set).
 PATH defaults to bouncer-hook next to this program.";
 
+/// The uninstaller runs `uninstall-hooks --uninstalling` in its own console.
+const UNINSTALLING: &str =
+    "Bouncer is being uninstalled. Remove its hooks from Claude Code's settings?
+Upgrading to a new version? Answer N to keep them.
+";
+
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Only after uninstall-hooks: the uninstaller's console, which closes
+    // as soon as this ends, so it waits for Enter.
+    let uninstalling = args.first().is_some_and(|c| c == "uninstall-hooks")
+        && args.iter().any(|a| a == "--uninstalling");
+    args.retain(|a| !uninstalling || a != "--uninstalling");
+    let code = match run(args, uninstalling) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("bouncer: {e}");
             ExitCode::FAILURE
         }
+    };
+    if uninstalling {
+        print!("\nPress Enter to close.");
+        let _ = io::stdout().flush();
+        let _ = io::stdin().lock().read_line(&mut String::new());
     }
+    code
 }
 
-fn run(args: Vec<String>) -> Result<(), String> {
+fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     let (command, rest) = args.split_first().ok_or(USAGE)?;
     let installing = match command.as_str() {
         "install-hooks" => true,
@@ -62,6 +80,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
 
     println!("Changes to {}:\n", path.display());
     print!("{}", change.diff());
+    // Right above the question: a long diff scrolls the top out of view.
+    if uninstalling {
+        print!("\n{UNINSTALLING}");
+    }
     print!("\nWrite these changes? [y/N] ");
     io::stdout().flush().map_err(|e| e.to_string())?;
     let mut answer = String::new();
@@ -70,6 +92,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
         .read_line(&mut answer)
         .map_err(|e| e.to_string())?;
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        if uninstalling {
+            println!(
+                "Kept. Without Bouncer, Claude Code will report a missing hook until\n\
+                 the entries running bouncer-hook.exe are removed from {}.",
+                path.display()
+            );
+        }
         return done("Nothing written.");
     }
     if let Some(backup) = change.write()? {
