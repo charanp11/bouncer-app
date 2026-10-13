@@ -3022,6 +3022,62 @@ the second-launch check. Prototype v0.26. TESTS W3.
 - [x] Settings turns it off and on; taken by another app is harmless and shown
 - [x] Test instance: while it ran, a second registration of Ctrl+Alt+B from PowerShell failed (it held the keys), so the key press reached only Bouncer; with a Bash card up, Ctrl+Alt+B moved focus from the page body to that card's Deny, Allow untouched, the relay still waiting (it printed nothing when the app was stopped); off → keys free and `"shortcut": false` saved; held by PowerShell → on reports taken; released → on holds them again; app stopped → keys free
 
+**c-5: Installer (2026-10-13).** NSIS only (`bundle.targets`: nsis, app,
+dmg; no MSI), `installMode: currentUser` → `%LOCALAPPDATA%\Bouncer`, no
+admin. `scripts/bundle.mjs` builds the relay and the CLI in release, copies
+them to `crates/app/binaries/<name>-<triple>` and runs `tauri build` with
+`tauri.release.json` (just `externalBin`; kept out of `tauri.conf.json`
+because every plain cargo build would then need them). Installed beside
+the app: `bouncer-app.exe`, `bouncer-hook.exe`, `bouncer.exe`,
+`uninstall.exe`. Installer: **2.24 MiB** (2,353,157 bytes), version still
+0.0.0 until the release workflow (c-6) sets it from the tag.
+
+Uninstall (`installer-hooks.nsh`, on Tauri 2.12.1's template):
+- Before the files go: `bouncer.exe uninstall-hooks --uninstalling` in its
+  own console (the CLI: diff, y / N, dated backup, atomic write). The flag
+  puts why it asks ("Bouncer is being uninstalled… Upgrading? Answer N")
+  right above the question, says what a "no" means, and waits for Enter.
+  Skipped in update mode and in silent / passive runs.
+- After: Tauri's "Delete the application data" box (unticked) removes the
+  WebView2 folder; our step adds `%APPDATA%\Bouncer`, only when ticked and
+  never in an update. The one exception to "one wipe path" (U9, W7).
+- Known limit: Tauri's installer offers "uninstall before installing" when
+  the version changes, and runs the old uninstaller in full; our console
+  then asks, and says to answer N. A "y" there leaves Settings showing
+  "Not installed" with Install…. Same-version reinstall never uninstalls.
+- Tauri's uninstaller also deletes a `Run` value named `Bouncer`, i.e. our
+  autostart (c-3).
+
+Check on this PC (2026-10-13; Charan asked for it). This Claude Code runs
+inside the Claude desktop app, which is an MSIX package: Windows sends its
+child processes' writes under `AppData` to the package's own storage
+(`Packages\Claude_…\LocalCache`), registry writes too. So the install landed
+there, not in the real profile; the release's real-desktop install is a
+Phase 9 hand check. Found because the redirected folders also grant the
+package's capability SID full control, and Bouncer's trust check (rightly)
+refused that history folder and rules file: fail safe, not a bug.
+
+| Step | Result |
+| --- | --- |
+| Install (`/S`) | Exit 0, no admin prompt; the four files; uninstall entry; Start menu shortcut |
+| Use | Hooks installed with the installed `bouncer.exe` into a scratch `CLAUDE_CONFIG_DIR`; its command is `%LOCALAPPDATA%\Bouncer\bouncer-hook.exe`; a permission request through it waited on a card for 100 s and printed nothing (timed out unanswered) |
+| Install over itself, app running | The app was closed; one uninstall entry; `settings.json` unchanged; hook path valid; a request waited on a card again |
+| Uninstall, box unticked (first build) | Console with the diff → `y` → backup, hooks removed, `settings.json` byte for byte; files, entry, shortcut gone; `%APPDATA%\Bouncer` and the WebView2 folder kept |
+| Uninstall, box ticked (final build) | The why right above `[y/N]`; `y` → backup, `settings.json` byte for byte; `%APPDATA%\Bouncer` and the WebView2 folder gone; other folders untouched |
+| Real disk and registry (checked from outside the container) | No `Bouncer` program folder, no uninstall key, no `Run` value, no test keys |
+
+The uninstaller was driven without mouse or keys: UI Automation found its
+window, the box and buttons got `BM_SETCHECK` / `WM_COMMAND`, and the
+console's answer was written into that console's input only.
+
+One side effect, repaired: the ticked uninstall deleted
+`%LOCALAPPDATA%\io.github.charanp11.bouncer` (the WebView2 folder of the
+same app ID, which Charan's dev app also uses) in the real profile. It had
+been copied first and was restored from outside the container (765 files,
+55.5 MB; 10 long-path cache files didn't copy and are rebuilt by WebView2).
+The dev app and an installed Bouncer share that folder because they share
+the identifier: a real user has only one.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
