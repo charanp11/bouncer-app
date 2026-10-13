@@ -2774,6 +2774,84 @@ No new dependency. Checked on the test instance (real clicks, the fake's
 `md` answer): blocks as expected, no links, the tag shown as text; 6.5% of a
 core while streaming (30 s), no worse than before. C32–C33.
 
+**Roadmap b: 6e "Explain this request" (2026-10-12).**
+
+Audit. The card already has everything needed: the desk's view holds each
+waiting request's tool and whole command (hidden characters as `\u{…}`), and
+the Phase 6 runner gives a locked chat. Decisions inside Charan's brief:
+
+- The page sends only the card's request ID (`explain`); the backend takes
+  the command from the waiting request itself, never text from the page.
+- Shell commands only (Bash, PowerShell): "what the command does". Write and
+  Edit already show their whole content and diff on the card.
+- Its own run of the locked chat (the same constant command line, confirmed
+  `claude`, empty folder, limits, environment), one message, one at a time.
+  Not the chat panel's conversation: a card can come while a chat streams.
+  The model is the panel's choice (Default unless changed).
+- The prompt (core, `explain_prompt`) is fixed wording: what it does, then
+  what could go wrong, never whether to allow; the command is data, fenced by
+  more `~` than any run in it, so it can't close the fence and pose as the
+  instructions. It goes on stdin as one `serde_json` line like every prompt.
+- It ends when answered, on Stop (`explain_stop`), at quit, when another one
+  starts, and whenever a view comes without its card (`show`, which every
+  queue change goes through: answered, timed out, gone). Each run has a
+  number, so an old run finishing never clears a newer one on the same card.
+- The page: a dashed "Explain this command" under Deny / Allow. The box goes
+  below them at a fixed height (132 px of text, then it scrolls): the
+  buttons never move and the window doesn't resize while it streams. Its
+  text is filled in place (twice a second at most, as chat), so the card
+  isn't rebuilt under the mouse and a click on Deny is never lost. Allow
+  re-arms (600 ms) whenever the box opens or closes, in case the island sits
+  at the screen's bottom and the window had to move. Explain, Stop and Hide
+  are one control (one key), so the keyboard stays on it, never Allow.
+- "A card still comes first" holds: the box lives inside the card, below
+  its buttons, and nothing else about the card changes.
+
+| Threat | Fix |
+| --- | --- |
+| The page (or anything in it) gets other text explained or sent | Only an ID goes up; the text comes from the waiting request; a card not waiting → `gone` |
+| The command talks the model into "it's safe, allow it" | Fixed wording asks for no verdict and calls the command data; the fence can't be closed early; the box says "Can be wrong · you decide"; nothing it says changes the card, the rules or the risk |
+| The explanation answers the card | No answer path in it (tested by reading the source); Deny / Allow unchanged |
+| Buttons move under the mouse, or a click is lost to a rebuild | Box below the buttons, fixed height, filled in place; Allow re-arms on open / close |
+| Keyboard lands on Allow | One key for Explain / Stop / Hide; the keyboard-arrival rule still goes to Deny |
+| A run outlives its card | Stopped with every view that lacks the card, on Stop, at quit, by the chat limits |
+| Argv or lock weakened | The same constant command line (C10); the prompt only on stdin (E2) |
+| Model text injects markup | Text nodes only (Markdown as roadmap a); UI11 |
+
+Done when:
+
+- [x] Explain on a shell card streams an answer from the locked chat; other tools have no button
+- [x] Only the request ID goes up; hostile commands stay data on stdin; argv locked (E1, E2)
+- [x] Deny / Allow work while it answers; buttons never move; Allow re-arms; focus never on Allow (E4–E6)
+- [x] It stops with Stop, the card leaving and quit; its `claude` is gone (E7)
+- [x] Prototype v0.23 has the state and a build-spec rule; `docs/TESTS.md` E1–E8
+- [x] fmt, clippy, tests and `check-tests` green locally; CI on the PR
+
+Checks (2026-10-12), test instance (scratch rules, its own pipe, WebView2
+folder and debug port, the fake `claude` first on PATH; a black backdrop;
+real clicks and keys behind the guard; requests sent through the scratch
+relay). Screenshots: `design/screenshots/explain/`.
+
+- Not confirmed yet: "Confirm the claude path in Settings first.", buttons
+  unmoved. After confirming in Settings: the answer streams in, the island's
+  height stays the same (570.95 px in both samples) and Deny / Allow stay put.
+- Deny mid-stream on a risky card: Claude Code got the deny; the
+  explanation's `claude` was gone within 1.5 s.
+- Allow re-armed: disabled at the Explain click, armed 600 ms later.
+- Keyboard: focus on Stop; Space → "Stopped." and Hide; Enter on Hide → the
+  button back, focus on it; Enter on it → explaining again. A click on
+  Explain that also gave the island the keyboard put focus on Deny (A2), so
+  a Space then denied: by design, never Allow.
+- The app stopped with a card and an explanation up: the relay printed
+  nothing (fail safe); a card left 100 s timed out as usual.
+- Once, early on, a Space on Stop closed the whole box instead of showing
+  "Stopped."; not reproduced in three tries since (recorded with key and
+  click events). Watch for it.
+- CPU, % of one core, app + WebView2 (the `claude` child left out): a card
+  with the cursor on it 4.8%; while an explanation streams (8 s, the fake
+  sends a piece every 200 ms) 20.7%; answered and still up 5.7–7.1%; box
+  closed 6.3%. Streaming lasts only as long as the answer.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
