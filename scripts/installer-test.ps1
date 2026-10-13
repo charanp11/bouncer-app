@@ -125,7 +125,12 @@ function Control($window, $name, $type = "") {
         Select-Object -First 1
 }
 function Button($window, $name) { Control $window $name "ControlType.Button" }
-function Press($button) { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+# Presses a web button. The island re-renders often, so an element can be gone
+# by the time it's pressed: that's not an error, the caller looks again.
+function Press($button) {
+    try { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $true }
+    catch [System.Windows.Automation.ElementNotAvailableException] { $false }
+}
 function Click($control) {
     # A button's click as its dialog hears it (no mouse, no keys).
     $h = [IntPtr]$control.Current.NativeWindowHandle
@@ -188,7 +193,7 @@ try {
     $awayGone = {
         if (Control $island "While you were away") {
             $c = Button $island "Close"
-            if ($c) { Press $c }
+            if ($c) { [void](Press $c) }
         }
     }
     # Closing the summary folds the island back to its pill ("1 session · …"):
@@ -196,34 +201,39 @@ try {
     $opened = {
         & $awayGone
         $pill = Button $island "*session*"
-        if ($pill -and -not (Button $island "Settings")) { Press $pill }
+        if ($pill -and -not (Button $island "Settings")) { [void](Press $pill) }
     }
     $gear = Wait-Until { & $opened; Button $island "Settings" } 30
     if (-not $gear) { Dump $island "no Settings button in the island" }
-    Press $gear
+    [void](Press $gear)
     $switch = Wait-Until {
         & $opened
         if (-not (Control $island "Rules file")) {  # not in Settings (the summary took over): the gear again
             $g = Button $island "Settings"
-            if ($g) { Press $g }
+            if ($g) { [void](Press $g) }
         }
         Button $island "Start with Windows"
     } 30
     if (-not $switch) { Dump $island "no Start with Windows switch in Settings" }
-    $flip = {
-        $s = Button $island "Start with Windows"
-        $pattern = $null
-        if ($s.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $pattern.Toggle() }
-        else { $s.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+    # Press the switch until the Run value shows the state wanted (at most one
+    # press per 2 s, so a slow write is never flipped back).
+    $setRun = {
+        param($on)
+        $is = { $v = (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Bouncer; if ($on) { $v -eq $want } else { -not $v } }
+        $end = (Get-Date).AddSeconds(30)
+        while (-not (& $is) -and (Get-Date) -lt $end) {
+            & $opened
+            $s = Button $island "Start with Windows"
+            if ($s) { [void](Press $s) }
+            $wait = (Get-Date).AddSeconds(2)
+            while (-not (& $is) -and (Get-Date) -lt $wait) { Start-Sleep -Milliseconds 200 }
+        }
+        & $is
     }
     $want = "`"$(Join-Path $dir 'bouncer-app.exe')`""
     Check (-not (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Bouncer) "Start with Windows: off by default" "no Run value"
-    & $flip
-    $on = Wait-Until { (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Bouncer -eq $want } 10
-    Check ([bool]$on) "Start with Windows: on" "Run value Bouncer = $want"
-    & $flip
-    $off = Wait-Until { -not (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Bouncer } 10
-    Check ([bool]$off) "Start with Windows: off" "Run value removed"
+    Check (& $setRun $true) "Start with Windows: on" "Run value Bouncer = $want"
+    Check (& $setRun $false) "Start with Windows: off" "Run value removed"
     Stop-App $app
 
     # 5. Upgrade through "uninstall before installing": our console must never open.
