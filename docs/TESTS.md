@@ -192,6 +192,12 @@ command does and what could go wrong. It never decides.
 | E7 | Lifetime | Ends when answered, on Stop, when its card is answered, times out or goes, at quit, or when another starts; its `claude` is gone; events carry the card's request ID and any other card's are ignored | unit, frontend, real-click | `chat::tests::explanation_events_carry_the_card_not_a_chat` `tests::only_a_waiting_cards_text_is_explained` `ts: explain: the answer joins as text; another card's events, and anything after the end, are ignored` | CI; real-click 2026-10-12 |
 | E8 | The commands | `explain` and `explain_stop` granted, nothing else new; same CSP | unit | `tests::strict_csp_and_only_our_commands` | CI |
 
+## Windows release (roadmap c)
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| W1 | Memory, release build (app + WebView2, 60 s) | Task Manager's private memory about 93 MB idle, 103 MB with a card, ours 5 MB; level, no climb (`docs/PLAN.md`, roadmap c) | real-click (measured on the test instance) | — | measured 2026-10-12 |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |

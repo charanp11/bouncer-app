@@ -5,7 +5,7 @@ session live, auto-approves safe actions under rules you control, flags risky on
 with a plain reason, and never blocks the agent. A security guard for coding
 agents, with personality. Ten phases (0–9), $0.
 
-**Current phase: Phase 6 — Chat in the island (6a–6c and roadmap a merged, v0.6.3; next: roadmap b, 6e "Explain this request" — see "Roadmap after Phase 6c")**
+**Current phase: Roadmap c — Windows release, v0.7.0 (audit done 2026-10-12; PRs c-1 to c-7 — see "Roadmap c" under "Roadmap after Phase 6c")**
 
 ## MVP scope
 
@@ -40,7 +40,12 @@ Fails safe: app missing or slow → relay prints nothing → Claude Code asks in
 2. **Implement** — small commits, one concern each, in the order listed.
 3. **Test** — unit tests, integration tests on recorded real hook payloads, a short
    manual script on a real machine.
-4. **Verify** — security checklist, reread the whole diff, update docs, tag `v0.N.0`.
+4. **Verify** — security checklist, reread the whole diff, update docs.
+
+Tags (Charan, 2026-10-12): a tag means a release. Merges are no longer
+tagged; the release workflow runs only on `v*.*.*` tags created from v0.7.0
+on (the old `v0.5.x` / `v0.6.x` tags never trigger it) and makes a draft
+that Charan publishes.
 
 ---
 
@@ -2867,6 +2872,114 @@ relay). Screenshots: `design/screenshots/explain/`.
   sends a piece every 200 ms) 20.7%; answered and still up 5.7–7.1%; box
   closed 6.3%. Streaming lasts only as long as the answer.
 
+**Roadmap c: Windows release (audit 2026-10-12, decisions Charan 2026-10-12).**
+
+Audit. Read: `docs/COMPARE.md`, Phase 9, `tauri.conf.json`, `bin/bouncer.rs`,
+`hooks.rs`, `main.rs` (tray, `about`, `hook_status`), the Settings screen,
+the CI workflows; Tauri's Windows installer guide; the signing options.
+
+What the plan had wrong or missing:
+
+- **No MSI.** Tauri's MSI installs per machine (admin). NSIS installs per
+  user under `%LOCALAPPDATA%`, no admin (Tauri's default `currentUser`).
+  `bundle.targets` was `"all"` (both): NSIS only.
+- **Installed users had no way to add the hooks.** Only `bouncer
+  install-hooks` in a terminal could; Settings showed the command as text.
+  The installer ships `bouncer-hook.exe` and `bouncer.exe` beside the app,
+  and Settings does install / re-install / remove itself (diff, confirm,
+  dated backup, atomic write: rule 6, the same code as the CLI).
+- **The version was `0.0.0`** everywhere; installer upgrades need a real
+  one. It now comes from the release tag (Cargo, `tauri.conf.json`, the
+  installer).
+- **A tag on every merge** would publish a release per merge. From now on a
+  tag means a release (`v*.*.*`, first `v0.7.0`); the old `v0.5.x` /
+  `v0.6.x` tags never trigger it.
+- **User data isn't in the app ID's folders.** Rules, preferences, history
+  and the chat folder are in `%APPDATA%\Bouncer`; WebView2's data is under
+  `%LOCALAPPDATA%\io.github.charanp11.bouncer`. The uninstaller's data
+  option removes exactly those two, only when ticked.
+
+Signing (cost, what users see):
+
+| Option | Cost | Result |
+| --- | --- | --- |
+| Unsigned | $0 | SmartScreen "Windows protected your PC", Unknown publisher → More info → Run anyway; Edge may say "not commonly downloaded". Smart App Control (when on) blocks it with no override. |
+| SignPath Foundation | $0 | Publisher "SignPath Foundation"; OSI license, CI-built releases, MFA, a manual approval per release, an existing release with some reputation (their call). SmartScreen warnings fade with downloads. |
+| Azure Artifact Signing | ~$9.99 / month | Own name; individuals in the US / Canada only, ID check; reputation still builds over time. |
+| Certum open-source certificate | ~€49 | Removes "Unknown publisher"; SmartScreen effect disputed; certificates now at most 459 days. |
+| OV certificate (other CAs) | ~$150–300 / year | As Certum. |
+
+Decisions (Charan, 2026-10-12):
+
+1. v0.7.0 ships unsigned with the SmartScreen walkthrough, SHA-256
+   checksums and attestations; apply to SignPath once it's out. The release
+   workflow keeps a slot for a signing step.
+2. Shortcut: `tauri-plugin-global-shortcut` (approved new dependency,
+   pinned; deny and npm-audit stay green). Default Ctrl+Alt+B, can be
+   turned off in Settings; it opens the island and focuses Deny, never
+   approves.
+3. Tags: a tag means a release; the workflow runs only on `v*.*.*` tags
+   created from now on and makes a **draft** (Charan presses Publish).
+4. Uninstall's "Also delete my Bouncer data" box: the one documented
+   exception to "one wipe path". Unticked by default, uninstall only,
+   removes only `%APPDATA%\Bouncer` and the WebView2 folder.
+5. First release: v0.7.0.
+6. Before the release: check where Bouncer works (Claude Code in a
+   terminal, the VS Code extension, the Claude desktop app's Code tab),
+   playground hooks only: do our hooks fire, PermissionRequest included,
+   and does Allow / Deny from the island reach it. Results in the README's
+   "What it can't do", with Claude Code on the web (cloud), which can't be
+   seen.
+7. After the release, the roadmap order becomes: v0.8 questions (c2), v0.9
+   file drop (d), other agents one per release (h), Ask about this session
+   (f), Mac (g), music (e), Linux (i, optional). One feature per release.
+
+PRs, in order (each its own four stages, `docs/TESTS.md` rows, green CI,
+Charan's OK before merging):
+
+| # | PR | Done when |
+| --- | --- | --- |
+| c-1 | Audit and memory (docs) | This section; memory measured next to the CPU numbers; `COMPARE.md` updated |
+| c-2 | Hooks in the app | Settings shows installed / incomplete / moved / missing; install, re-install and remove from Settings with the diff, Confirm, dated backup and atomic write; the CLI unchanged in behaviour, sharing the code |
+| c-3 | Autostart | Settings switch, off by default; per-user `Run` key only; off removes only our value |
+| c-4 | Shortcut | Ctrl+Alt+B opens the island with the keyboard on Deny (or the list with no card); never approves; Settings turns it off; registration failure is harmless |
+| c-5 | Installer | NSIS only, per user, no admin; relay and CLI beside the app; version from the tag; uninstall offers hook removal (diff, y/N, backup) except during upgrades and silent runs; data box unticked by default; install → use → uninstall on the test instance gives back the scratch `settings.json` byte for byte |
+| c-6 | Release workflow | On `v*.*.*` tags only: checks, build, `SHA256SUMS.txt`, build attestation, draft release with notes; write permissions only in that job; a signing slot |
+| c-7 | README and demo GIF | What Bouncer is, demo GIF (no real paths or plan use), install / verify / uninstall, SmartScreen and Defender notes, what it can't do (with the surfaces check, decision 6); then the roadmap order (decision 7) |
+
+Memory (c-1, 2026-10-12). Release build (`--release`, custom protocol)
+from a scratch target, its `%APPDATA%` and `%LOCALAPPDATA%` pointed at a
+scratch folder (so rules, history and WebView2 data stayed there), on the
+real pipe while no other Bouncer ran. Sampled once a second for 60 s over
+the app and every process under it (8: the app and WebView2's). "Private"
+is the private working set, Task Manager's "Memory" column; average / peak.
+
+| Case (60 s) | Private, all (MB) | App alone (MB) | Working set incl. shared (MB) | Private bytes (MB) |
+| --- | --- | --- | --- | --- |
+| Idle, no session | 93.1 / 95.0 | 5.1 | 397.7 / 401.8 | 143.4 / 145.6 |
+| A card up (Bash request) | 103.2 / 115.6 | 5.1 | 410.5 / 419.6 | 156.8 / 167.7 |
+| After the card timed out (session listed) | 102.7 / 109.5 | 5.1 | 410.5 / 416.9 | 155.9 / 162.8 |
+
+WebView2 is ~95% of it; our Rust process is 5 MB. A card adds ~10 MB and
+it stays about level after (no climb across the 60 s). Coucou not measured:
+that means installing it, which belongs on a separate test machine, not
+this PC. The chat runs Claude Code, whose memory is its own and not counted.
+
+| Threat | Fix |
+| --- | --- |
+| Installer needs admin, or writes outside the user's folders | NSIS `currentUser`; no MSI |
+| Uninstall leaves hooks that point at a deleted relay | Uninstall offers removal with the diff; a "no" says what Claude Code will show and how to remove them later |
+| Upgrade removes the hooks | The hook step is skipped in update mode and silent runs; the install folder (and so the hook path) stays the same |
+| Uninstall deletes data by surprise | The data box is unticked; it removes only the two named folders; documented as the one exception to "one wipe path" |
+| Settings writes `settings.json` silently | The same rule-6 path as the CLI: diff shown, Confirm, dated backup, atomic write, refused if the file changed meanwhile; shared code, shared tests |
+| A shortcut approves | It only opens the island and focuses Deny (arrival rule); tested by reading its handler; Allow keeps its arm delay |
+| A shortcut taken by another app | Registration failure is ignored (the island works without it); Settings can turn it off |
+| Autostart behind your back | Off by default; only our value in the per-user `Run` key, removed when turned off |
+| Tampered download | Built only by CI from a tag; `SHA256SUMS.txt`; GitHub build attestation; draft until Charan publishes |
+| Release job abused | Only it gets `contents: write`, `id-token: write`, `attestations: write`; Actions pinned by SHA; no secrets until signing |
+| WebView2 missing on install | The installer's bootstrapper fetches it (the installer's only network use; the app still makes none); documented |
+| Unsigned binary flagged | README walkthrough, checksums, attestation; Defender false-positive report link; SignPath after v0.7.0 |
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
@@ -2930,8 +3043,8 @@ forward), Mac release is g, Linux is i.
 
 - **Audit:** document unsigned-app warnings per OS; Defender false-positive process;
   check eligibility for free SignPath Foundation signing.
-- **Implement:** release workflow on `v*` tags: macOS universal `.dmg`, Windows
-  `.msi`, SHA-256 checksums, GitHub build attestations; README with pitch, demo GIF,
+- **Implement:** release workflow on `v*.*.*` tags: macOS universal `.dmg`, Windows
+  NSIS `.exe` (per user; no MSI, roadmap c), SHA-256 checksums, GitHub build attestations; README with pitch, demo GIF,
   install / verify / uninstall steps, privacy statement.
 - Settings warns when installed hooks are missing events; one click re-installs.
   (Same rules as `install-hooks`: shows the diff, asks, dated backup, atomic

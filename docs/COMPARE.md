@@ -27,7 +27,7 @@ was copied.
 | Activity history | Weekly recap | Local, redacted activity log (secrets removed before writing), 30-day retention, one wipe path; away summary | **Bouncer** (redaction, wipe) |
 | Settings file writes | Diff, dated backup, consent, only its entries | Same, plus byte-identical uninstall and atomic write (tested) | Even |
 | CPU | Cursor polled from Rust at ~60 Hz while the island is open, twice a second when folded (`island.rs`); not measured here | Event-driven, no polling; motion in short bursts: idle 0.5–1.7%, working 4%, a card 4.7%, chat streaming 15% (one core, 60 s) | **Bouncer** by design; theirs unmeasured |
-| Memory | Larger dependency tree (tokio, reqwest, rustls, ring, keyring, WebSocket, mDNS); not measured | Small tree (serde_json, toml, getrandom, windows-sys, Tauri); **not measured yet** | Unknown until measured |
+| Memory | Larger dependency tree (tokio, reqwest, rustls, ring, keyring, WebSocket, mDNS); not measured | Measured (release build, Task Manager's private memory, app + WebView2, 60 s): idle 93 MB, a card up 103 MB; our own process 5 MB, the rest is WebView2 | Unknown: Coucou not measured (needs installing on a test machine) |
 | Tests | Unit tests (66 in the ten Rust files read), JS tests | 196 Rust + 71 frontend tests; a regression gate (every scenario listed, CI fails on a missing test); Windows and macOS CI, macOS smoke test | **Bouncer** |
 | Installer and releases | NSIS (current user, no admin) and MSI, GitHub releases, unsigned with a SmartScreen walkthrough, Defender false-positive note | None yet (roadmap c) | Coucou |
 | Extras | File drop, live diffs, plan usage from the status line, GitHub, Spotify, global shortcuts, phone approvals, outfits, desktop mascot, two languages, Linux | Live diffs, away summary, sounds, settings, chat | Coucou |
@@ -80,8 +80,10 @@ was copied.
 In order, as part of roadmap c unless noted:
 
 1. **Measure memory** (working set, app + WebView2, idle and with a card)
-   and put it next to the CPU numbers. If the numbers allow, measure Coucou
-   the same way on a test machine (install it there, not on the dev PC).
+   and put it next to the CPU numbers. Done 2026-10-12 (`docs/PLAN.md`,
+   roadmap c): idle 93 MB, a card 103 MB (Task Manager's private memory),
+   5 MB of it ours. Coucou can be measured the same way on a test machine
+   (install it there, not on the dev PC).
 2. **Installer:** per-user, no admin, and an uninstall that removes only our
    hook entries (Coucou leaves `settings.json` alone on uninstall; we should
    offer to remove our entries, with the diff). Add an autostart option,
