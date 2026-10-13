@@ -1,13 +1,131 @@
 # Bouncer
 
-A free, open-source desktop companion for Claude Code on Windows and macOS.
+**The security guard for coding agents.** A free, open-source desktop
+companion for Claude Code: it watches your sessions, lets safe actions
+through under rules you control, stops risky ones at the door with a plain
+reason, and never blocks the agent.
 
-Bouncer shows your Claude Code sessions live, auto-approves safe actions under
-rules you control, flags risky ones with a plain reason, and never blocks the
-agent: if Bouncer is closed, slow or confused, Claude Code just asks you in the
-terminal as usual.
+![Bouncer: a card for npm test is allowed; a risky curl | sh card is flagged, explained, then denied](docs/demo.gif)
 
-**Status:** early development. Nothing to install yet.
+- **Sessions in an island.** Every Claude Code session, live, in a small
+  island at the top of the screen.
+- **Approve or deny.** Claude Code's permission requests show up as cards:
+  the whole command, hidden characters made visible, edits as a diff. Allow
+  arms after 600 ms, the keyboard starts on Deny, and Enter never approves.
+- **Auto-allow by rule.** Rules you write (or add with "Always allow…") answer
+  for you in auto mode; observe mode only says what they would do.
+- **Risky flags.** Requests that download and run scripts, delete outside the
+  project, touch secrets, force-push and so on are flagged with a plain
+  reason and never auto-allowed. Compound or unparseable commands always ask.
+- **Explain this command.** One click asks Claude what a shell command does
+  and what could go wrong.
+- **Read-only chat.** Ask Claude a question from the island, through your
+  own Claude Code, locked to read-only.
+- **Redacted log.** A local activity log with secrets removed before
+  anything is written, and a summary when you come back.
+- **Fail-safe.** If Bouncer is closed, slow or confused, Claude Code asks in
+  its own prompt as usual. Nothing is ever allowed by default.
+
+**Status:** Windows 10 and 11 (64-bit). v0.7.0 is the first release; no Mac
+build yet.
+
+## Install
+
+1. Download `Bouncer_<version>_x64-setup.exe` and `SHA256SUMS.txt` from
+   [Releases](https://github.com/charanp11/bouncer-app/releases).
+2. Check the file is the one GitHub built. In PowerShell, in your Downloads
+   folder:
+
+   ```powershell
+   Get-FileHash .\Bouncer_0.7.0_x64-setup.exe
+   ```
+
+   The hash must match the line in `SHA256SUMS.txt`. With the
+   [GitHub CLI](https://cli.github.com/) you can also check that it was built
+   by this repo's release workflow from its tag:
+
+   ```powershell
+   gh attestation verify .\Bouncer_0.7.0_x64-setup.exe --repo charanp11/bouncer-app
+   ```
+
+3. Run it. Bouncer isn't code-signed yet, so Windows SmartScreen says
+   **"Windows protected your PC"** with an unknown publisher: click
+   **More info**, then **Run anyway**. Edge may also say the file "isn't
+   commonly downloaded": choose **Keep**. It installs for your user only
+   (`%LOCALAPPDATA%\Bouncer`), with no admin prompt. If WebView2 is missing,
+   the installer downloads it from Microsoft; that's the only network use,
+   and the app itself makes none.
+4. In Bouncer, open Settings (the gear) → **Claude Code hooks** →
+   **Install…**. It shows the exact change to `~/.claude/settings.json`;
+   **Write changes** saves it, with a dated backup beside the file. Claude
+   Code sessions started after this show up in the island.
+
+**Smart App Control.** If it's on (Windows 11, Windows Security → App &
+browser control), it blocks unsigned apps with no "Run anyway". Bouncer
+can't be installed until it's signed, unless you turn Smart App Control
+off (your call: Windows may not let you turn it back on without a reset). Signing is
+planned (SignPath Foundation).
+
+**Microsoft Defender.** New unsigned apps are sometimes flagged by mistake.
+Check the hash and the attestation above first; if they match and Defender
+still flags it, please
+[open an issue](https://github.com/charanp11/bouncer-app/issues) and
+[report the false positive to Microsoft](https://www.microsoft.com/en-us/wdsi/filesubmission).
+
+## Update
+
+Download the new installer and run it (check it the same way). It closes
+Bouncer and replaces it in place. Your hooks, rules,
+settings and history stay; it never asks about the hooks.
+
+## Uninstall
+
+Settings → Apps → Installed apps → Bouncer → Uninstall.
+
+- **The hooks.** A console window shows what would be removed from
+  `~/.claude/settings.json` and asks `[y/N]`. **y** removes only Bouncer's
+  entries (dated backup first). **N**, the default, keeps them: answer N if
+  you're installing Bouncer again next. Kept hooks point at a program that's
+  gone, so Claude Code shows a hook error on each event and carries on,
+  asking in its own prompt; remove them later from a reinstalled Bouncer, or
+  by hand.
+- **"Delete the application data".** Unticked by default: your rules,
+  settings and history (`%APPDATA%\Bouncer`) stay for next time. Ticked, that
+  folder and Bouncer's WebView2 data folder are deleted. Nothing else is.
+
+## Where it works
+
+| Where you run Claude Code | Bouncer |
+| --- | --- |
+| A terminal (`claude`) | Yes |
+| The VS Code extension | Yes |
+| The Claude desktop app's Code tab | Yes |
+| Claude Code on the web (cloud) | No: it runs on Anthropic's servers, so its hooks can't reach your PC |
+
+All three local ones read the hooks in `~/.claude/settings.json`. In VS Code
+and the desktop app, Bouncer's card shows up next to the app's own
+permission prompt: answer in either. Answer in the island and the app's
+prompt closes; answer in the app and the card stays until Claude Code moves
+on. In modes where Claude Code asks less (auto, accept edits, bypass), you
+see fewer cards.
+
+## What it can't do
+
+- **Only Claude Code for now.** Other agents come one per release.
+- **Questions are answered in the terminal.** When Claude Code asks you a
+  question or wants a plan approved, Bouncer shows the session waits; you
+  answer in Claude Code.
+- **It never blocks the agent.** If Bouncer is closed, paused, slow or
+  confused, Claude Code asks in its own prompt as usual. A card waits 100
+  seconds, then goes, and Claude Code asks.
+- **Rules can't make an unsafe command safe.** A rule only allows what it
+  matches; risky and compound commands still ask. What you allow runs with
+  your permissions.
+- **Explanations can be wrong.** "Explain this command" is Claude's reading,
+  not a verdict. You decide.
+- **Not signed yet.** See SmartScreen and Smart App Control above.
+- **No Mac build yet.** The code runs on macOS in CI, but there's no
+  release for it.
 
 ## Chat
 
@@ -37,6 +155,14 @@ the session list opens it.
   Deny and Allow work as always while it answers, and it stops when the card
   is answered or goes.
 
+## Privacy
+
+No telemetry, and Bouncer itself makes no network calls. Everything stays
+on your machine. What you send in a chat or an explanation goes to Claude
+through your own Claude Code, as any Claude Code message does. The activity
+log keeps no tool output or file contents, and secrets are removed before
+anything is written.
+
 ## Building from source
 
 Needs Rust (stable) and Node.js 24.
@@ -45,12 +171,6 @@ Needs Rust (stable) and Node.js 24.
 npm ci
 npm run tauri dev
 ```
-
-## Privacy
-
-No telemetry, and Bouncer itself makes no network calls. Everything stays
-on your machine, except what you send in a chat: that goes to Claude through
-your own Claude Code, as any Claude Code message does.
 
 ## License
 
