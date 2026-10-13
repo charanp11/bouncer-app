@@ -2839,9 +2839,15 @@ relay). Screenshots: `design/screenshots/explain/`.
   explanation's `claude` was gone within 1.5 s.
 - Allow re-armed: disabled at the Explain click, armed 600 ms later.
 - Keyboard: focus on Stop; Space → "Stopped." and Hide; Enter on Hide → the
-  button back, focus on it; Enter on it → explaining again. A click on
-  Explain that also gave the island the keyboard put focus on Deny (A2), so
-  a Space then denied: by design, never Allow.
+  button back, focus on it; Enter on it → explaining again.
+- Review of #28 (Charan): a click on Explain that also gave the island the
+  keyboard put focus on Deny (A2), so a Space then denied. Fixed: a press on
+  Explain or its box that takes the keyboard keeps it there
+  (`arrivalFocus`); any other arrival (the tray, the gear, a click elsewhere
+  on the card) still goes to Deny, never Allow. Rechecked with real clicks:
+  Explain without the keyboard → focus on Stop, Space stopped it (no
+  answer); a click on the card's title → Deny; a click in the box → its
+  button.
 - The app stopped with a card and an explanation up: the relay printed
   nothing (fail safe); a card left 100 s timed out as usual.
 - Once, early on, a Space on Stop closed the whole box instead of showing
