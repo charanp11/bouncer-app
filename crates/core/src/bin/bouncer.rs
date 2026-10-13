@@ -20,7 +20,7 @@ PATH defaults to bouncer-hook next to this program.";
 /// The uninstaller runs `uninstall-hooks --uninstalling` in its own console.
 const UNINSTALLING: &str =
     "Bouncer is being uninstalled. Remove its hooks from Claude Code's settings?
-Upgrading to a new version? Answer N to keep them.
+Installing Bouncer again next? Answer N to keep them.
 ";
 
 fn main() -> ExitCode {
