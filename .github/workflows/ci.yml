@@ -42,10 +42,11 @@ jobs:
           BOUNCER_FUZZ_ITERS: 5000
       # The regression gate: every test docs/TESTS.md names exists on this OS.
       - run: node scripts/check-tests.mjs
-      # Release builds must ignore BOUNCER_ENDPOINT, BOUNCER_RULES and BOUNCER_AWAY_SECS.
+      # Release builds must ignore BOUNCER_ENDPOINT, BOUNCER_RULES, BOUNCER_AWAY_SECS and BOUNCER_AUTOSTART_KEY.
       - run: cargo test --locked --release -p bouncer-relay --lib
       - run: cargo test --locked --release -p bouncer-core --lib rules::tests::override
       - run: cargo test --locked --release -p bouncer-core --lib away::tests::override
+      - run: cargo test --locked --release -p bouncer-core --lib autostart::tests::override
 
   deny:
     runs-on: ubuntu-latest
