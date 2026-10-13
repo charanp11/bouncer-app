@@ -128,8 +128,14 @@ function Button($window, $name) { Control $window $name "ControlType.Button" }
 # Presses a web button. The island re-renders often, so an element can be gone
 # by the time it's pressed: that's not an error, the caller looks again.
 function Press($button) {
-    try { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $true }
-    catch [System.Windows.Automation.ElementNotAvailableException] { $false }
+    try {
+        # A switch (role="switch") only toggles; other buttons are invoked.
+        $p = $null
+        if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke() }
+        elseif ($button.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$p)) { $p.Toggle() }
+        else { return $false }
+        $true
+    } catch [System.Windows.Automation.ElementNotAvailableException] { $false }
 }
 function Click($control) {
     # A button's click as its dialog hears it (no mouse, no keys).
