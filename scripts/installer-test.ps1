@@ -99,14 +99,14 @@ $originalHash = (Get-FileHash $settings).Hash
 $env:CLAUDE_CONFIG_DIR = $cfg
 
 $results = [System.Collections.Generic.List[string]]::new()
-function Pass($step, $detail) { $results.Add("| $step | ✅ | $detail |"); Write-Host "PASS  $step  $detail" }
+function Pass($step, $detail) { $results.Add("| $step | pass | $detail |"); Write-Host "PASS  $step  $detail" }
 function Check($ok, $step, $detail) {
-    if (-not $ok) { $results.Add("| $step | ❌ | $detail |"); throw "FAILED: ${step}: $detail" }
+    if (-not $ok) { $results.Add("| $step | **FAIL** | $detail |"); throw "FAILED: ${step}: $detail" }
     Pass $step $detail
 }
 function Summary {
     $table = @("| Step | | Result |", "| --- | --- | --- |") + $results
-    if ($env:GITHUB_STEP_SUMMARY) { ($table -join "`n") | Add-Content $env:GITHUB_STEP_SUMMARY }
+    if ($env:GITHUB_STEP_SUMMARY) { ($table -join "`n") | Add-Content $env:GITHUB_STEP_SUMMARY -Encoding utf8 }
     $table | Write-Host
 }
 function Wait-Until([scriptblock]$cond, [int]$seconds = 30) {
@@ -125,6 +125,14 @@ function Click($control) {
     # A button's click as its dialog hears it (no mouse, no keys).
     $h = [IntPtr]$control.Current.NativeWindowHandle
     [void][Native]::PostMessageW([Native]::GetParent($h), 0x0111, [IntPtr][Native]::GetDlgCtrlID($h), $h)
+}
+# What UI Automation sees in a window, for the log when a lookup fails.
+function Dump($window, $why) {
+    Write-Host "---- $why; the window's elements:"
+    $window.FindAll($Scope::Descendants, $True_) | ForEach-Object {
+        "  {0} | {1} | enabled={2}" -f $_.Current.ControlType.ProgrammaticName, $_.Current.Name, $_.Current.IsEnabled
+    } | Select-Object -First 200 | Write-Host
+    throw $why
 }
 function Checked($control) { [int][Native]::SendMessageW([IntPtr]$control.Current.NativeWindowHandle, 0xF0, 0, 0) -eq 1 }
 function Set-Checked($control, $on) { [void][Native]::SendMessageW([IntPtr]$control.Current.NativeWindowHandle, 0xF1, [IntPtr][int]$on, 0) }
@@ -171,10 +179,10 @@ try {
     $island = Wait-Until { Windows-Named "Bouncer" | Where-Object { $_.Current.ProcessId -eq $app.Id } | Select-Object -First 1 } 15
     if (-not $island) { throw "no Bouncer window" }
     $gear = Wait-Until { Control $island "Settings" } 15
-    if (-not $gear) { throw "no Settings button in the island" }
+    if (-not $gear) { Dump $island "no Settings button in the island" }
     $gear.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $switch = Wait-Until { Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" } } 15
-    if (-not $switch) { throw "no Start with Windows switch in Settings" }
+    if (-not $switch) { Dump $island "no Start with Windows switch in Settings" }
     $flip = {
         $s = Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
         $pattern = $null
