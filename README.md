@@ -31,6 +31,11 @@ the session list opens it.
   Settings → **Claude Code for chat**, check the path, and click **Confirm
   this path**. If that path ever changes, Bouncer asks again before any chat
   runs.
+- **Explain this command.** A card for a shell command (Bash, PowerShell)
+  has an **Explain this command** button: the same locked chat says what the
+  command does and what could go wrong. It can be wrong and never decides:
+  Deny and Allow work as always while it answers, and it stops when the card
+  is answered or goes.
 
 ## Building from source
 
