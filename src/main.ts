@@ -69,7 +69,10 @@ type Away = {
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
 type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>> };
 /** Read-only facts for the settings screen (asked for when it opens). */
-type About = { rules: string | null; hooks: "installed" | "missing" | "unknown" };
+type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown";
+type About = { rules: string | null; hooks: HookStatus };
+/** A hooks change the backend offers: written only by its id, after Confirm. */
+type HooksChange = { id: string; path: string; diff: string };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
 type ChatStatus = { state: "missing" | "unconfirmed" | "changed" | "confirmed"; path: string | null; defaultModel?: string | null };
 type View = {
@@ -753,6 +756,11 @@ function renderAway(view: View, away: Away) {
 /** Settings facts, asked for once each time the screen opens. */
 let about: About | null = null;
 let aboutAsked = false;
+/** The hooks change on show (and since when, for its armed Confirm), and the
+ * last outcome. */
+let hooksShown: HooksChange | null = null;
+let hooksSince = 0;
+let hooksNote = "";
 /** The "Wipe…" confirm is open, and since when (its button arms like Allow). */
 let wiping = false;
 let wipeSince = 0;
@@ -788,6 +796,8 @@ function savePrefs(prefs: Prefs) {
 
 function closeSettings() {
   aboutAsked = false;
+  hooksShown = null;
+  hooksNote = "";
   chatAsked = false;
   if (current?.chat) {
     // Back to the chat: the keyboard goes to the message box.
@@ -1004,15 +1014,7 @@ function renderSettings(view: View, state: BallState) {
   rules.append(el("pre", "cmd", about?.rules ?? "…"));
   list.append(rules);
 
-  const hooks = about?.hooks;
-  const status = el("span", `status${hooks === "installed" ? "" : " off"}`, hooks === "installed" ? "Installed" : hooks === "missing" ? "Not installed" : "Unknown");
-  list.append(
-    setRow(
-      "Claude Code hooks",
-      [status],
-      hooks === "installed" ? "Remove: bouncer uninstall-hooks" : "Install: bouncer install-hooks",
-    ),
-  );
+  list.append(hooksRow(about?.hooks));
 
   const body = el("div", "body");
   body.dataset.screen = "settings";
@@ -1718,6 +1720,104 @@ function renderChat(view: View, done: boolean) {
   island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
   // A conversation stays at its end; the first-run note starts at its top.
   log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+}
+
+const HOOK_LABEL: Record<HookStatus, string> = {
+  installed: "Installed",
+  incomplete: "Incomplete",
+  moved: "Another copy",
+  missing: "Not installed",
+  unknown: "Unknown",
+};
+const HOOK_HINT: Record<HookStatus, string> = {
+  installed: "Claude Code sends every event to Bouncer.",
+  incomplete: "Some events don't reach Bouncer: re-install to fix.",
+  moved: "They run a Bouncer from another folder: re-install to fix.",
+  missing: "Until they're in, Claude Code asks in its terminal.",
+  unknown: "Couldn't read Claude Code's settings.",
+};
+
+/** Settings' "Claude Code hooks": status, then install / re-install /
+ * remove. Nothing is written until the diff has been shown and its armed
+ * Confirm clicked (rule 6); the backend keeps a dated backup. */
+function hooksRow(status: HookStatus | undefined): HTMLElement {
+  const row = setRow(
+    "Claude Code hooks",
+    [el("span", `status${status === "installed" ? "" : " off"}`, status ? HOOK_LABEL[status] : "…")],
+    status ? HOOK_HINT[status] : undefined,
+  );
+  if (hooksShown) {
+    const shown = hooksShown;
+    const box = el("div", "confirm");
+    box.append(el("b", "", "Changes to Claude Code's settings"));
+    const path = el("pre", "cmd");
+    agentText(path, shown.path);
+    const diff = el("pre", "cmd diff");
+    agentText(diff, shown.diff);
+    box.append(path, diff, el("div", "", "A dated backup of the old file is kept."));
+    const cancel = el("button", "btn deny small", "Cancel");
+    cancel.dataset.key = "hooks-cancel";
+    const write = armed("Write changes", hooksSince);
+    write.classList.add("small");
+    write.dataset.key = "hooks-write";
+    cancel.addEventListener("click", () => {
+      hooksShown = null;
+      refocus = "hooks";
+      if (current) render(current);
+    });
+    write.addEventListener("click", () => {
+      write.disabled = true;
+      invoke<string | null>("hooks_write", { id: shown.id })
+        .then((backup) => (hooksNote = backup ? `Written. Backup: ${backup}` : "Written."))
+        .catch((e) => (hooksNote = String(e)))
+        .finally(() => {
+          hooksShown = null;
+          aboutAsked = false;
+          refocus = "hooks";
+          if (current) render(current);
+        });
+    });
+    const actions = el("div", "actions");
+    actions.append(cancel, write);
+    box.append(actions);
+    row.append(box);
+    return row;
+  }
+  const offer = (label: string, install: boolean, key: string) => {
+    const b = el("button", "btn deny small", label);
+    b.dataset.key = key;
+    b.addEventListener("click", () => {
+      b.disabled = true;
+      hooksNote = "";
+      invoke<HooksChange | null>("hooks_preview", { install })
+        .then((change) => {
+          hooksShown = change;
+          hooksSince = performance.now();
+          if (!change) hooksNote = "Nothing to change.";
+        })
+        .catch((e) => (hooksNote = String(e)))
+        .finally(() => {
+          refocus = hooksShown ? "hooks-cancel" : key;
+          if (current) render(current);
+        });
+    });
+    return b;
+  };
+  const buttons: HTMLElement[] = [];
+  if (status === "missing") buttons.push(offer("Install…", true, "hooks"));
+  if (status === "incomplete" || status === "moved") buttons.push(offer("Re-install…", true, "hooks"));
+  if (status && status !== "missing" && status !== "unknown") buttons.push(offer("Remove…", false, "hooks-remove"));
+  if (buttons.length) {
+    const actions = el("div", "actions");
+    actions.append(...buttons);
+    row.append(actions);
+  }
+  if (hooksNote) {
+    const note = el("pre", "cmd");
+    agentText(note, hooksNote);
+    row.append(note);
+  }
+  return row;
 }
 
 /** Settings' row for the claude chat runs: its full path, confirmed or not. */

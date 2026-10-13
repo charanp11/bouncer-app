@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use bouncer_core::activity;
-use bouncer_core::approvals::{Desk, WAIT};
+use bouncer_core::approvals::{self, Desk, WAIT};
 use bouncer_core::away::{self, Away};
 use bouncer_core::hooks;
 use bouncer_core::ipc::{self, Handler, Server};
@@ -60,6 +60,9 @@ struct Island {
     /// Island size and sound, and where they're saved.
     prefs: Mutex<Prefs>,
     prefs_path: Option<PathBuf>,
+    /// The hooks change Settings is showing, under its single-use id: only
+    /// that exact change can be written, once.
+    hooks_change: Mutex<Option<(String, hooks::Change)>>,
 }
 
 /// How long the island must stay still before it's checked for being out of
@@ -134,7 +137,9 @@ fn main() {
             chat::chat_cancel,
             chat::chat_new,
             explain,
-            explain_stop
+            explain_stop,
+            hooks_preview,
+            hooks_write
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -177,6 +182,7 @@ fn main() {
                 confirm_wipe: AtomicBool::new(false),
                 prefs: Mutex::new(prefs_path.as_deref().map(prefs::load).unwrap_or_default()),
                 prefs_path,
+                hooks_change: Mutex::new(None),
             });
             if let Some(window) = app.get_webview_window("main") {
                 // Fail safe: if it can't be set up, the window works as before.
@@ -778,9 +784,10 @@ fn about() -> Value {
     })
 }
 
-/// "installed", "missing" (no file, or not in it) or "unknown" (unreadable).
+/// "installed", "incomplete", "moved", "missing" (no file, or none of ours)
+/// or "unknown" (unreadable), for the relay beside this app.
 fn hook_status() -> &'static str {
-    let Ok(path) = hooks::user_settings() else {
+    let (Ok(path), Ok(relay)) = (hooks::user_settings(), hooks::relay_beside_me()) else {
         return "unknown";
     };
     let mut text = String::new();
@@ -793,10 +800,56 @@ fn hook_status() -> &'static str {
             }
         }
     }
-    match serde_json::from_str::<Value>(&text) {
-        Ok(settings) if hooks::installed(&settings) => "installed",
-        Ok(_) => "missing",
-        Err(_) => "unknown",
+    match (serde_json::from_str::<Value>(&text), relay.to_str()) {
+        (Ok(settings), Some(relay)) => hooks::status(&settings, relay).name(),
+        _ => "unknown",
+    }
+}
+
+/// Settings' "Install…", "Re-install…" or "Remove…": what would change in
+/// the user's Claude Code settings, nothing written. The diff is shown with
+/// secrets redacted (its context lines may hold some). `null`: nothing to
+/// change. The id is the only way to write this change (`hooks_write`).
+#[tauri::command]
+fn hooks_preview(island: State<'_, Island>, install: bool) -> Result<Value, String> {
+    let path = hooks::user_settings()?;
+    let relay = if install {
+        Some(hooks::relay_beside_me()?)
+    } else {
+        None
+    };
+    let mut pending = island.hooks_change.lock().unwrap();
+    *pending = None;
+    let Some(change) = hooks::plan(&path, relay.as_deref())? else {
+        return Ok(Value::Null);
+    };
+    let id = approvals::request_id().ok_or("no random source")?;
+    let shown = json!({
+        "id": id,
+        "path": path.display().to_string(),
+        "diff": bouncer_core::redact::redact(&change.diff()),
+    });
+    *pending = Some((id, change));
+    Ok(shown)
+}
+
+/// Writes the change `hooks_preview` showed under `id` (after the user's
+/// armed Confirm), once: dated backup, atomic write, refused if the file
+/// changed meanwhile. Returns the backup's path, if there was a file.
+#[tauri::command]
+fn hooks_write(island: State<'_, Island>, id: String) -> Result<Option<String>, String> {
+    let change = take_change(&island.hooks_change, &id)?;
+    Ok(change.write()?.map(|p| p.display().to_string()))
+}
+
+/// The pending change if `id` is its id; it's gone either way.
+fn take_change(
+    pending: &Mutex<Option<(String, hooks::Change)>>,
+    id: &str,
+) -> Result<hooks::Change, String> {
+    match pending.lock().unwrap().take() {
+        Some((want, change)) if want == id => Ok(change),
+        _ => Err("that change is no longer offered; open it again".into()),
     }
 }
 
@@ -943,6 +996,8 @@ fn tray(",
             "chat-new",
             "explain",
             "explain-stop",
+            "hooks-preview",
+            "hooks-write",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()
@@ -952,6 +1007,36 @@ fn tray(",
             .collect();
         assert_eq!(granted, ours.map(|c| format!("allow-{c}")));
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
+    }
+
+    /// Settings can write only the change it showed, by its id, once.
+    #[test]
+    fn a_hooks_change_is_written_only_by_its_id_once() {
+        let dir = std::env::temp_dir().join(format!("bouncer-take-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(
+            &file, "{}
+",
+        )
+        .unwrap();
+        let relay = dir.join("bouncer-hook.exe");
+        std::fs::write(&relay, "").unwrap();
+        let change = hooks::plan(&file, Some(&relay)).unwrap().unwrap();
+        let pending = Mutex::new(Some(("a".repeat(32), change.clone())));
+        assert!(take_change(&pending, &"b".repeat(32)).is_err());
+        assert!(
+            take_change(&pending, &"a".repeat(32)).is_err(),
+            "a wrong id drops it"
+        );
+        *pending.lock().unwrap() = Some(("a".repeat(32), change.clone()));
+        assert_eq!(take_change(&pending, &"a".repeat(32)).unwrap(), change);
+        assert!(
+            take_change(&pending, &"a".repeat(32)).is_err(),
+            "single use"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The explanation follows the queue: only a waiting card's text is

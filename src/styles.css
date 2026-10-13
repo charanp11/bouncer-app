@@ -1216,6 +1216,21 @@ pre.cmd {
   user-select: all;
 }
 
+/* The hooks diff: whole lines, scrolls past ten or so. */
+.confirm pre.diff {
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre;
+  user-select: text;
+}
+
+.setrow > .actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .seg {
   display: inline-flex;
   background: var(--island);
