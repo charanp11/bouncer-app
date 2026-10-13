@@ -80,7 +80,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | U5 | Rules file others can write | Refused (Windows access list; macOS mode and links) | unit | `rules::tests::access_lists_with_other_writers_are_refused` `windows: rules::tests::own_files_pass_the_windows_access_check` `macos: rules::tests::files_others_can_write_are_refused` | CI |
 | U6 | preferences.json corrupt or missing | Defaults, per field; unknown sound names refused | unit, frontend | `prefs::tests::missing_file_gives_defaults_and_save_reads_back` `prefs::tests::unknown_or_broken_values_fall_back_per_field` `prefs::tests::sounds_from_names_refuses_unknown_names` `ts: the pack is exactly the sounds preferences.json knows, in its order` | CI |
 | U7 | Wipe history | Settings → Wipe… → confirm: Cancel keeps everything; "Delete history" is armed; then every day file and the summary are deleted, only our files, the pill says so, logging carries on | unit, real-click (page-level) | `activity::tests::old_days_are_deleted_and_wipe_deletes_all` `approvals::tests::coming_back_shows_a_summary_until_closed_and_wipe_empties_it` | CI; real-click 2026-10-08 |
-| U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 passed 2026-10-08 |
+| U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself. The one documented exception: uninstall's data box (W7) | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 passed 2026-10-08 |
 | U8 | Rules added one at a time | Appended atomically, read back exactly | unit | `rules::tests::add_appends_one_rule_atomically` `rules::tests::scoped_rules_read_back_exactly` `rules::tests::rules_read_back_from_their_toml` `rules::tests::scoped_rule_keys_are_checked` | CI |
 
 ## Redaction and the activity log
@@ -201,6 +201,10 @@ command does and what could go wrong. It never decides.
 | W1 | Memory, release build (app + WebView2, 60 s) | Task Manager's private memory about 93 MB idle, 103 MB with a card, ours 5 MB; level, no climb (`docs/PLAN.md`, roadmap c) | real-click (measured on the test instance) | — | measured 2026-10-12 |
 | W2 | Start with Windows | Off by default; on writes one value (`Bouncer`, the quoted app path) in the per-user Run key; off deletes only a value whose program is ours, someone else's `Bouncer` stays; the switch shows what Windows has; not offered off Windows | unit, real-click (page-level) | `windows: autostart::tests::on_off_and_someone_elses_value_left_alone` `autostart::tests::only_our_program_counts_as_ours` | CI; real-click 2026-10-12 |
 | W3 | Shortcut Ctrl+Alt+B | On by default; opens the island with the keyboard, on Deny with a card up (never Allow), answers nothing; Settings turns it off (keys released) and on; held by another app: harmless, the hint says so; a second launch never registers it | unit, real-click (key presses on the test instance) | `tests::the_shortcut_only_opens_the_island` `prefs::tests::unknown_or_broken_values_fall_back_per_field` | CI; real-click 2026-10-13 |
+| W4 | Installer | NSIS only (no MSI), per user in `%LOCALAPPDATA%\Bouncer`, no admin prompt; `bouncer-hook.exe` and `bouncer.exe` beside the app; uninstall entry and Start menu shortcut | unit, real (installed on this PC, 2.24 MiB) | `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
+| W5 | Install over itself (same version) | The running app is closed, files replaced, one uninstall entry; the hooks in Claude Code's settings and their path stay valid; a request waits on a card again | real | — | real 2026-10-13 |
+| W6 | Uninstall and the hooks | Offers removal in its own console: the diff, why ("Answer N if upgrading") right above the question, nothing without "y", a dated backup; "no" says what Claude Code will show; waits for Enter; skipped in update, silent and passive runs | integration, unit, real | `the_uninstaller_asks_explains_and_waits` `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
+| W7 | Uninstall's "Delete the application data" box (the one exception to one wipe path) | Unticked by default: `%APPDATA%\Bouncer` and the WebView2 folder stay; ticked: exactly those two go (our step deletes only `%APPDATA%\Bouncer`; Tauri's, the WebView2 folder); never in an update | unit, real | `tests::the_installer_is_per_user_and_its_uninstall_steps_are_guarded` | CI; real 2026-10-13 |
 
 ## macOS
 
@@ -263,6 +267,15 @@ never the real `~/.claude/settings.json`.
       was before step 1 (none of Bouncer's left).
    8. Check `bouncer-playground\chat` is still empty.
 ### Phase 9 hand checks
+
+- **Install from a real download (about 5 min).** Charan, on his own
+   desktop (outside any app's container): run the release's
+   `Bouncer_<version>_x64-setup.exe` from Explorer. Expected: SmartScreen's
+   walkthrough as in the README, no admin prompt, Bouncer in
+   `%LOCALAPPDATA%\Bouncer`; Settings → Claude Code hooks → Install… shows the
+   diff for the real `~/.claude/settings.json` (Cancel is fine); uninstall
+   from Settings → Apps: the hooks console appears only if they're
+   installed, the data box is unticked.
 
 - **Screen reader (about 5 min).** Turn on Narrator (Ctrl+Win+Enter). With a
    card up, click the card text, then Tab: Narrator reads "Deny", "Allow
