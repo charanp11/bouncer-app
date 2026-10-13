@@ -206,6 +206,8 @@ test("explain: below the buttons at a fixed height, filled in place, never decid
   // Below Deny / Allow in the card, so they never move.
   const card = main.slice(main.indexOf("\nfunction card("), main.indexOf("\nfunction relative("));
   assert.ok(card.indexOf("c.append(explainPart(request))") > card.indexOf("c.append(actions)"));
+  // It sits beside "Always allow…", never in its place.
+  assert.ok(card.includes("if (offer) actions.append(alwaysButton(request));"));
   // The explanation section never answers anything, and its events never redraw the card.
   const section = main.slice(main.indexOf("let explaining: Explain"), main.indexOf("// ---- chat (Phase 6)"));
   for (const call of ['"decide"', '"always"', "decide(", "allow: true"]) assert.ok(!section.includes(call), call);
