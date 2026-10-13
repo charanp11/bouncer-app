@@ -117,14 +117,14 @@ function Wait-Until([scriptblock]$cond, [int]$seconds = 30) {
 function Windows-Named($pattern) {
     $UIA::RootElement.FindAll($Scope::Children, $True_) | Where-Object { $_.Current.Name -like $pattern }
 }
-function Control($window, $name) {
+# The first enabled element named $name (of $type, if given: the page's
+# labels share names with their buttons, so filter before taking the first).
+function Control($window, $name, $type = "") {
     $window.FindAll($Scope::Descendants, $True_) |
-        Where-Object { $_.Current.Name -like $name -and $_.Current.IsEnabled } | Select-Object -First 1
+        Where-Object { $_.Current.Name -like $name -and $_.Current.IsEnabled -and (-not $type -or $_.Current.ControlType.ProgrammaticName -eq $type) } |
+        Select-Object -First 1
 }
-# A web button in the island (the page's titles share names with buttons).
-function Button($window, $name) {
-    Control $window $name | Where-Object { $_.Current.ControlType.ProgrammaticName -eq "ControlType.Button" } | Select-Object -First 1
-}
+function Button($window, $name) { Control $window $name "ControlType.Button" }
 function Press($button) { $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
 function Click($control) {
     # A button's click as its dialog hears it (no mouse, no keys).
@@ -207,11 +207,11 @@ try {
             $g = Button $island "Settings"
             if ($g) { Press $g }
         }
-        Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
+        Button $island "Start with Windows"
     } 30
     if (-not $switch) { Dump $island "no Start with Windows switch in Settings" }
     $flip = {
-        $s = Control $island "Start with Windows" | Where-Object { $_.Current.ControlType.ProgrammaticName -ne "ControlType.Text" }
+        $s = Button $island "Start with Windows"
         $pattern = $null
         if ($s.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $pattern.Toggle() }
         else { $s.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
