@@ -38,7 +38,16 @@ if (mode === "tag") {
   const next = toml.replace(/(\[workspace\.package\][^[]*?\nversion = )"[^"]*"/, `$1"${arg}"`);
   if (next === toml && !toml.includes(`version = "${arg}"`)) fail("no version under [workspace.package] in Cargo.toml");
   writeFileSync("Cargo.toml", next);
-  execFileSync("cargo", ["update", "--workspace", "--offline"], { stdio: "inherit" });
+  // Our own three crates in Cargo.lock, by text: no network and nothing else
+  // changes (`cargo update --offline` needs a crates index a fresh runner
+  // doesn't have). The --locked build that follows proves the lock still fits.
+  let lock = readFileSync("Cargo.lock", "utf8");
+  for (const name of CRATES) {
+    const entry = new RegExp(`(\\[\\[package\\]\\]\\nname = "${name}"\\nversion = )"[^"]*"`);
+    if (!entry.test(lock)) fail(`no ${name} in Cargo.lock`);
+    lock = lock.replace(entry, `$1"${arg}"`);
+  }
+  writeFileSync("Cargo.lock", lock);
   const pkg = json("package.json");
   writeJson("package.json", { ...pkg, version: arg });
   // A text edit, so the file keeps its layout: "version" after "productName".
