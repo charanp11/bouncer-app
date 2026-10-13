@@ -3009,6 +3009,19 @@ row is hidden; roadmap g). Prototype v0.25. TESTS W2.
 - [x] Off by default; on / off from Settings; only our value (W2)
 - [x] Test instance (page-level clicks, a test key): Off → On wrote the quoted path; On → Off removed it; the real `Run` key was the same before and after
 
+**c-4: Shortcut (2026-10-13).** `tauri-plugin-global-shortcut` pinned at
+`=2.4.0` (2.4.1 was three days old), used from Rust only: no plugin
+permission is granted to the page. Ctrl+Alt+B runs `open_island`, the tray's
+"Open Bouncer": the island opens with the keyboard, and the page's arrival
+rule puts it on Deny when a card is up. `preferences.json` gains `shortcut`
+(on by default); Settings' switch saves it and registers or drops the keys.
+A failed registration only sets "taken" (the hint says so). Registered after
+the second-launch check. Prototype v0.26. TESTS W3.
+
+- [x] Ctrl+Alt+B opens the island, Deny focused with a card up, nothing answered (W3)
+- [x] Settings turns it off and on; taken by another app is harmless and shown
+- [x] Test instance: while it ran, a second registration of Ctrl+Alt+B from PowerShell failed (it held the keys), so the key press reached only Bouncer; with a Bash card up, Ctrl+Alt+B moved focus from the page body to that card's Deny, Allow untouched, the relay still waiting (it printed nothing when the app was stopped); off → keys free and `"shortcut": false` saved; held by PowerShell → on reports taken; released → on holds them again; app stopped → keys free
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to

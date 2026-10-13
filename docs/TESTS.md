@@ -200,6 +200,7 @@ command does and what could go wrong. It never decides.
 | --- | --- | --- | --- | --- | --- |
 | W1 | Memory, release build (app + WebView2, 60 s) | Task Manager's private memory about 93 MB idle, 103 MB with a card, ours 5 MB; level, no climb (`docs/PLAN.md`, roadmap c) | real-click (measured on the test instance) | — | measured 2026-10-12 |
 | W2 | Start with Windows | Off by default; on writes one value (`Bouncer`, the quoted app path) in the per-user Run key; off deletes only a value whose program is ours, someone else's `Bouncer` stays; the switch shows what Windows has; not offered off Windows | unit, real-click (page-level) | `windows: autostart::tests::on_off_and_someone_elses_value_left_alone` `autostart::tests::only_our_program_counts_as_ours` | CI; real-click 2026-10-12 |
+| W3 | Shortcut Ctrl+Alt+B | On by default; opens the island with the keyboard, on Deny with a card up (never Allow), answers nothing; Settings turns it off (keys released) and on; held by another app: harmless, the hint says so; a second launch never registers it | unit, real-click (key presses on the test instance) | `tests::the_shortcut_only_opens_the_island` `prefs::tests::unknown_or_broken_values_fall_back_per_field` | CI; real-click 2026-10-13 |
 
 ## macOS
 
