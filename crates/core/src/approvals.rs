@@ -958,7 +958,7 @@ fn epoch_ms(time: SystemTime) -> u64 {
 }
 
 /// 128 bits from the OS random source, as hex. `None` if it fails.
-fn request_id() -> Option<String> {
+pub fn request_id() -> Option<String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).ok()?;
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())

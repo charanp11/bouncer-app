@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hooks-write"
+description = "Enables the hooks_write command without any pre-configured scope."
+commands.allow = ["hooks_write"]
+
+[[permission]]
+identifier = "deny-hooks-write"
+description = "Denies the hooks_write command without any pre-configured scope."
+commands.deny = ["hooks_write"]

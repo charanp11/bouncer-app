@@ -23,6 +23,8 @@ fn main() {
         "chat_new",
         "explain",
         "explain_stop",
+        "hooks_preview",
+        "hooks_write",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");

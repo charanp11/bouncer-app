@@ -218,6 +218,8 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .head .buttons { display: flex; align-items: center; gap: 2px; }
 .confirm { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--island); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
 .confirm b { color: var(--text); font-weight: 500; }
+.confirm pre.diff { max-height: 150px; overflow: auto; white-space: pre; word-break: normal; user-select: text; }
+.setrow > .actions { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 6px; }
 .btn.small { height: 30px; font-size: 12.5px; }
 .iconbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
 
@@ -466,7 +468,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.23 · Oct 12 2026</div>
+    <div class="meta">design/prototype · v0.24 · Oct 12 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -489,6 +491,9 @@ a.chip { text-decoration: none; }
     <div class="group"><span class="label">Phase 5</span>
       <button class="chip" data-s="settings">Settings</button>
       <button class="chip" data-s="settingsauto">Settings · turn on auto</button>
+    </div>
+    <div class="group"><span class="label">Release</span>
+      <button class="chip" data-s="settingshooks">Settings · hooks</button>
     </div>
     <div class="group"><span class="label">Phase 5d</span>
       <a class="chip" href="#sounds">Sound pack: listen and pick &darr;</a>
@@ -933,7 +938,7 @@ function toggle(label, on, onClick) {
   if (onClick) t.addEventListener("click", onClick);
   return t;
 }
-function settings(confirming) {
+function settings(confirming, hooksConfirm) {
   island.className = "island open";
   island.append(head("idle", "Settings"));
   const b = el("div", "body");
@@ -983,7 +988,37 @@ function settings(confirming) {
   const rules = setRow("Rules file", [], null);
   rules.append(el("pre", "cmd", "C:\\Users\\dev\\AppData\\Roaming\\Bouncer\\rules.toml"));
   list.append(rules);
-  list.append(setRow("Claude Code hooks", [el("span", "status", "Installed")], "Remove: bouncer uninstall-hooks"));
+  const hooks = setRow("Claude Code hooks", [el("span", "status off", "Incomplete")],
+    "Some events don't reach Bouncer: re-install to fix.");
+  if (hooksConfirm) {
+    const c = el("div", "confirm");
+    c.append(el("b", "", "Changes to Claude Code's settings"));
+    c.append(el("pre", "cmd", "C:\\Users\\dev\\.claude\\settings.json"));
+    c.append(el("pre", "cmd diff", [
+      "  ...", '      "Stop": [', "        {",
+      '+         "hooks": [', "+           {", '+             "type": "command",',
+      '+             "command": "C:\\\\Users\\\\dev\\\\AppData\\\\Local\\\\Bouncer\\\\bouncer-hook.exe",',
+      '+             "args": [],', '+             "timeout": 5', "+           }", "+         ]", "+       },", "  ...",
+    ].join("\n")));
+    c.append(el("div", "", "A dated backup of the old file is kept."));
+    const row = el("div", "actions");
+    const cancel = el("button", "btn deny small", "Cancel"); cancel.addEventListener("click", () => show("settings"));
+    const write = el("button", "btn allow small"); write.append(el("span", "arm"), el("span", "", "Write changes"));
+    write.lastChild.style.position = "relative"; armOnVisible(write);
+    write.addEventListener("click", () => show("settings"));
+    c.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target === write) e.preventDefault();
+      if (e.key === "Escape") { e.preventDefault(); cancel.click(); }
+    });
+    row.append(cancel, write); c.append(row); hooks.append(c);
+    requestAnimationFrame(() => { c.scrollIntoView({ block: "nearest" }); cancel.focus({ preventScroll: true }); });
+  } else {
+    const row = el("div", "actions");
+    const re = el("button", "btn deny small", "Re-install…"); re.addEventListener("click", () => show("settingshooks"));
+    row.append(re, el("button", "btn deny small", "Remove…"));
+    hooks.append(row);
+  }
+  list.append(hooks);
   b.append(list);
   island.append(b);
 }
@@ -1073,7 +1108,9 @@ Object.assign(STATES, {
       island.append(d);
     }, notes: ["Click a session row to open its detail. The island widens to 720.", "Left: Bouncer, the project, and every step with who allowed it (rule, you, or flagged).", "Right: the change being made, as a diff built from the hook's old and new text. The caret marks the line being written."] },
   settings: { phase: "Phase 5b", title: "Settings", render() { settings(false); },
-    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Hooks show status only; install and uninstall stay in the bouncer command (Phase 9 installer).", "Phase 5d: Sound style (Soft default, Playful), Volume, and Which sounds: one switch per sound. On by default: launch, needs you, risky, done, tool failed, welcome back."] },
+    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Claude Code hooks: Installed, Incomplete (some events missing), Another copy (they run a Bouncer from another folder) or Not installed, with Install…, Re-install… or Remove… (see Settings · hooks).", "Phase 5d: Sound style (Soft default, Playful), Volume, and Which sounds: one switch per sound. On by default: launch, needs you, risky, done, tool failed, welcome back."] },
+  settingshooks: { phase: "Roadmap c", title: "Settings · hooks", render() { settings(false, true); },
+    notes: ["Install…, Re-install… and Remove… show the exact change to Claude Code's settings first: the file's path, then a diff (changed lines, two lines of context; secrets in the context redacted).", "Write changes arms after 600ms like Allow; Enter never writes; Esc or Cancel writes nothing. Focus goes to Cancel.", "The backend writes only the change it showed (a single-use id), keeps a dated backup and writes atomically; if the file changed meanwhile, nothing is written and it says so.", "After writing, the row shows the new status and where the backup went. The bouncer command does the same in a terminal."] },
   settingsauto: { phase: "Phase 5b", title: "Settings · turn on auto", render() { settings(true); },
     notes: ["Turning auto-allow on asks first; its button arms after 600ms like Allow.", "The confirm scrolls fully into view (Settings scrolls inside the island). Focus goes to Cancel; Esc cancels; Enter never turns auto on.", "Turning it off doesn't ask.", "Bouncer writes the mode into rules.toml itself, checked and atomic, and the island shows the change like any other."] },
   editask: { phase: "Phase 2 · design", title: "Approve an edit", render() {
