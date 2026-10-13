@@ -12,7 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
+import { apply, arrivalFocus, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
@@ -1103,7 +1103,11 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
     refocus = null;
     return;
   }
-  const target = newCard ? `deny:${card.id}` : had;
+  // The keyboard arriving with this card up goes to Deny, unless the press
+  // that took it was on the card's Explain control: it stays there.
+  const arrived = newCard && card.id === before && !keyboardBefore;
+  const target = newCard ? (arrived ? arrivalFocus(card.id, pressed) : `deny:${card.id}`) : had;
+  pressed = null;
   let next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
   // Nothing to go back to (the keyboard just arrived, or the focused control
   // went, e.g. a row that opened its detail): the first control (in the body
@@ -1124,6 +1128,8 @@ function controls(root: HTMLElement): HTMLElement[] {
   );
 }
 
+/** The press that is taking the keyboard was on this Explain control. */
+let pressed: string | null = null;
 /** Where focus goes when the focused control disappears (a confirm closed). */
 let refocus: string | null = null;
 /** The card that came while a chat message was being typed: no focus for it. */
@@ -1784,8 +1790,13 @@ document.addEventListener("keydown", (e) => {
 // purpose); a click on the pill only opens it.
 island.addEventListener(
   "pointerdown",
-  () => {
-    if (current?.open && !current.keyboard) invoke("keyboard", { on: true });
+  (e) => {
+    pressed = null;
+    if (!current?.open || current.keyboard) return;
+    // This press takes the keyboard: remember if it was on Explain (or its box).
+    const x = e.target instanceof Element ? e.target.closest<HTMLElement>(".explainbtn, .explain") : null;
+    if (x) pressed = x.dataset.key ?? `explain:${x.dataset.explain}`;
+    invoke("keyboard", { on: true });
   },
   true,
 );

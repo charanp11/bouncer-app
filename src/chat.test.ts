@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { apply, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
+import { apply, arrivalFocus, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
 
 const run = (chat: Chat, events: Omit<ChatEvent, "chat">[]): Chat =>
   events.reduce((c, e) => apply(c, { ...e, chat: c.id } as ChatEvent), chat);
@@ -216,4 +216,17 @@ test("explain: below the buttons at a fixed height, filled in place, never decid
   assert.match(section, /const key = `explain:\$\{request\.id\}`;/);
   // Only the request ID goes to the backend, never the command text.
   assert.match(section, /invoke\("explain", \{ id: request\.id, model: chat\.model \}\)/);
+});
+
+test("explain: the keyboard taken by a press on Explain stays there; any other arrival goes to Deny, never Allow", () => {
+  assert.equal(arrivalFocus("aa", "explain:aa"), "explain:aa");
+  assert.equal(arrivalFocus("aa", null), "deny:aa", "tray, gear, a press elsewhere");
+  assert.equal(arrivalFocus("aa", "explain:bb"), "deny:aa", "another card's Explain");
+  for (const other of ["allow:aa", "deny:aa", "chat-input", "explain:", ""]) assert.equal(arrivalFocus("aa", other), "deny:aa", other);
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  // Only a press that is itself taking the keyboard counts, and it's used once.
+  const down = main.slice(main.indexOf('"pointerdown"'), main.indexOf('invoke("keyboard", { on: true });', main.indexOf('"pointerdown"')));
+  assert.match(down, /pressed = null;\s+if \(!current\?\.open \|\| current\.keyboard\) return;/);
+  assert.match(down, /closest<HTMLElement>\("\.explainbtn, \.explain"\)/);
+  assert.match(main, /const target = newCard \? \(arrived \? arrivalFocus\(card\.id, pressed\) : `deny:\$\{card\.id\}`\) : had;\s+pressed = null;/);
 });
