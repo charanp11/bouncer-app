@@ -468,7 +468,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.24 · Oct 12 2026</div>
+    <div class="meta">design/prototype · v0.25 · Oct 12 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -1019,6 +1019,8 @@ function settings(confirming, hooksConfirm) {
     hooks.append(row);
   }
   list.append(hooks);
+  list.append(setRow("Start with Windows", [el("span", "", "Off"), toggle("Start with Windows", false, () => {})],
+    "Off by default. Opens Bouncer when you sign in."));
   b.append(list);
   island.append(b);
 }
@@ -1108,7 +1110,7 @@ Object.assign(STATES, {
       island.append(d);
     }, notes: ["Click a session row to open its detail. The island widens to 720.", "Left: Bouncer, the project, and every step with who allowed it (rule, you, or flagged).", "Right: the change being made, as a diff built from the hook's old and new text. The caret marks the line being written."] },
   settings: { phase: "Phase 5b", title: "Settings", render() { settings(false); },
-    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Claude Code hooks: Installed, Incomplete (some events missing), Another copy (they run a Bouncer from another folder) or Not installed, with Install…, Re-install… or Remove… (see Settings · hooks).", "Phase 5d: Sound style (Soft default, Playful), Volume, and Which sounds: one switch per sound. On by default: launch, needs you, risky, done, tool failed, welcome back."] },
+    notes: ["Opens from the gear in the session list, or the tray's \"Settings…\".", "Opened on purpose, the island takes the keyboard: Tab moves through the controls, Esc closes and gives the keyboard back.", "Every switch also says its state in words. The rules file path is plain text you can copy.", "Start with Windows (Windows only): off by default; on writes one value, Bouncer, in the per-user Run key (no admin); off deletes only that value.", "Claude Code hooks: Installed, Incomplete (some events missing), Another copy (they run a Bouncer from another folder) or Not installed, with Install…, Re-install… or Remove… (see Settings · hooks).", "Phase 5d: Sound style (Soft default, Playful), Volume, and Which sounds: one switch per sound. On by default: launch, needs you, risky, done, tool failed, welcome back."] },
   settingshooks: { phase: "Roadmap c", title: "Settings · hooks", render() { settings(false, true); },
     notes: ["Install…, Re-install… and Remove… show the exact change to Claude Code's settings first: the file's path, then a diff (changed lines, two lines of context; secrets in the context redacted).", "Write changes arms after 600ms like Allow; Enter never writes; Esc or Cancel writes nothing. Focus goes to Cancel.", "The backend writes only the change it showed (a single-use id), keeps a dated backup and writes atomically; if the file changed meanwhile, nothing is written and it says so.", "After writing, the row shows the new status and where the backup went. The bouncer command does the same in a terminal."] },
   settingsauto: { phase: "Phase 5b", title: "Settings · turn on auto", render() { settings(true); },
