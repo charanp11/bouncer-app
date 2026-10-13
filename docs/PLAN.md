@@ -3126,6 +3126,38 @@ the identifier: a real user has only one.
    The same steps are Charan's hand check on a real desktop (TESTS, Phase 9
    hand checks), since the runner isn't his machine.
 
+**c-6: Release workflow (2026-10-13).** `.github/workflows/release.yml`,
+on a pushed tag `v*.*.*` only.
+
+| Job | What | Permissions |
+| --- | --- | --- |
+| `version` | `scripts/version.mjs tag`: vX.Y.Z and 0.7.0 or later, else it stops (old v0.5.x / v0.6.x tags never get further) | contents: read |
+| `checks` | `ci.yml` itself (now also `workflow_call`): fmt, clippy, tests, check-tests on Windows and macOS, deny, npm audit, gitleaks | contents: read |
+| `installer-test` | `installer.yml`: the disposable test below | contents: read |
+| `build` | Clean (no cache) on windows-latest: `version.mjs set` → `bundle.mjs` → `version.mjs check` (crates, package.json, tauri.conf.json and the installer's name agree); the signing slot (commented); `SHA256SUMS.txt`; uploaded as an artifact | contents: read |
+| `release` | Checksums re-checked; `actions/attest-build-provenance` on the installer; notes (how to verify the SHA-256 and the attestation, the SmartScreen line, changes since the last tag); `gh release create --draft --verify-tag` | contents, id-token, attestations: write (the only writer) |
+
+New actions are GitHub's own, pinned by SHA to releases at least two weeks
+old: `upload-artifact` v7.0.1, `download-artifact` v8.0.1,
+`attest-build-provenance` v4.2.2. No third-party ones. Version: plain
+X.Y.Z only (the installer needs numbers), stamped at build time, never
+committed: the repo stays at 0.0.0.
+
+`installer.yml` (the disposable test from the c-5 review, item 4): on PRs
+that touch the installer, from the release workflow, and by hand. Builds
+this commit twice, as 0.0.1 and 0.0.2, on a fresh windows-latest runner,
+then `scripts/installer-test.ps1` (refuses nothing, so never run it on a
+real profile): install; hooks with the installed `bouncer.exe` into a
+scratch `CLAUDE_CONFIG_DIR`; a card through the installed hook; Start with
+Windows on and off through Settings (Ctrl+Alt+B, then UI Automation in the
+WebView); the upgrade driven through its pages with "Uninstall before
+installing" ticked while a watcher checks `bouncer.exe` never runs;
+uninstall unticked (console `y`, `settings.json` byte for byte, data
+kept); reinstall, uninstall ticked (data gone). Results land in the job
+summary. TESTS W9, W10. `check-tests` now also accepts a CI job's files as
+its proof (they must exist), and checks `ts:` titles that contain a "/"
+(UI1's had been skipped).
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
