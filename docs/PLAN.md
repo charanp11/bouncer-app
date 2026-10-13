@@ -2848,6 +2848,15 @@ relay). Screenshots: `design/screenshots/explain/`.
   Explain without the keyboard → focus on Stop, Space stopped it (no
   answer); a click on the card's title → Deny; a click in the box → its
   button.
+- "Always allow…" and Explain together (Charan asked where Always allow
+  went): it shows only when the backend offers a rule, unchanged by this
+  PR. The check's cards had none: `ls`, `cargo build` and `pwd` are allowed
+  by the default rules ("Would auto-allow"), the risky one never gets one,
+  a pipe or a `#` comment isn't offered, and the instance's session came from
+  a fixture whose project folder doesn't exist here. A card from a real
+  project (`terraform plan`): Deny, Allow once, Always allow… and Explain;
+  with the explanation open, Always allow… previews the exact rule and
+  Cancel brings the buttons back.
 - The app stopped with a card and an explanation up: the relay printed
   nothing (fail safe); a card left 100 s timed out as usual.
 - Once, early on, a Space on Stop closed the whole box instead of showing
