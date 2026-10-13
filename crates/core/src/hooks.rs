@@ -5,9 +5,16 @@
 //! event list or `hooks` object that only became empty because of that. Key
 //! order is kept (`serde_json` `preserve_order`), so install followed by
 //! uninstall gives back the same JSON.
+//!
+//! Writing is never silent (rule 6): `plan` gives the change, the caller shows
+//! its diff and asks, then `Change::write` keeps a dated backup and replaces
+//! the file atomically. The `bouncer` CLI and the app's Settings share it.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::fs::{self, File, Permissions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -151,6 +158,245 @@ pub fn diff(old: &str, new: &str) -> String {
         }
     }
     out
+}
+
+/// How our hooks stand in a settings file, against the relay that should run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// Every event runs this relay, with its timeout.
+    Installed,
+    /// Some events have none of our hooks (or an old timeout).
+    Incomplete,
+    /// Every event has ours, but some point at another relay (a moved app).
+    Moved,
+    /// None of ours.
+    Missing,
+}
+
+impl Status {
+    pub fn name(self) -> &'static str {
+        match self {
+            Status::Installed => "installed",
+            Status::Incomplete => "incomplete",
+            Status::Moved => "moved",
+            Status::Missing => "missing",
+        }
+    }
+}
+
+/// Checks every event in `EVENTS` for our hook running `relay`.
+pub fn status(settings: &Value, relay: &str) -> Status {
+    if !installed(settings) {
+        return Status::Missing;
+    }
+    let mut moved = false;
+    for &(event, timeout) in EVENTS {
+        let ours: Vec<&Value> = settings["hooks"][event]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|group| group["hooks"].as_array())
+            .flatten()
+            .filter(|hook| is_ours(hook))
+            .collect();
+        let exact =
+            |h: &&Value| h["command"] == relay && h["timeout"] == timeout && h["args"] == json!([]);
+        if ours.is_empty() {
+            return Status::Incomplete;
+        } else if !ours.iter().any(exact) {
+            if ours.iter().all(|h| h["command"] == relay) {
+                return Status::Incomplete;
+            }
+            moved = true;
+        }
+    }
+    if moved {
+        Status::Moved
+    } else {
+        Status::Installed
+    }
+}
+
+/// A change to a settings file, shown before anything is written (rule 6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    pub path: PathBuf,
+    before: Option<String>,
+    after: String,
+}
+
+impl Change {
+    /// The changed lines with two lines of context, as `diff` gives them.
+    pub fn diff(&self) -> String {
+        diff(self.before.as_deref().unwrap_or(""), &self.after)
+    }
+
+    /// Writes the change: refused if the file changed since it was read
+    /// (Claude Code writes it too), a dated backup of the old file first,
+    /// then an atomic replace. Returns the backup's path, if there was a file.
+    pub fn write(&self) -> Result<Option<PathBuf>, String> {
+        let path = &self.path;
+        if read(path)? != self.before {
+            return Err(format!("{} changed meanwhile; try again", path.display()));
+        }
+        let backup = match &self.before {
+            Some(text) => Some(backup(path, text)?),
+            None => None,
+        };
+        atomic_write(path, &self.after).map_err(|e| format!("write {}: {e}", path.display()))?;
+        Ok(backup)
+    }
+}
+
+/// The file's text, or `None` if it doesn't exist.
+fn read(path: &Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("can't read {}: {e}", path.display())),
+    }
+}
+
+/// What installing our hooks (with `relay`) or removing them (`None`) would
+/// change in the settings file at `path`. `Ok(None)`: nothing to change.
+/// Refuses a file that isn't valid JSON, and a relay that isn't an absolute
+/// path to a file.
+pub fn plan(path: &Path, relay: Option<&Path>) -> Result<Option<Change>, String> {
+    let before = read(path)?;
+    let mut value = match &before {
+        Some(text) => serde_json::from_str(text).map_err(|e| {
+            format!(
+                "{} is not valid JSON ({e}); not touching it",
+                path.display()
+            )
+        })?,
+        None if relay.is_some() => json!({}),
+        None => return Ok(None),
+    };
+    match relay {
+        Some(relay) => {
+            if !relay.is_absolute() || !relay.is_file() {
+                return Err(format!("relay not found at {}", relay.display()));
+            }
+            let relay = relay.to_str().ok_or("relay path is not valid UTF-8")?;
+            install(&mut value, relay)?;
+        }
+        None => uninstall(&mut value),
+    }
+    let mut after = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
+    if before.as_ref().is_none_or(|t| t.ends_with('\n')) {
+        after.push('\n');
+    }
+    if before.as_deref() == Some(after.as_str()) {
+        return Ok(None);
+    }
+    Ok(Some(Change {
+        path: path.to_owned(),
+        before,
+        after,
+    }))
+}
+
+/// `bouncer-hook[.exe]` next to the running program.
+pub fn relay_beside_me() -> Result<PathBuf, String> {
+    Ok(std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .with_file_name(format!("bouncer-hook{}", std::env::consts::EXE_SUFFIX)))
+}
+
+fn file_name(path: &Path) -> Result<&str, String> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("bad settings path {}", path.display()))
+}
+
+/// Saves `text` as `<file>.bouncer-backup-<UTC time>[-n]`, never overwriting,
+/// with the same permissions as `path`.
+fn backup(path: &Path, text: &str) -> Result<PathBuf, String> {
+    let perms = perms_of(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let base = format!(
+        "{}.bouncer-backup-{}",
+        file_name(path)?,
+        stamp(SystemTime::now())
+    );
+    for n in 1..100 {
+        let name = if n == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        let backup = path.with_file_name(name);
+        match write_new(&backup, text, perms.clone()) {
+            Ok(()) => return Ok(backup),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("backup {}: {e}", backup.display())),
+        }
+    }
+    Err("too many backups this second".into())
+}
+
+/// The permissions of `path`, or `None` if it doesn't exist.
+fn perms_of(path: &Path) -> io::Result<Option<Permissions>> {
+    match fs::metadata(path) {
+        Ok(meta) => Ok(Some(meta.permissions())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Creates `path` (failing if it exists) with `perms` set before any byte is
+/// written, then syncs it to disk. Removes it again on error.
+fn write_new(path: &Path, text: &str, perms: Option<Permissions>) -> io::Result<()> {
+    let mut file = File::create_new(path)?;
+    let result = perms
+        .map_or(Ok(()), |p| file.set_permissions(p))
+        .and_then(|()| file.write_all(text.as_bytes()))
+        .and_then(|()| file.sync_all());
+    if result.is_err() {
+        drop(file);
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
+/// Writes a temp file next to `path` (same permissions), then renames it over.
+fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
+    let tmp = path.with_file_name(format!(
+        "{}.bouncer-tmp-{}",
+        file_name(path).map_err(io::Error::other)?,
+        std::process::id()
+    ));
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        fs::create_dir_all(dir)?;
+    }
+    write_new(&tmp, text, perms_of(path)?)?;
+    let result = fs::rename(&tmp, path);
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// UTC `YYYYMMDD-HHMMSSZ`.
+fn stamp(time: SystemTime) -> String {
+    let secs = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 #[cfg(test)]
@@ -298,5 +544,131 @@ mod tests {
     fn diff_shows_changes_with_context() {
         let d = diff("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nd\nX\nf\ng\n");
         assert_eq!(d, "  ...\n  c\n  d\n- e\n+ X\n  f\n  g\n");
+    }
+
+    #[test]
+    fn stamps_utc_dates() {
+        let at = |s| stamp(UNIX_EPOCH + std::time::Duration::from_secs(s));
+        assert_eq!(at(0), "19700101-000000Z");
+        assert_eq!(at(951_782_400), "20000229-000000Z");
+        assert_eq!(at(1_790_812_799), "20260930-235959Z");
+    }
+
+    #[test]
+    fn settings_path_follows_claude_config_dir() {
+        let path = |dir: Option<&str>, home: Option<&str>| {
+            settings_path(dir.map(Into::into), home.map(Into::into))
+        };
+        let home = Path::new("h").join(".claude").join("settings.json");
+        assert_eq!(
+            path(Some("cfg"), Some("h")),
+            Ok(Path::new("cfg").join("settings.json"))
+        );
+        assert_eq!(path(None, Some("h")), Ok(home.clone()));
+        assert_eq!(path(Some(""), Some("h")), Ok(home));
+        assert!(path(None, None).is_err());
+        assert!(path(Some(""), Some("")).is_err());
+    }
+
+    #[test]
+    fn write_new_applies_permissions_and_still_writes() {
+        let dir = std::env::temp_dir().join(format!("bouncer-perms-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("original"), "").unwrap();
+        let mut readonly = fs::metadata(dir.join("original")).unwrap().permissions();
+        readonly.set_readonly(true);
+        let file = dir.join("copy");
+        write_new(&file, "text", Some(readonly)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "text");
+        let mut perms = fs::metadata(&file).unwrap().permissions();
+        assert!(perms.readonly());
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(&file, perms).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn status_tells_installed_incomplete_moved_and_missing() {
+        let mut s = user_settings();
+        assert_eq!(status(&s, RELAY), Status::Missing);
+        install(&mut s, RELAY).unwrap();
+        assert_eq!(status(&s, RELAY), Status::Installed);
+        assert_eq!(status(&s, r"D:\elsewhere\bouncer-hook.exe"), Status::Moved);
+        // One event lost: incomplete, wherever the rest point.
+        let mut lost = s.clone();
+        lost["hooks"]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("Notification");
+        assert_eq!(status(&lost, RELAY), Status::Incomplete);
+        // An old timeout on the permission hook: incomplete, re-install fixes it.
+        let mut old = s.clone();
+        for group in old["hooks"]["PermissionRequest"].as_array_mut().unwrap() {
+            for hook in group["hooks"].as_array_mut().unwrap() {
+                hook["timeout"] = json!(60);
+            }
+        }
+        assert_eq!(status(&old, RELAY), Status::Incomplete);
+        // Only a lookalike: missing.
+        let fake =
+            json!({ "hooks": { "Stop": [{ "hooks": [{ "command": "bouncer-hook-extra" }] }] } });
+        assert_eq!(status(&fake, RELAY), Status::Missing);
+    }
+
+    /// Settings' path: plan, show, write. A backup of the old file, the new
+    /// one in place; a file changed after the plan is never overwritten.
+    #[test]
+    fn plan_then_write_backs_up_and_refuses_a_file_changed_meanwhile() {
+        let dir = std::env::temp_dir().join(format!("bouncer-plan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let relay = dir.join(format!("bouncer-hook{}", std::env::consts::EXE_SUFFIX));
+        let file = dir.join("settings.json");
+        let original = "{\n  \"model\": \"opus\"\n}\n";
+        fs::write(&file, original).unwrap();
+
+        // No relay there yet: refused.
+        assert!(
+            plan(&file, Some(&relay))
+                .unwrap_err()
+                .contains("relay not found")
+        );
+        fs::write(&relay, "").unwrap();
+        assert!(plan(&file, Some(Path::new("bouncer-hook"))).is_err());
+
+        let change = plan(&file, Some(&relay)).unwrap().unwrap();
+        assert!(change.diff().contains("+ "));
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            original,
+            "planning writes nothing"
+        );
+        let backup = change.write().unwrap().unwrap();
+        assert_eq!(fs::read_to_string(&backup).unwrap(), original);
+        let written: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(status(&written, relay.to_str().unwrap()), Status::Installed);
+        assert_eq!(
+            plan(&file, Some(&relay)).unwrap(),
+            None,
+            "nothing more to do"
+        );
+
+        // Remove, but the file changes before the write: refused, untouched.
+        let remove = plan(&file, None).unwrap().unwrap();
+        fs::write(&file, original).unwrap();
+        assert!(remove.write().unwrap_err().contains("changed meanwhile"));
+        assert_eq!(fs::read_to_string(&file).unwrap(), original);
+
+        // Not JSON: refused, untouched. No file: nothing to remove.
+        fs::write(&file, "{ not json").unwrap();
+        assert!(
+            plan(&file, Some(&relay))
+                .unwrap_err()
+                .contains("not valid JSON")
+        );
+        assert_eq!(plan(&dir.join("none.json"), None).unwrap(), None);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
