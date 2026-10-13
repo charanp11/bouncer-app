@@ -1,0 +1,67 @@
+name: Installer test
+
+# The installer end to end on a fresh runner (a disposable machine: it
+# installs, uninstalls and deletes Bouncer's data folders). Two test builds of
+# this commit, 0.0.1 and 0.0.2, so the upgrade goes through "uninstall before
+# installing". Runs on PRs that touch the installer, from the release workflow
+# before anything is built for real, and by hand.
+on:
+  pull_request:
+    paths:
+      - crates/app/installer-hooks.nsh
+      - crates/app/tauri.conf.json
+      - crates/app/tauri.release.json
+      - crates/core/src/bin/**
+      - crates/core/src/autostart.rs
+      - crates/core/src/hooks.rs
+      - scripts/bundle.mjs
+      - scripts/version.mjs
+      - scripts/installer-test.ps1
+      - .github/workflows/installer.yml
+      - .github/workflows/release.yml
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: npm ci
+      - name: Build test version 0.0.1
+        shell: bash
+        run: |
+          node scripts/version.mjs set 0.0.1
+          node scripts/bundle.mjs
+          node scripts/version.mjs check 0.0.1 target/release/bundle/nsis
+          mv target/release/bundle/nsis/Bouncer_0.0.1_x64-setup.exe "$RUNNER_TEMP/old-setup.exe"
+      - name: Build test version 0.0.2
+        shell: bash
+        run: |
+          node scripts/version.mjs set 0.0.2
+          node scripts/bundle.mjs
+          node scripts/version.mjs check 0.0.2 target/release/bundle/nsis
+          mv target/release/bundle/nsis/Bouncer_0.0.2_x64-setup.exe "$RUNNER_TEMP/new-setup.exe"
+      - name: Install, use, upgrade, uninstall
+        shell: powershell
+        run: >
+          ./scripts/installer-test.ps1
+          -Old "$env:RUNNER_TEMP\old-setup.exe" -OldVersion 0.0.1
+          -New "$env:RUNNER_TEMP\new-setup.exe" -NewVersion 0.0.2
+          -Fixtures crates\relay\tests\fixtures
