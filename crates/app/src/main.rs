@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use bouncer_core::activity;
 use bouncer_core::approvals::{self, Desk, WAIT};
+use bouncer_core::autostart;
 use bouncer_core::away::{self, Away};
 use bouncer_core::hooks;
 use bouncer_core::ipc::{self, Handler, Server};
@@ -139,7 +140,8 @@ fn main() {
             explain,
             explain_stop,
             hooks_preview,
-            hooks_write
+            hooks_write,
+            set_autostart
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -781,7 +783,17 @@ fn about() -> Value {
     json!({
         "rules": rules::path().map(|p| p.display().to_string()),
         "hooks": hook_status(),
+        "autostart": std::env::current_exe().ok().and_then(|exe| autostart::enabled(&exe)),
     })
+}
+
+/// Settings' "Start with Windows" switch (off by default). Returns whether
+/// it's on now.
+#[tauri::command]
+fn set_autostart(on: bool) -> Result<bool, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    autostart::set(on, &exe)?;
+    autostart::enabled(&exe).ok_or_else(|| "not offered here".into())
 }
 
 /// "installed", "incomplete", "moved", "missing" (no file, or none of ours)
@@ -998,6 +1010,7 @@ fn tray(",
             "explain-stop",
             "hooks-preview",
             "hooks-write",
+            "set-autostart",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()
