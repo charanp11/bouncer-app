@@ -1,4 +1,5 @@
 {
+  "identifier": "io.github.charanp11.bouncer",
   "bundle": {
     "externalBin": ["binaries/bouncer-hook", "binaries/bouncer"]
   }

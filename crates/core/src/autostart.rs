@@ -13,7 +13,8 @@ pub const KEY_ENV: &str = "BOUNCER_AUTOSTART_KEY";
 use std::path::Path;
 
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const NAME: &str = "Bouncer";
+/// `Bouncer` (`Bouncer-dev` in a debug build, never the installed app's value).
+const NAME: &str = bouncer_relay::NAME;
 
 fn key_with(over: Option<std::ffi::OsString>) -> String {
     over.filter(|v| cfg!(debug_assertions) && !v.is_empty())

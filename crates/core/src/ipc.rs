@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::event::Event;
 
-pub use bouncer_relay::endpoint;
+pub use bouncer_relay::{NAME, endpoint};
 
 /// True if a server answers on `path` and runs as this user (the relay's own
 /// check). Nothing is sent: the server ignores an empty connection.

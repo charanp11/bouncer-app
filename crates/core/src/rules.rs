@@ -254,7 +254,8 @@ pub struct Loaded {
 pub const RULES_ENV: &str = "BOUNCER_RULES";
 
 /// Where the rules file lives: `%APPDATA%\Bouncer` on Windows,
-/// `~/Library/Application Support/Bouncer` on macOS (next to the socket).
+/// `~/Library/Application Support/Bouncer` on macOS (next to the socket);
+/// `Bouncer-dev` in debug builds, never the installed app's folder.
 pub fn path() -> Option<PathBuf> {
     path_with(std::env::var_os(RULES_ENV))
 }
@@ -269,7 +270,7 @@ fn path_with(over: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let dir = std::env::home_dir()?.join("Library/Application Support");
     #[cfg(not(any(windows, target_os = "macos")))]
     let dir = std::env::home_dir()?.join(".config");
-    Some(dir.join("Bouncer").join("rules.toml"))
+    Some(dir.join(bouncer_relay::NAME).join("rules.toml"))
 }
 
 /// When the file last changed, to notice edits cheaply.
@@ -832,7 +833,12 @@ pub(crate) mod tests {
     fn override_is_honored_only_in_debug_builds() {
         let over = path_with(Some("x-rules.toml".into()));
         assert_eq!(over == Some("x-rules.toml".into()), cfg!(debug_assertions));
-        assert!(path_with(Some("".into())).is_some_and(|p| p.ends_with("Bouncer/rules.toml")));
+        let default = path_with(Some("".into())).unwrap();
+        assert!(default.ends_with(Path::new(bouncer_relay::NAME).join("rules.toml")));
+        assert_eq!(
+            default.to_string_lossy().contains("Bouncer-dev"),
+            cfg!(debug_assertions)
+        );
     }
 
     #[test]
