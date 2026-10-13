@@ -2980,6 +2980,22 @@ this PC. The chat runs Claude Code, whose memory is its own and not counted.
 | WebView2 missing on install | The installer's bootstrapper fetches it (the installer's only network use; the app still makes none); documented |
 | Unsigned binary flagged | README walkthrough, checksums, attestation; Defender false-positive report link; SignPath after v0.7.0 |
 
+**c-2: hooks in the app (2026-10-12).** The CLI's file code (dated backup,
+atomic write, changed-meanwhile refusal) moved into `core::hooks` as
+`plan` → `Change::diff` → `Change::write`; the CLI and Settings both use
+it, and the CLI's output is unchanged. `hooks::status` checks every event
+for our hook running the relay beside the app, with its timeout:
+installed, incomplete, another copy (moved) or not installed. Settings
+offers Install… / Re-install… / Remove…: `hooks_preview` returns the file,
+the diff (redacted: its context lines can hold a token from `env`) and a
+single-use id; an armed "Write changes" sends only the id (`hooks_write`).
+Prototype v0.24 ("Settings · hooks"). TESTS I8, I9.
+
+- [x] Status in Settings: installed / incomplete / another copy / not installed (I8)
+- [x] Install, re-install, remove from Settings with diff, armed confirm, single-use id, backup, atomic write (I9)
+- [x] The CLI behaves as before (I1–I7 unchanged, its tests pass)
+- [x] Test instance (scratch `CLAUDE_CONFIG_DIR`, page-level clicks over CDP): a Write before the arm did nothing; the token in the context showed as `[redacted]`; install then remove gave back the exact bytes, a backup each time; one event removed by hand → Incomplete, Re-install → Installed; Cancel and a file changed under the open diff wrote nothing ("changed meanwhile; try again")
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
