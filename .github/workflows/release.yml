@@ -1,0 +1,154 @@
+name: Release
+
+# Only a pushed tag vX.Y.Z (0.7.0 or later) makes a release, and only as a
+# DRAFT: Charan reads it and presses Publish. The old v0.5.x / v0.6.x tags
+# never trigger it (they're not pushed again, and the version step refuses
+# anything older than 0.7.0). The version comes from the tag into Cargo,
+# package.json, tauri.conf.json and the installer, and every one is checked.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+# Nothing by default; each job asks for what it needs. Only `release` writes.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "version=$(node scripts/version.mjs tag "$TAG")" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  installer-test:
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/installer.yml
+
+  build:
+    needs: [version, checks, installer-test]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # A clean build: no cache, so nothing from earlier runs ends up in a release.
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - run: npm ci
+      - name: Build the installer
+        shell: bash
+        run: |
+          node scripts/version.mjs set "$VERSION"
+          node scripts/bundle.mjs
+          node scripts/version.mjs check "$VERSION" target/release/bundle/nsis
+      # Signing slot (once SignPath Foundation accepts the project; PLAN, roadmap c):
+      # submit the unsigned installer, wait for the approved signature, put the
+      # signed file back in target/release/bundle/nsis before the checksums.
+      # - name: Sign the installer (SignPath)
+      #   uses: signpath/github-action-submit-signing-request@<commit SHA> # v<version>
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: <SignPath organization id>
+      #     project-slug: bouncer-app
+      #     signing-policy-slug: release-signing
+      #     github-artifact-id: <id of an uploaded, unsigned installer artifact>
+      #     wait-for-completion: true
+      #     output-artifact-directory: target/release/bundle/nsis
+      - name: Checksums
+        shell: bash
+        working-directory: target/release/bundle/nsis
+        run: |
+          sha256sum "Bouncer_${VERSION}_x64-setup.exe" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: |
+            target/release/bundle/nsis/Bouncer_${{ env.VERSION }}_x64-setup.exe
+            target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The only job that writes: the draft release and its attestation.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: out
+      - name: Checksums still match
+        working-directory: out
+        run: sha256sum --check SHA256SUMS.txt
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: out/Bouncer_${{ env.VERSION }}_x64-setup.exe
+      - name: Release notes
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*.*.*' "$TAG^" 2>/dev/null || true)
+          {
+            echo "Bouncer $VERSION for Windows (64-bit): a per-user install, no admin needed."
+            echo
+            echo "**Not signed yet.** Windows SmartScreen will say \"Windows protected your PC\": choose **More info → Run anyway**. Check the file first:"
+            echo
+            echo '```'
+            cat out/SHA256SUMS.txt
+            echo '```'
+            echo
+            echo "In PowerShell: \`Get-FileHash .\\Bouncer_${VERSION}_x64-setup.exe\` must show the same SHA-256. With the GitHub CLI: \`gh attestation verify Bouncer_${VERSION}_x64-setup.exe --repo ${GITHUB_REPOSITORY}\` proves it was built by this workflow from this tag."
+            echo
+            echo "Install, update and uninstall steps, and what Bouncer can't do: see the README."
+            echo
+            echo "## Changes${previous:+ since $previous}"
+            echo
+            git log --no-merges --format='- %s' "${previous:+$previous..}$TAG"
+          } > notes.md
+          cat notes.md
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$TAG" --draft --verify-tag
+          --title "Bouncer $VERSION"
+          --notes-file notes.md
+          "out/Bouncer_${VERSION}_x64-setup.exe" out/SHA256SUMS.txt
