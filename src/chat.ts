@@ -191,6 +191,13 @@ export function heldCard(held: string, card: string | null, newCard: boolean, ha
 // The locked chat explains a waiting card's shell command. It only reads:
 // nothing here can answer the card, and the card's buttons never wait on it.
 
+/** Where the keyboard goes when it arrives with a card up: Deny, unless
+ * the press that brought it was on that card's Explain control or its box
+ * (`pressed`, as `explain:<id>`), where it stays. Never Allow. */
+export function arrivalFocus(card: string, pressed: string | null): string {
+  return pressed === `explain:${card}` ? pressed : `deny:${card}`;
+}
+
 /** Cards whose command can be explained (the backend checks again). */
 export const EXPLAINED_TOOLS = new Set(["Bash", "PowerShell"]);
 
