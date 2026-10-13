@@ -191,11 +191,18 @@ try {
             if ($c) { Press $c }
         }
     }
-    $gear = Wait-Until { & $awayGone; Button $island "Settings" } 20
+    # Closing the summary folds the island back to its pill ("1 session · …"):
+    # press the pill to open it again.
+    $opened = {
+        & $awayGone
+        $pill = Button $island "*session*"
+        if ($pill -and -not (Button $island "Settings")) { Press $pill }
+    }
+    $gear = Wait-Until { & $opened; Button $island "Settings" } 30
     if (-not $gear) { Dump $island "no Settings button in the island" }
     Press $gear
     $switch = Wait-Until {
-        & $awayGone
+        & $opened
         if (-not (Control $island "Rules file")) {  # not in Settings (the summary took over): the gear again
             $g = Button $island "Settings"
             if ($g) { Press $g }
