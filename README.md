@@ -17,6 +17,10 @@ reason, and never blocks the agent.
 - **Risky flags.** Requests that download and run scripts, delete outside the
   project, touch secrets, force-push and so on are flagged with a plain
   reason and never auto-allowed. Compound or unparseable commands always ask.
+- **Questions and plans.** When Claude Code asks you to pick an option or
+  approve a plan, the island shows it too: pick and send, or approve / keep
+  planning. Only your click answers; the terminal asks at the same time, and
+  whichever you answer first wins.
 - **Explain this command.** One click asks Claude what a shell command does
   and what could go wrong.
 - **Read-only chat.** Ask Claude a question from the island, through your
@@ -123,9 +127,12 @@ see the first item under "What it can't do".
   instead. Safe requests in those modes still run unasked, and Bouncer never
   allows or denies anything on its own.
 - **Only Claude Code for now.** Other agents come one per release.
-- **Questions are answered in the terminal.** When Claude Code asks you a
-  question or wants a plan approved, Bouncer shows the session waits; you
-  answer in Claude Code.
+- **Some questions stay in the terminal.** Typing your own answer ("Type
+  something"), questions Bouncer can't show unambiguously (for example a
+  multi-select option whose label contains ", "), and any question while
+  Bouncer is paused are answered in Claude Code only; the island says the
+  session waits. Approving a plan in Bouncer never changes the session's
+  permission mode.
 - **It never blocks the agent.** If Bouncer is closed, paused, slow or
   confused, Claude Code asks in its own prompt as usual. A card waits 100
   seconds, then goes, and Claude Code asks.

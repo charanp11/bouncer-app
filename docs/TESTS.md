@@ -47,7 +47,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | A7 | Auto-allow by rule | Auto mode answers what a rule allows; Always allow adds the exact offered rule, scoped to the project | unit, integration | `approvals::tests::auto_mode_answers_what_a_rule_allows` `approvals::tests::always_allow_adds_the_offered_rule_then_allows` `check::tests::always_allow_offers_exact_rules_in_this_project` `scoped_rules_match_only_there` | CI |
 | A8 | Risky requests | Flagged with a plain reason; never auto-allowed or offered as a rule | unit, integration, fixture | `check::tests::risky_requests_are_never_allowed_or_offered` `bash_case_table` `powershell_case_table` `tool_case_table` `every_risk_reason_is_one_lowercase_clause` `recorded_requests` | CI |
 | A9 | Compound or unparseable commands | Never auto-allowed; every part must be allowed | unit, integration | `check::tests::compound_commands_need_every_part_allowed` `fuzz_never_panics_and_never_allows_metacharacters` `powershell_fuzz_only_allows_plain_commands` `shell::tests::compound_commands_split` `shell::tests::issues_are_noticed` | CI |
-| A10 | Questions (AskUserQuestion, ExitPlanMode) | Never answered by Bouncer; the terminal asks; the session shows it waits; one sound | unit, integration, frontend | `approvals::tests::questions_go_to_the_terminal_and_flag_the_session` `questions_print_nothing_so_the_terminal_asks` `ts: a question in the terminal sounds; one that stays doesn't again` | CI |
+| A10 | Questions (AskUserQuestion, ExitPlanMode) Bouncer can't show, or while paused | Never answered by Bouncer; no card; the terminal asks; the session shows it waits; one sound. Questions it can show get a card of their own (Q1–Q9) | unit, integration, frontend | `approvals::tests::questions_bouncer_cant_show_go_to_the_terminal_and_flag_the_session` `questions_bouncer_cant_show_print_nothing_so_the_terminal_asks` `ts: a question in the terminal sounds; one that stays doesn't again` | CI |
 | A11 | Subagent tools | Another tool finishing in the session doesn't take the card away | unit | `approvals::tests::another_tool_finishing_leaves_the_card_up` | CI |
 | A12 | Stale card | The tool ran / failed, or the turn moved on: the card leaves unanswered | unit | `approvals::tests::answering_in_the_terminal_while_the_card_is_up_clears_it` `approvals::tests::a_failure_after_a_terminal_yes_clears_the_card` | CI |
 | A13 | Timeout | No answer in 100 s: the card leaves, nothing answered, Claude Code asks | unit | `approvals::tests::unanswered_requests_time_out_with_no_answer` | CI |
@@ -220,6 +220,20 @@ command does and what could go wrong. It never decides.
 | G3 | The wire and the relay | The server sends `ask` only for a PreToolUse (allow / deny only for a PermissionRequest); the relay prints the documented PreToolUse ask (fixed reason) for exactly `ask`, nothing else ever; a late answer prints nothing within ~2 s | unit, integration | `ipc::tests::ask_goes_only_to_a_pre_tool_use` `tests::the_guard_prints_ask_for_exactly_ask_and_nothing_else` `the_guard_makes_claude_code_ask_only_for_a_pre_tool_use` `the_desk_guards_risky_requests_through_the_real_relay` `a_slow_guard_answer_prints_nothing` | CI |
 | G4 | A real Claude Code | With the switch on: a risky command in bypass, auto and accept-edits mode raises Claude Code's prompt and Bouncer's card; island Deny reaches it; switch off: it runs unasked; a `claude -p` run refuses it (documented) | real (test instance, playground hooks), hand (terminal check below) | — | real 2026-10-14 (PLAN, c3); hand: not run yet |
 
+## Questions in the island (roadmap c2)
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| Q1 | Which questions Bouncer shows | One check shared by the relay and the app: 1–4 questions with unique, non-empty texts; 2–4 options with unique, non-empty labels; `multiSelect` a bool or absent; no ", " in a multi-select's labels; no `answers` yet. Picks: one group per question, one-digit numbers, strictly increasing, exactly one for a single-select | unit | `questions::tests::only_unambiguous_questions_are_accepted` `questions::tests::picks_must_cover_every_question_once_and_in_range` `questions::tests::answers_echo_the_input_and_add_the_chosen_labels` `questions::tests::the_picks_line_round_trips` | CI |
+| Q2 | The relay's answer | Built from its own copy of Claude Code's input: a question's `answer <picks>` → allow + the input plus `answers` (labels looked up by number); a plan's `approve` → allow + the input as it came, `keep` → deny with fixed text; never a plain allow / deny for them; these words mean nothing for any other tool; anything else prints nothing | unit, integration | `tests::a_question_is_answered_only_with_its_own_labels` `tests::a_plan_is_approved_as_it_came_or_kept_in_planning` `tests::anything_else_prints_nothing` `questions_and_plans_are_answered_from_the_island_through_the_real_relay` | CI |
+| Q3 | The wire | `answer` only for an AskUserQuestion request, `approve` / `keep` only for an ExitPlanMode one; allow / deny never for them | unit | `ipc::tests::questions_and_plans_get_only_their_own_words` | CI |
+| Q4 | A question card | Its own card (no rule, "would", offer or guard, in auto mode too), text made visible-safe; answered only by `answer` with picks that fit (armed 600 ms, single-use); `decide` / `always` / `plan` refused for it; unanswered: times out with no answer | unit | `approvals::tests::a_question_gets_a_card_that_only_its_picks_answer` `approvals::tests::an_unanswered_question_times_out_with_no_answer` | CI |
+| Q5 | A plan card | Its own card with the plan and its file; Keep planning at once, Approve armed; single-use; allow / answers refused; no plan text: still a card that says so | unit | `approvals::tests::a_plan_gets_a_card_approved_or_kept_only_by_the_user` | CI |
+| Q6 | Answered elsewhere, paused, or not showable | Relay stopped (answered in the terminal / app): the card leaves within a second, a late answer is refused and nothing is printed. Paused, or a shape Bouncer can't show: no card, nothing printed at once, "question in the terminal" | integration, unit | `a_question_answered_elsewhere_leaves_and_a_late_click_sends_nothing` `questions_bouncer_cant_show_print_nothing_so_the_terminal_asks` `approvals::tests::questions_bouncer_cant_show_go_to_the_terminal_and_flag_the_session` | CI |
+| Q7 | The app's commands | `answer` (ID + numbers) and `plan` (ID + a bool) only, granted to the page and listed with our own commands | unit | `tests::strict_csp_and_only_our_commands` | CI |
+| Q8 | The page | Built to prototype v0.28: questions, options (one or several picks, a filled mark), Send answer armed and only when every question has a pick; plan as Markdown from text with Keep planning / Approve plan; the page sends only the ID and numbers or approve / keep; the keyboard arrives on the first option or Keep planning; agent text with red tags | frontend, real (test instance) | `ts: the page sends only the card's ID and option numbers, or approve / keep` `ts: Send answer and Approve plan arm like Allow (so Enter never reaches them); a pick never sends` `ts: one pick for a single-select question; a second press clears it` `ts: a multi-select question adds and removes picks, kept sorted` `ts: an answer is ready only when every question has a pick` `ts: questions: the keyboard arrives on the first option or on Keep planning, never on a button that answers` | CI; real 2026-10-14 (PLAN, c2) |
+| Q9 | A real Claude Code | Island answer reaches the terminal's question / plan in every mode; answering in the terminal first takes the card away; bypass mode in the terminal | hand (hand check 5) | — | Hand 5 (not run yet) |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |
@@ -230,7 +244,7 @@ command does and what could go wrong. It never decides.
 
 ## Hand checks
 
-What a person has to do (about 13 minutes). Use the dev app and the
+What a person has to do (about 13 minutes, plus the c3 and c2 checks). Use the dev app and the
 playground (`../bouncer-playground`, its own `.claude/settings.local.json`);
 never the real `~/.claude/settings.json`.
 
@@ -303,6 +317,33 @@ never the real `~/.claude/settings.json`.
       Code moves on.
    6. Settings → Guard every mode → Off. In bypass mode ask again.
       Expected: it runs, no prompt, no card (as v0.7.0).
+   Log it in `docs/PLAN.md` ("Manual checks", date + Claude Code
+   version) and here.
+5. **Questions in the island (about 10 min).** Not run yet. Dev app from
+   the c2 branch and the playground: first `cargo build -p bouncer-relay`
+   (so the playground's relay answers questions), then `npm run tauri dev`.
+   Like any session, these runs write Claude Code's own files under your
+   `~/.claude`.
+   1. In `bouncer-playground`: `claude --permission-mode default`. Ask:
+      "Use AskUserQuestion to ask me which color I prefer: Red or Blue."
+      Expected: the question in the terminal and a Question card in the
+      island at the same time. Send answer is greyed out until you pick;
+      pick **Blue**, wait for it to arm, click **Send answer**: the
+      terminal's question closes and Claude says Blue.
+   2. Ask the same again; this time answer **in the terminal first** (Red)
+      while the card waits. Expected: the card leaves as soon as Claude
+      Code moves on; nothing from the island reaches Claude.
+   3. Shift+Tab to **plan mode**. Ask: "Plan a one-line hello script and
+      show me the plan." Expected: the plan in the terminal and a Plan
+      card. **Keep planning** in the island: Claude keeps planning. When
+      it shows a plan again, **Approve plan** (arms first): Claude starts,
+      and the mode is "manual" (default), not changed by Bouncer.
+   4. Quit Claude Code; start `claude --dangerously-skip-permissions`
+      (bypass; accept its warning) and ask the color question. Expected:
+      a card; answer it in the island: Claude gets the answer.
+   5. Tray → **Pause**, ask the color question again. Expected: no card;
+      the pill says "question in the terminal"; answer in the terminal.
+      Resume.
    Log it in `docs/PLAN.md` ("Manual checks", date + Claude Code
    version) and here.
 

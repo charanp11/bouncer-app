@@ -3494,14 +3494,43 @@ Design:
 
 Done when:
 
-- [ ] Shared shape check and answer builder in the relay library; relay prints answers / approve / keep only for their tool, built from its own input; anything odd prints nothing (Q1, Q2)
-- [ ] Wire: `answer` / `approve` / `keep` only for their tool's PermissionRequest; `allow` / `deny` never for them (Q3)
-- [ ] Desk: question and plan cards (not paused, accepted shape); never answered by rules, guard or observe mode; `answer` / `plan` single-use, armed, checked; `decide` / `always` refuse them; leaves when answered elsewhere (Q4, Q5, Q6)
-- [ ] App: `answer` and `plan` commands, granted to the page, listed in the strict-commands test (Q7)
-- [ ] Prototype v0.28: Question and Plan states and their rule; the page built to it (Q8)
-- [ ] Correction 13 and TESTS A10 updated; TESTS rows Q1–Q9; README
-- [ ] Test instance: question and plan fixtures through the real relay, answered from the page; late click sends nothing (real runs of Claude Code wait for Charan's way to keep `~/.claude` untouched)
-- [ ] Charan's hand check written: terminal answer first while a card waits; bypass in the terminal (Q9)
+- [x] Shared shape check and answer builder in the relay library; relay prints answers / approve / keep only for their tool, built from its own input; anything odd prints nothing (Q1, Q2)
+- [x] Wire: `answer` / `approve` / `keep` only for their tool's PermissionRequest; `allow` / `deny` never for them (Q3)
+- [x] Desk: question and plan cards (not paused, accepted shape); never answered by rules, guard or observe mode; `answer` / `plan` single-use, armed, checked; `decide` / `always` refuse them; leaves when answered elsewhere (Q4, Q5, Q6)
+- [x] App: `answer` and `plan` commands, granted to the page, listed in the strict-commands test (Q7)
+- [x] Prototype v0.28: Question and Plan states and their rule; the page built to it (Q8)
+- [x] Correction 13 and TESTS A10 updated; TESTS rows Q1–Q9; README
+- [x] Test instance: question and plan payloads through the real relay, answered from the page; late click sends nothing (real runs of Claude Code wait for Charan's way to keep `~/.claude` untouched)
+- [x] Charan's hand check written: terminal answer first while a card waits; bypass in the terminal (TESTS hand check 5, Q9)
+
+Implemented. Relay library: `questions` (`questions`, `picks`,
+`picks_line`, `answered`), shared with core. Relay: keeps the trimmed
+event; `decision_json(answer, tool, input)` prints each word only for its
+tool; `KEEP_PLANNING` is fixed text. Core: `Decision::Answer(picks)` /
+`Decision::Plan(bool)`, written as `answer <picks>` / `approve` / `keep`
+only for their tool; `Kind` per card (permission, question, plan),
+`Desk::answer` / `Desk::plan`, `pending(id, kind)` so `decide` / `always`
+refuse the new cards; the guard skips both tools; the view adds `kind`,
+`questions`, `plan`. Rules can't name these tools anyway (`tool` takes file
+tools only). App: `answer`, `plan`. Page: `questionParts` / `planParts`
+(prototype v0.28), picks in `src/questions.ts`, plans through the chat's
+Markdown renderer (`answerInto`), arrival focus by kind (`arrivalFocus`).
+No new dependency.
+
+Verify (2026-10-14, test instance from this branch: scratch target,
+release-style page, its own pipe, rules and WebView2 folder; payloads in
+the shape Claude Code 2.1.295 sent in the audit, through the branch's
+relay; the page driven over CDP):
+
+| Case | Result |
+| --- | --- |
+| Two questions (one multi-select) | Question card as the prototype; Send greyed until both had a pick; picks [0] and [0, 2] → relay printed allow with the input plus `answers` "Option numbers only" / "Unit, Page" |
+| Hostile question (`<img onerror>`, `<script>`, RLO, zero-width) | All as text; no element made; U+202E / U+202C / U+200B as red tags |
+| Keyboard arriving with a card up | Question: the first option; plan: Keep planning |
+| Relay stopped with the card up (answered elsewhere) | Card gone; a late `answer` refused ("unknown or already answered request"); nothing printed |
+| Plan with Markdown, a link and RLO | Rendered from text, link as text, red tags; Approve plan → allow with the input exactly as it came |
+| Plan with no text | "No plan text was sent. Read it in the terminal."; Keep planning → deny "Not approved in Bouncer: keep planning." |
+| A question with no options | Relay done in 108 ms, nothing printed, no card; pill "Needs you · question in the terminal" |
 
 ## Phase 7 — File drop (~1 week)
 
