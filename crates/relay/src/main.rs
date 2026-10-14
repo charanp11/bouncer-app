@@ -11,6 +11,9 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use bouncer_relay::questions::{self, ASK, PLAN};
+use serde_json::Value;
+
 /// Bigger events are dropped whole rather than cut (a cut command could be
 /// approved by someone who never saw its end).
 const MAX_INPUT: u64 = 1024 * 1024;
@@ -24,6 +27,8 @@ const MAX_ANSWER: u64 = 64;
 /// What Claude Code shows (or, in a `claude -p` run, refuses with) when the
 /// guard makes it ask.
 const GUARD_REASON: &str = "Bouncer flagged this request as risky (Guard every mode).";
+/// What Claude is told when the user keeps planning in the island.
+const KEEP_PLANNING: &str = "Not approved in Bouncer: keep planning.";
 
 fn main() {
     if let Some(json) = run() {
@@ -66,9 +71,16 @@ fn run() -> Option<String> {
 /// PreToolUse the app guards) turns the app's answer into output. `waiting`
 /// is called only for permission requests.
 fn work(waiting: impl FnOnce()) -> Option<String> {
-    let (line, event) = read_event(std::io::stdin().lock())?;
-    match event.as_str() {
-        "PermissionRequest" => decision_json(&talk(&line, true, waiting)?),
+    let (line, payload) = read_event(std::io::stdin().lock())?;
+    match payload["hook_event_name"].as_str()? {
+        "PermissionRequest" => {
+            let answer = talk(&line, true, waiting)?;
+            decision_json(
+                &answer,
+                payload["tool_name"].as_str(),
+                &payload["tool_input"],
+            )
+        }
         "PreToolUse" => guard_json(&talk(&line, false, || {})?),
         _ => {
             talk(&line, false, || {});
@@ -93,12 +105,25 @@ fn guard_json(answer: &str) -> Option<String> {
     })
 }
 
-/// The documented `PermissionRequest` output for an exact `allow` / `deny`;
-/// anything else is `None`, so nothing is printed.
-fn decision_json(answer: &str) -> Option<String> {
-    let decision = match answer {
-        "allow" => serde_json::json!({ "behavior": "allow" }),
-        "deny" => serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" }),
+/// The documented `PermissionRequest` output for the app's answer, each only
+/// for its own tool: a question's `answer <picks>` (allow, with `updatedInput`
+/// built from Claude Code's own `input` plus the chosen labels), a plan's
+/// `approve` (allow, the input as it came) or `keep` (deny, fixed text), and
+/// `allow` / `deny` for any other tool. Anything else is `None`, so nothing
+/// is printed.
+fn decision_json(answer: &str, tool: Option<&str>, input: &Value) -> Option<String> {
+    let decision = match (tool, answer) {
+        (Some(ASK), _) => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": questions::answered(input, answer.strip_prefix("answer ")?)?,
+        }),
+        (Some(PLAN), "approve") if input.is_object() => {
+            serde_json::json!({ "behavior": "allow", "updatedInput": input })
+        }
+        (Some(PLAN), "keep") => serde_json::json!({ "behavior": "deny", "message": KEEP_PLANNING }),
+        (Some(PLAN), _) => return None,
+        (_, "allow") => serde_json::json!({ "behavior": "allow" }),
+        (_, "deny") => serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" }),
         _ => return None,
     };
     let out = serde_json::json!({
@@ -107,24 +132,25 @@ fn decision_json(answer: &str) -> Option<String> {
     Some(out.to_string())
 }
 
-/// Reads and trims the hook JSON. Returns the line to send and the event name;
-/// `None` if it's too big, not a JSON object, or has no event name.
-fn read_event(input: impl Read) -> Option<(String, String)> {
+/// Reads and trims the hook JSON. Returns the line to send and the trimmed
+/// event (a question's answer is built from its `tool_input`); `None` if
+/// it's too big, not a JSON object, or has no event name.
+fn read_event(input: impl Read) -> Option<(String, Value)> {
     let mut raw = Vec::new();
     input.take(MAX_INPUT + 1).read_to_end(&mut raw).ok()?;
     if raw.len() as u64 > MAX_INPUT {
         return None;
     }
     let raw = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&raw);
-    let mut payload: serde_json::Value = serde_json::from_slice(raw).ok()?;
+    let mut payload: Value = serde_json::from_slice(raw).ok()?;
     let map = payload.as_object_mut()?;
-    let event = map.get("hook_event_name")?.as_str()?.to_owned();
+    map.get("hook_event_name")?.as_str()?;
     for field in DROPPED_FIELDS {
         map.remove(*field);
     }
     let mut line = payload.to_string();
     line.push('\n');
-    Some((line, event))
+    Some((line, payload))
 }
 
 /// Sends the event line; if `asks`, calls `waiting` first. Then reads the
@@ -161,7 +187,7 @@ mod tests {
             line,
             "{\"hook_event_name\":\"PostToolUse\",\"tool_input\":{\"command\":\"ls\"}}\n"
         );
-        assert_eq!(event, "PostToolUse");
+        assert_eq!(event["hook_event_name"], "PostToolUse");
     }
 
     #[test]
@@ -174,19 +200,21 @@ mod tests {
             line,
             "{\"hook_event_name\":\"PostToolUseFailure\",\"tool_input\":{\"command\":\"cat x\"},\"is_interrupt\":false}\n"
         );
-        assert_eq!(event, "PostToolUseFailure");
+        assert_eq!(event["hook_event_name"], "PostToolUseFailure");
     }
 
     #[test]
     fn decisions_match_the_documented_shape() {
         // Compared as JSON values: key order depends on serde_json features.
         let parse = |s: String| serde_json::from_str::<serde_json::Value>(&s).unwrap();
+        let bash = Some("Bash");
+        let input = serde_json::json!({ "command": "ls" });
         assert_eq!(
-            parse(decision_json("allow").unwrap()),
+            parse(decision_json("allow", bash, &input).unwrap()),
             parse(r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#.into())
         );
         assert_eq!(
-            parse(decision_json("deny").unwrap()),
+            parse(decision_json("deny", bash, &input).unwrap()),
             parse(r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied in Bouncer"}}}"#.into())
         );
     }
@@ -203,8 +231,88 @@ mod tests {
             "allow\nallow",
             "{}",
         ] {
-            assert!(decision_json(answer).is_none(), "{answer:?}");
+            assert!(
+                decision_json(answer, Some("Bash"), &Value::Null).is_none(),
+                "{answer:?}"
+            );
         }
+        // Words for questions and plans mean nothing for any other tool.
+        for answer in ["answer 0", "approve", "keep"] {
+            assert!(decision_json(answer, Some("Bash"), &serde_json::json!({})).is_none());
+            assert!(decision_json(answer, None, &serde_json::json!({})).is_none());
+        }
+    }
+
+    fn question() -> Value {
+        serde_json::json!({ "questions": [{ "question": "Which color?", "header": "Color",
+            "multiSelect": false, "options": [{ "label": "Red" }, { "label": "Blue" }] }] })
+    }
+
+    /// A question's answer: allow, with `updatedInput` = Claude Code's own
+    /// input plus the labels the numbers name. Never a plain allow / deny.
+    #[test]
+    fn a_question_is_answered_only_with_its_own_labels() {
+        let out: Value =
+            serde_json::from_str(&decision_json("answer 1", Some(ASK), &question()).unwrap())
+                .unwrap();
+        let mut input = question();
+        input["answers"] = serde_json::json!({ "Which color?": "Blue" });
+        assert_eq!(
+            out,
+            serde_json::json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest",
+                "decision": { "behavior": "allow", "updatedInput": input } } })
+        );
+        for answer in [
+            "allow",
+            "deny",
+            "approve",
+            "keep",
+            "answer",
+            "answer ",
+            "answer 2",
+            "answer 0,1",
+            "answer 0;0",
+            "Answer 0",
+            "answer  0",
+            "answer 0
+",
+        ] {
+            assert!(
+                decision_json(answer, Some(ASK), &question()).is_none(),
+                "{answer:?}"
+            );
+        }
+        assert!(decision_json("answer 0", Some(ASK), &Value::Null).is_none());
+    }
+
+    /// A plan: approve echoes the input (nothing else, no mode change);
+    /// keep is a deny with fixed text. Nothing else prints.
+    #[test]
+    fn a_plan_is_approved_as_it_came_or_kept_in_planning() {
+        let plan = serde_json::json!({ "plan": "# Plan
+1. Print hello", "planFilePath": "/p/plan.md" });
+        let out: Value =
+            serde_json::from_str(&decision_json("approve", Some(PLAN), &plan).unwrap()).unwrap();
+        assert_eq!(
+            out["hookSpecificOutput"]["decision"],
+            serde_json::json!({ "behavior": "allow", "updatedInput": plan })
+        );
+        let out: Value =
+            serde_json::from_str(&decision_json("keep", Some(PLAN), &plan).unwrap()).unwrap();
+        assert_eq!(
+            out["hookSpecificOutput"]["decision"],
+            serde_json::json!({ "behavior": "deny", "message": KEEP_PLANNING })
+        );
+        for answer in [
+            "allow", "deny", "answer 0", "Approve", "approve ", "keep
+", "",
+        ] {
+            assert!(
+                decision_json(answer, Some(PLAN), &plan).is_none(),
+                "{answer:?}"
+            );
+        }
+        assert!(decision_json("approve", Some(PLAN), &Value::Null).is_none());
     }
 
     #[test]
