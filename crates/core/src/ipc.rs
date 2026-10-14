@@ -2,7 +2,9 @@
 //!
 //! Wire format: the relay sends one JSON line (the hook event). For a
 //! `PermissionRequest` the server may answer one line, exactly `allow` or
-//! `deny`; closing without an answer means "ask in the terminal".
+//! `deny`; for a `PreToolUse`, only `ask` ("guard every mode": Claude Code
+//! then asks, so the card comes). Closing without an answer leaves Claude
+//! Code to its own flow.
 //!
 //! Only the current user can open the endpoint (user-only DACL on Windows,
 //! `0700` folder on macOS), and every connection's peer is checked again.
@@ -28,12 +30,14 @@ const MAX_LINE: u64 = 1024 * 1024 + 2;
 pub enum Decision {
     Allow,
     Deny,
+    /// Only for a `PreToolUse`: make Claude Code ask (never allows or denies).
+    Ask,
 }
 
 /// Called once per event, on its own thread, with a check that says whether
-/// the relay has hung up (non-blocking; asked while a card waits). The
-/// return value is sent back only for permission requests; `None` leaves the
-/// decision to the terminal.
+/// the relay has hung up (non-blocking; asked while a card waits). Allow /
+/// Deny are sent back only for permission requests and Ask only for a
+/// PreToolUse; anything else, or `None`, leaves Claude Code to its own flow.
 pub type Handler = Arc<dyn Fn(Event, &dyn Fn() -> bool) -> Option<Decision> + Send + Sync>;
 
 /// One relay connection.
@@ -60,11 +64,12 @@ fn handle(mut stream: impl Conn, handler: &Handler) {
         return;
     };
     let asks = event.is_permission_request();
+    let pre = event.kind == "PreToolUse";
     let answer = match handler(event, &|| stream.gone()) {
-        Some(_) if !asks => return,
-        Some(Decision::Allow) => "allow\n",
-        Some(Decision::Deny) => "deny\n",
-        None => return,
+        Some(Decision::Allow) if asks => "allow\n",
+        Some(Decision::Deny) if asks => "deny\n",
+        Some(Decision::Ask) if pre => "ask\n",
+        _ => return,
     };
     let _ = stream.write_all(answer.as_bytes());
     let _ = stream.flush();
@@ -326,6 +331,19 @@ mod tests {
         assert_eq!(reply(ASK, Some(Decision::Deny)), "deny\n");
         assert_eq!(reply(ASK, None), "");
         assert_eq!(reply(PRE, Some(Decision::Allow)), "");
+    }
+
+    /// "Guard every mode": `ask` goes back only for a PreToolUse, and a
+    /// PreToolUse never gets allow / deny; a permission request never `ask`.
+    #[test]
+    fn ask_goes_only_to_a_pre_tool_use() {
+        assert_eq!(reply(PRE, Some(Decision::Ask)), "ask\n");
+        assert_eq!(reply(PRE, Some(Decision::Deny)), "");
+        assert_eq!(reply(PRE, None), "");
+        assert_eq!(reply(ASK, Some(Decision::Ask)), "");
+        let stop = r#"{"session_id":"s","cwd":"/p","hook_event_name":"Stop"}
+"#;
+        assert_eq!(reply(stop, Some(Decision::Ask)), "");
     }
 
     #[test]
