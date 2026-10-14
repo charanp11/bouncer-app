@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use bouncer_core::chat::{self, Binary, Chat, LOCKED, Limits, Model, Out, Stop};
@@ -22,28 +23,53 @@ const EXE: &str = "claude.exe";
 #[cfg(not(windows))]
 const EXE: &str = "claude";
 
-/// A fresh folder holding the fake as `claude(.exe)`; chats run in its
-/// `chat` subfolder.
+/// The fake as `claude(.exe)`, one hard link for the whole run. Every test
+/// runs this same file: a fresh copy per test made macOS's first launch of
+/// each new executable land inside the test's quiet limit (up to ~300 ms at
+/// times on CI; 4 in 240 runs went Silent). Under `target/tmp`, the build's
+/// drive, as a link needs; nothing runs there.
+fn fake() -> Binary {
+    static FAKE: OnceLock<Binary> = OnceLock::new();
+    FAKE.get_or_init(|| {
+        let examples = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("examples");
+        let built = examples.join(format!("fake_claude{}", std::env::consts::EXE_SUFFIX));
+        let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
+        // Earlier runs' links (a link in use isn't harmed: Windows refuses,
+        // macOS keeps the running file).
+        for old in fs::read_dir(tmp).into_iter().flatten().flatten() {
+            if old
+                .file_name()
+                .to_string_lossy()
+                .starts_with("fake-claude-")
+            {
+                let _ = fs::remove_dir_all(old.path());
+            }
+        }
+        let dir = tmp.join(format!("fake-claude-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::hard_link(&built, dir.join(EXE)).unwrap_or_else(|e| {
+            panic!(
+                "{}: {e} (plain `cargo test` builds the example)",
+                built.display()
+            )
+        });
+        Binary::check(&dir.join(EXE)).unwrap()
+    })
+    .clone()
+}
+
+/// A fresh folder for one test; its chats run in the `chat` subfolder.
 fn setup(name: &str) -> (TempDir, Binary) {
     let dir = std::env::temp_dir().join(format!("bouncer-chat-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let examples = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("examples");
-    let fake = examples.join(format!("fake_claude{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(&fake, dir.join(EXE)).unwrap_or_else(|e| {
-        panic!(
-            "{}: {e} (plain `cargo test` builds the example)",
-            fake.display()
-        )
-    });
-    let bin = Binary::check(&dir.join(EXE)).unwrap();
-    (TempDir(dir), bin)
+    (TempDir(dir), fake())
 }
 
 fn start(dir: &TempDir, bin: &Binary, model: Model, limits: Limits) -> Chat {
