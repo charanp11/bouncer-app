@@ -3223,6 +3223,20 @@ in the cloud: its hooks can't reach this PC. Found on the way: reads
 outside the project weren't prompted in 2.1.295's default mode (hence the
 `ask` rule), and Claude Code's own scratch folder is pre-allowed.
 
+Permission modes (2026-10-13, after the draft; Charan's review). Bouncer
+only sees what Claude Code asks. Checked the same way as above (the
+desktop app's Claude Code 2.1.295, stream-json, playground hooks, test
+instance, `--tools Bash`): in `acceptEdits`, `mkdir c7-accept-edits-check`
+ran with no prompt and no card (the empty folder was removed after);
+`node -e "console.log(1)"` asked, the card came with Explain, and island
+Deny reached Claude Code. `bypassPermissions` never asks (Claude Code's
+definition); `auto` asks rarely (Phase 1's note, and the hand check's auto
+session showed no card). README "What it can't do" and the v0.7.0 draft's
+notes say so ("Known limit"). Guarding every mode is roadmap c3 (audit
+first).
+
+- [x] Known limit in the README and the v0.7.0 draft notes, from the check above
+
 Roadmap after v0.7.0 (decision 7). One feature per release:
 
 | Release | What | Roadmap item |
