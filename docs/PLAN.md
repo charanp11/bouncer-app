@@ -821,6 +821,11 @@ Plan corrections after the playground check:
 13. `AskUserQuestion` and `ExitPlanMode` (Charan): never a card, never an
     answer; Claude Code asks in the terminal. The session shows "Needs you ·
     question in the terminal" (row and pill) until the tool runs.
+    **Changed by c2 (Charan, 2026-10-14):** they get a card of their own
+    (pick options / Approve plan or Keep planning), answered only by a
+    click; the terminal still asks meanwhile, and whichever answers first
+    wins. Paused, a shape Bouncer doesn't accept, free text: "question in
+    the terminal" as before. See "c2" under the roadmap.
 14. (CI) Windows writes the built-in Administrator account's SID as `LA` in
     a security descriptor; the GitHub runner is that account, so its own
     rules file was refused. `LA` now counts as the user when the user's SID
@@ -3375,6 +3380,128 @@ guard-test'`, risky: "runs a command hidden inside a string"):
 | Guard on, bypass, `echo guard-safe` | Ran, no prompt, no card |
 | Guard off (page switch, `guard = false`), bypass | The risky command ran unasked (as v0.7.0) |
 | Guard on, `claude -p`, bypass | Risky: refused, Claude said the Bouncer guard blocked it; safe: ran |
+
+**c2: answer Claude Code's questions in the island (2026-10-14).**
+
+Audit. Claude Code's hooks reference: `AskUserQuestion` and `ExitPlanMode`
+"require user interaction"; a hook answers them with "allow" together with
+`updatedInput` ("allow" alone is not enough). For a question, `updatedInput`
+echoes the original `questions` and adds `answers`: question text → chosen
+label, several labels joined with ", ". For a plan, Claude Code injects
+`plan` (Markdown) and `planFilePath` into the input the hooks get.
+
+Measured (2026-10-14; a throwaway hook passed with `--settings` in the
+playground, MCP off; the desktop app's Claude Code 2.1.295 and VS Code's
+2.1.288 started as their apps start them (stream-json, prompts over stdio,
+a driver that never answers unless told to), and the terminal, 2.1.295,
+auto-updated to 2.1.299 during the run):
+
+| | default | plan | acceptEdits | auto | bypass | dontAsk |
+| --- | --- | --- | --- | --- | --- | --- |
+| PermissionRequest fires for the question / plan | yes | yes | yes | yes | yes | no: Claude Code denies it itself |
+| Hook's answer reached Claude (desktop's) | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| VS Code's | ✓ | ✓ | — | 2.1.288 started it as default | ✓ | — |
+| Terminal | ✓ | ✓ | ✓ | ✓ | not run (its warning needs accepting) | denied, as above |
+
+- PermissionRequest with allow + `updatedInput`: answered ("Blue"); one
+  pick, several picks ("Red, Blue"), two questions and a typed free-text
+  answer all reached Claude. A **partial** answer (one of two questions)
+  was accepted without a word. "Allow" without `answers` did nothing (the
+  question stayed open); "deny" gave Claude an error with our message.
+- ExitPlanMode: the hook got the plan text and its path. A plain approval
+  left plan mode for `default`; a `setMode` entry could switch to
+  `acceptEdits`. A denial reached Claude with our message.
+- Timing: with PermissionRequest the terminal shows the question / plan
+  dialog **while the hook waits**; a hook answering after 20 s closed it
+  ("Allowed by PermissionRequest hook"). In the stream-json hosts, when the
+  app answered first, the hook's later answer was dropped (first answer
+  wins). A PreToolUse hook blocks: nothing is shown ("running PreToolUse
+  hook · 11s") until it returns. So PermissionRequest only.
+- Not checked by Claude: answering in the terminal first while a card
+  waits (no keystrokes into the terminal), bypass in the terminal, the
+  apps' own windows. The first two are in Charan's hand check (TESTS Q9).
+- Side effects of the audit runs (Charan, 2026-10-14): a Haiku run tried
+  the claude.ai Slack connector (unanswered, nothing sent); a plan landed
+  in `~/.claude/plans` (`plansDirectory` via `--settings` was ignored;
+  Charan deleted it). Since then every run uses `--strict-mcp-config`, and
+  nothing may write into the real `~/.claude`. Measured after: even a
+  stream-json run with `--no-session-persistence`, no Write tool and
+  `--strict-mcp-config` rewrites `~/.claude/.credentials.json` and
+  `~/.claude.json` at start; terminal runs save transcripts. So real runs
+  wait for Charan's choice of a way (open item); c2 is verified with
+  fixtures through the real relay, the test instance and the page.
+
+Decisions (Charan, 2026-10-14):
+
+1. Listed options only; free text stays in the terminal.
+2. A plan: "Approve" and "Keep planning" only; never change the session's
+   mode. Keep planning = deny with fixed text, nothing from the page.
+3. A multi-select question with a label containing ", " gets no card.
+4. Rules (auto mode), the guard and observe mode never answer a question
+   or a plan; only a click does. Paused: no card.
+5. Answered in the terminal or the app first: the card leaves as soon as
+   Claude Code moves on, and a late click sends nothing.
+6. No keyboard shortcut answers. Question, option and plan text are
+   hostile: `textContent`, hidden characters shown, plans through the
+   roadmap-a Markdown renderer. Too big to forward: no card.
+
+Design:
+
+- Wire: for a PermissionRequest of `AskUserQuestion` the server may write
+  `answer <picks>` (per question, comma-separated 0-based option numbers;
+  questions separated by `;`, e.g. `answer 0;1,2`); for `ExitPlanMode`,
+  `approve` or `keep`. `allow` / `deny` stay for every other tool; a
+  question never gets them, and nothing else gets these.
+- Relay: keeps the `tool_input` it read and builds `updatedInput` from it:
+  the original input plus `answers` (labels looked up by number), or the
+  original input for `approve`; `keep` is a deny with a fixed message. A
+  shape it doesn't accept (shared check, `bouncer_relay::questions`: 1–4
+  questions, unique non-empty texts, 2–4 options with unique non-empty
+  labels, `multiSelect` a bool or absent, no ", " in a multi-select's
+  labels, no `answers` already), a number out of range, a missing or
+  doubled pick, several picks for a single-select, or anything unknown:
+  nothing is printed, the terminal keeps asking.
+- Desk: a question / plan PermissionRequest, not paused, with a shape the
+  shared check accepts, gets a card of its own kind (no rules check, no
+  "would", no offer); anything else stays "question in the terminal" as
+  before. `answer(id, picks)` and `plan(id, approve)`: single-use IDs;
+  answering and approving arm after 600 ms like Allow; picks are checked
+  against the stored questions; `decide` and `always` refuse these cards.
+  The card leaves when its relay hangs up (Claude Code moved on) or the
+  turn moves on, as every card does.
+- Page: the question card shows each question (header, text, options with
+  descriptions, one or several picks) and "Send answer", armed 600 ms and
+  only once every question has a pick; the plan card shows the plan
+  (Markdown, scrolls) with "Keep planning" and "Approve plan" (armed). The
+  page sends only the request ID and option numbers, or approve / keep.
+  Enter never sends (armed buttons are `.btn.allow`); focus arrives on
+  the first option (a pick only selects) or on Keep planning, never on a
+  button that sends an answer.
+
+| Threat | Fix |
+| --- | --- |
+| The page (or a compromised page) answers with text of its own, or changes the question | The page sends numbers or approve / keep; the relay builds `updatedInput` from its own copy of the input; the backend checks numbers against the stored questions; tested on both ends |
+| Bouncer picks an answer by itself | No rule, the guard, observe mode or a timeout ever answers; only `answer` / `plan` from a click on that card's ID (tested) |
+| A plain "allow" / "deny" for a question, or "answer" for a command | The wire sends each word only for its tool; the relay accepts each only for its tool (tested both ends) |
+| A partial answer that Claude Code accepts silently | Send arms only when every question has a pick; the backend and the relay refuse a missing pick |
+| Ambiguous answers (", " in a multi-select label, two options or questions with the same text) | No card; the relay prints nothing for them |
+| A late click after the terminal / app answered | The card leaves when the relay hangs up or the turn moves on; its ID is then unknown and nothing is sent |
+| Bouncer closed, paused or slow | The terminal / app already shows the question while the hook waits; paused queues nothing; the app gives up before the relay's budget |
+| Hostile question / option / plan text (markup, bidi, zero-width) | `visible()` in the backend, `textContent` and red tags in the page, the roadmap-a renderer for plans (links never clickable) |
+| A question too big | The relay drops events over 1 MB whole (no card); the page scrolls long text, never cuts it |
+| Approving a plan changes the session's mode | Never: no `updatedPermissions` |
+| A keystroke answers | Enter is stopped on armed buttons; arrival focus never on Send / Approve; no shortcut answers |
+
+Done when:
+
+- [ ] Shared shape check and answer builder in the relay library; relay prints answers / approve / keep only for their tool, built from its own input; anything odd prints nothing (Q1, Q2)
+- [ ] Wire: `answer` / `approve` / `keep` only for their tool's PermissionRequest; `allow` / `deny` never for them (Q3)
+- [ ] Desk: question and plan cards (not paused, accepted shape); never answered by rules, guard or observe mode; `answer` / `plan` single-use, armed, checked; `decide` / `always` refuse them; leaves when answered elsewhere (Q4, Q5, Q6)
+- [ ] App: `answer` and `plan` commands, granted to the page, listed in the strict-commands test (Q7)
+- [ ] Prototype v0.28: Question and Plan states and their rule; the page built to it (Q8)
+- [ ] Correction 13 and TESTS A10 updated; TESTS rows Q1–Q9; README
+- [ ] Test instance: question and plan fixtures through the real relay, answered from the page; late click sends nothing (real runs of Claude Code wait for Charan's way to keep `~/.claude` untouched)
+- [ ] Charan's hand check written: terminal answer first while a card waits; bypass in the terminal (Q9)
 
 ## Phase 7 — File drop (~1 week)
 
