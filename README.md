@@ -106,11 +106,17 @@ All three local ones read the hooks in `~/.claude/settings.json`. In VS Code
 and the desktop app, Bouncer's card shows up next to the app's own
 permission prompt: answer in either. Answer in the island and the app's
 prompt closes; answer in the app and the card stays until Claude Code moves
-on. In modes where Claude Code asks less (auto, accept edits, bypass), you
-see fewer cards.
+on. Cards come only when Claude Code asks, so the permission mode matters:
+see the first item under "What it can't do".
 
 ## What it can't do
 
+- **It can only approve or deny when Claude Code asks.** In
+  bypass-permissions mode Claude Code never asks, and in auto mode it rarely
+  does, so Bouncer mostly watches. Accept-edits mode doesn't ask before file
+  edits or file commands such as `mkdir`, but still asks before other
+  commands, and those get a card. For a card on everything, use default mode
+  (`claude --permission-mode default`).
 - **Only Claude Code for now.** Other agents come one per release.
 - **Questions are answered in the terminal.** When Claude Code asks you a
   question or wants a plan approved, Bouncer shows the session waits; you
