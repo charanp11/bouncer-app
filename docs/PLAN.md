@@ -3345,12 +3345,36 @@ Design:
 
 Done when:
 
-- [ ] `rules.toml` `guard` (missing = off), parsed and written (`set_guard`); Settings switch, off by default, with what it changes (prototype v0.27)
-- [ ] The desk asks only for risky PreToolUse requests in auto / acceptEdits / bypassPermissions, guard on, not paused; nothing otherwise
-- [ ] The wire and the relay: exactly `ask` on a PreToolUse prints the documented JSON; nothing else ever does; allow / deny unchanged
-- [ ] TESTS rows (unit, integration through the real relay); README and the "Known limit" updated
-- [ ] Test instance: a real Claude Code (playground hooks) in bypass, auto and acceptEdits shows the card for a risky command with the switch on, and runs unasked with it off
-- [ ] Charan's terminal hand check written (dev build, playground)
+- [x] `rules.toml` `guard` (missing = off), parsed and written (`set_guard`); Settings switch, off by default, with what it changes (prototype v0.27) (G1)
+- [x] The desk asks only for risky PreToolUse requests in auto / acceptEdits / bypassPermissions, guard on, not paused; nothing otherwise (G2)
+- [x] The wire and the relay: exactly `ask` on a PreToolUse prints the documented JSON; nothing else ever does; allow / deny unchanged (G3)
+- [x] TESTS rows (unit, integration through the real relay); README and the "Known limit" updated
+- [x] Test instance: a real Claude Code (playground hooks) in bypass, auto and acceptEdits shows the card for a risky command with the switch on, and runs unasked with it off (G4, below)
+- [x] Charan's terminal hand check written (dev build, playground; TESTS, hand checks)
+
+Implemented. Core: `Rules::guard`, `rules::set_guard` (the mode
+switch's line rewrite, shared as `set_top`), `Event::mode`
+(`permission_mode`), `ipc::Decision::Ask` (sent only for a PreToolUse),
+`Desk::set_guard` and `State::guards`; "Rules changed: guard on / off".
+Relay: `guard_json`, a fixed reason ("Bouncer flagged this request as
+risky (Guard every mode)."). App: `set_guard` (a bool), granted to the
+page and listed in the strict-commands test. Page: the row after
+Auto-allow; its hint wraps (`.hint.wrap`, also in the prototype) because a
+one-line hint cut it off with "…" (seen on the test instance).
+
+Verify (2026-10-14, test instance from this branch, release-style page;
+the desktop app's Claude Code 2.1.295, stream-json with
+`--permission-prompt-tool stdio`, playground hooks plus this branch's
+relay as a PreToolUse hook passed with `--settings`; `sh -c 'echo
+guard-test'`, risky: "runs a command hidden inside a string"):
+
+| Case | Result |
+| --- | --- |
+| Settings, scratch rules file from before the guard | Row "Guard every mode · Off" after Auto-allow, hint in full; On → one line `guard = true` added above the first table, switch On |
+| Guard on: bypassPermissions, auto, acceptEdits | Each: Claude Code's prompt and the Risky card; island Deny → "Denied in Bouncer" |
+| Guard on, bypass, `echo guard-safe` | Ran, no prompt, no card |
+| Guard off (page switch, `guard = false`), bypass | The risky command ran unasked (as v0.7.0) |
+| Guard on, `claude -p`, bypass | Risky: refused, Claude said the Bouncer guard blocked it; safe: ran |
 
 ## Phase 7 — File drop (~1 week)
 

@@ -218,7 +218,7 @@ command does and what could go wrong. It never decides.
 | G1 | The switch | `guard` in `rules.toml`, missing = off; only true / false (else the file is refused, guard off); Settings writes only that line (added above the tables if missing), shown as "Rules changed: guard on / off"; its hint says what it changes, as the prototype; the row only calls `set_guard`, a bool | unit, frontend | `rules::tests::guard_is_off_unless_set_and_must_be_true_or_false` `rules::tests::set_guard_changes_only_the_guard_line` `approvals::tests::set_guard_writes_the_file_and_the_island_shows_it` `ts: the guard switch says what it changes, word for word as the prototype` | CI |
 | G2 | When Bouncer asks | Only a PreToolUse, guard on, not paused, mode auto / acceptEdits / bypassPermissions, and a risk reason: `Ask`, at once, no card of its own; default, plan, dontAsk, unknown or missing mode, a safe request, guard off or paused: nothing | unit | `approvals::tests::the_guard_asks_only_for_risky_requests_in_modes_that_dont_ask` `approvals::tests::the_guard_is_off_unless_turned_on_and_steps_aside_when_paused` | CI |
 | G3 | The wire and the relay | The server sends `ask` only for a PreToolUse (allow / deny only for a PermissionRequest); the relay prints the documented PreToolUse ask (fixed reason) for exactly `ask`, nothing else ever; a late answer prints nothing within ~2 s | unit, integration | `ipc::tests::ask_goes_only_to_a_pre_tool_use` `tests::the_guard_prints_ask_for_exactly_ask_and_nothing_else` `the_guard_makes_claude_code_ask_only_for_a_pre_tool_use` `the_desk_guards_risky_requests_through_the_real_relay` `a_slow_guard_answer_prints_nothing` | CI |
-| G4 | A real Claude Code | With the switch on: a risky command in bypass, auto and accept-edits mode raises Claude Code's prompt and Bouncer's card; island Deny reaches it; switch off: it runs unasked; a `claude -p` run refuses it (documented) | real (test instance, playground hooks), hand (terminal check below) | — | real (PLAN, c3) |
+| G4 | A real Claude Code | With the switch on: a risky command in bypass, auto and accept-edits mode raises Claude Code's prompt and Bouncer's card; island Deny reaches it; switch off: it runs unasked; a `claude -p` run refuses it (documented) | real (test instance, playground hooks), hand (terminal check below) | — | real 2026-10-14 (PLAN, c3); hand: not run yet |
 
 ## macOS
 
@@ -280,6 +280,32 @@ never the real `~/.claude/settings.json`.
       → Details again. Expected: the `claude.exe` count is back to what it
       was before step 1 (none of Bouncer's left).
    8. Check `bouncer-playground\chat` is still empty.
+4. **Guard every mode in a terminal (about 8 min).** Not run yet. Dev app
+   from the c3 branch and the playground (its `.claude/settings.local.json`
+   runs `target\debug\bouncer-hook.exe`). First `cargo build -p
+   bouncer-relay` (so the playground's relay has the guard), then `npm run
+   tauri dev`.
+   1. Settings → **Guard every mode**. Expected: Off, after Auto-allow; the
+      hint says what it changes (auto, accept-edits, bypass; `claude -p`
+      refused). Turn it On: the island shows "Rules changed: guard on" and
+      `bouncer-playground\rules.toml` has `guard = true`.
+   2. In `bouncer-playground`: `claude --dangerously-skip-permissions`
+      (bypass mode; accept its warning). Ask: "Run exactly `sh -c 'echo
+      guard-test'`". Expected: Claude Code's own prompt (reason "Bouncer
+      flagged this request as risky (Guard every mode).") and Bouncer's
+      Risky card. **Deny** in the island: Claude Code says it was denied.
+   3. Ask: "Run `echo guard-safe`". Expected: it runs, no prompt, no card.
+   4. Shift+Tab to **auto** mode, ask for `sh -c 'echo guard-test'` again.
+      Expected: prompt and card; **Allow once** in the island: it prints
+      `guard-test`.
+   5. Shift+Tab to **accept edits**, ask again; this time answer **in the
+      terminal** (Yes). Expected: it runs; the card leaves once Claude
+      Code moves on.
+   6. Settings → Guard every mode → Off. In bypass mode ask again.
+      Expected: it runs, no prompt, no card (as v0.7.0).
+   Log it in `docs/PLAN.md` ("Manual checks", date + Claude Code
+   version) and here.
+
 ### Phase 9 hand checks
 
 - **v0.7.0 on a real desktop (about 15 min).** Passed 2026-10-13 (Charan,
