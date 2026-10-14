@@ -21,6 +21,9 @@ const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path", "error"];
 const FIRE_AND_FORGET: Duration = Duration::from_secs(2);
 /// Longest answer line read from the app.
 const MAX_ANSWER: u64 = 64;
+/// What Claude Code shows (or, in a `claude -p` run, refuses with) when the
+/// guard makes it ask.
+const GUARD_REASON: &str = "Bouncer flagged this request as risky (Guard every mode).";
 
 fn main() {
     if let Some(json) = run() {
@@ -59,15 +62,35 @@ fn run() -> Option<String> {
     }
 }
 
-/// Reads the event, forwards it, and for a permission request turns the app's
-/// answer into output. `waiting` is called only for permission requests.
+/// Reads the event, forwards it, and for a permission request (or a
+/// PreToolUse the app guards) turns the app's answer into output. `waiting`
+/// is called only for permission requests.
 fn work(waiting: impl FnOnce()) -> Option<String> {
     let (line, event) = read_event(std::io::stdin().lock())?;
-    if event != "PermissionRequest" {
-        talk(&line, false, || {});
-        return None;
+    match event.as_str() {
+        "PermissionRequest" => decision_json(&talk(&line, true, waiting)?),
+        "PreToolUse" => guard_json(&talk(&line, false, || {})?),
+        _ => {
+            talk(&line, false, || {});
+            None
+        }
     }
-    decision_json(&talk(&line, true, waiting)?)
+}
+
+/// "Guard every mode": the documented PreToolUse output that makes Claude
+/// Code ask, for exactly `ask`; anything else is `None`. It never allows or
+/// denies. The reason is fixed text: nothing from the agent or the app.
+fn guard_json(answer: &str) -> Option<String> {
+    (answer == "ask").then(|| {
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": GUARD_REASON,
+            }
+        })
+        .to_string()
+    })
 }
 
 /// The documented `PermissionRequest` output for an exact `allow` / `deny`;
@@ -104,19 +127,18 @@ fn read_event(input: impl Read) -> Option<(String, String)> {
     Some((line, event))
 }
 
-/// Sends the event line; if `asks`, calls `waiting` and reads one answer line.
-/// Otherwise it waits for the app to close the connection: the app checks who
-/// sent an event before reading it, and an event whose relay had already
-/// exited could be lost (a burst of hooks on a busy machine). Still bounded by
-/// `FIRE_AND_FORGET`.
+/// Sends the event line; if `asks`, calls `waiting` first. Then reads the
+/// answer line until the app closes the connection: for any other event the
+/// app still closes it (it checks who sent an event before reading it, and an
+/// event whose relay had already exited could be lost on a busy machine), and
+/// for a PreToolUse it may say `ask` first. Bounded by `FIRE_AND_FORGET` (a
+/// permission request, by the decision budget).
 fn talk(line: &str, asks: bool, waiting: impl FnOnce()) -> Option<String> {
     let mut stream = bouncer_relay::connect(&bouncer_relay::endpoint()?)?;
     stream.write_all(line.as_bytes()).ok()?;
-    if !asks {
-        let _ = (&mut stream).take(MAX_ANSWER).read_to_end(&mut Vec::new());
-        return None;
+    if asks {
+        waiting();
     }
-    waiting();
     let mut answer = String::new();
     (&mut stream)
         .take(MAX_ANSWER)
@@ -182,6 +204,22 @@ mod tests {
             "{}",
         ] {
             assert!(decision_json(answer).is_none(), "{answer:?}");
+        }
+    }
+
+    #[test]
+    fn the_guard_prints_ask_for_exactly_ask_and_nothing_else() {
+        let parse = |s: String| serde_json::from_str::<serde_json::Value>(&s).unwrap();
+        assert_eq!(
+            parse(guard_json("ask").unwrap()),
+            serde_json::json!({ "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": GUARD_REASON,
+            }})
+        );
+        for answer in ["", "Ask", "ask ", " ask", "allow", "deny", "ask\nask", "{}"] {
+            assert!(guard_json(answer).is_none(), "{answer:?}");
         }
     }
 
