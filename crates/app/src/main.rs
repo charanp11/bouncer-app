@@ -124,6 +124,8 @@ fn main() {
             subscribe,
             decide,
             always,
+            answer,
+            plan,
             expand,
             drag,
             fit,
@@ -625,6 +627,22 @@ fn always(island: State<'_, Island>, id: String) -> Result<(), String> {
     island.desk.always(&id).map_err(str::to_owned)
 }
 
+/// Answers one question card by its ID with the option numbers picked, one
+/// list per question. Only numbers: the relay looks the labels up in its own
+/// copy of Claude Code's input. Unknown, used, too-early or ill-fitting
+/// picks are refused.
+#[tauri::command]
+fn answer(island: State<'_, Island>, id: String, picks: Vec<Vec<usize>>) -> Result<(), String> {
+    island.desk.answer(&id, picks).map_err(str::to_owned)
+}
+
+/// Approves one plan card by its ID, or keeps planning (fixed text, never
+/// from the page). Unknown, used or too-early approvals are refused.
+#[tauri::command]
+fn plan(island: State<'_, Island>, id: String, approve: bool) -> Result<(), String> {
+    island.desk.plan(&id, approve).map_err(str::to_owned)
+}
+
 /// "Explain this command" on the card `id`: its text is taken from the
 /// waiting request itself (never from the page) and explained by the locked
 /// chat. Only shell commands. It never answers the card; Allow and Deny keep
@@ -1060,6 +1078,8 @@ fn tray(",
             "subscribe",
             "decide",
             "always",
+            "answer",
+            "plan",
             "expand",
             "drag",
             "fit",
