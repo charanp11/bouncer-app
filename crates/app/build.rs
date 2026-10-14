@@ -5,6 +5,8 @@ fn main() {
         "subscribe",
         "decide",
         "always",
+        "answer",
+        "plan",
         "expand",
         "drag",
         "fit",
