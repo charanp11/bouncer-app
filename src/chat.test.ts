@@ -230,5 +230,13 @@ test("explain: the keyboard taken by a press on Explain stays there; any other a
   const down = main.slice(main.indexOf('"pointerdown"'), main.indexOf('invoke("keyboard", { on: true });', main.indexOf('"pointerdown"')));
   assert.match(down, /pressed = null;\s+if \(!current\?\.open \|\| current\.keyboard\) return;/);
   assert.match(down, /closest<HTMLElement>\("\.explainbtn, \.explain"\)/);
-  assert.match(main, /const target = newCard \? \(arrived \? arrivalFocus\(card\.id, pressed\) : `deny:\$\{card\.id\}`\) : had;\s+pressed = null;/);
+  assert.match(main, /const target = newCard \? arrivalFocus\(card\.id, arrived \? pressed : null, card\.kind\) : had;\s+pressed = null;/);
+});
+
+test("questions: the keyboard arrives on the first option or on Keep planning, never on a button that answers", () => {
+  assert.equal(arrivalFocus("aa", null, "question"), "opt:aa:0:0");
+  assert.equal(arrivalFocus("aa", "explain:aa", "question"), "opt:aa:0:0");
+  assert.equal(arrivalFocus("aa", null, "plan"), "keep:aa");
+  assert.equal(arrivalFocus("aa", "explain:aa", "plan"), "keep:aa");
+  assert.equal(arrivalFocus("aa", null, "permission"), "deny:aa");
 });

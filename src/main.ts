@@ -16,6 +16,7 @@ import { apply, arrivalFocus, begin, CHAT_INPUT, clear, defaultNote, escapeClose
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
+import { ready, toggle as togglePick, type Question } from "./questions.ts";
 import "./styles.css";
 
 type Line = { n: number | null; mark: string; text: string };
@@ -56,6 +57,10 @@ type Request = {
   would: string | null;
   /** The exact TOML "Always allow" appends (built by the backend). */
   offer: string | null;
+  /** What the card asks: allow / deny, pick options, or approve a plan. */
+  kind: "permission" | "question" | "plan";
+  questions: Question[] | null;
+  plan: { text: string; path: string | null } | null;
 };
 /** "While you were away", from the activity log (the backend drops it when the island closes). */
 type Away = {
@@ -132,6 +137,9 @@ const TAG: Record<string, string> = {
   "auto-allowed by rule": "auto",
   "you allowed": "mine",
   "you denied": "flag",
+  "you answered": "mine",
+  "you approved the plan": "mine",
+  "you kept planning": "flag",
   "waiting for you": "you",
   "asked in terminal": "you",
   "answered in terminal": "mine",
@@ -231,6 +239,10 @@ function what(tool: string | null): string {
     case "Task":
     case "Agent":
       return "Start a subagent";
+    case "AskUserQuestion":
+      return "Answer a question";
+    case "ExitPlanMode":
+      return "Approve a plan";
     case null:
       return "Use a tool";
     default:
@@ -423,16 +435,112 @@ function sessionRows(sessions: Session[]): HTMLElement {
 // The "Allowed / Denied" message shows from the press: the backend's new
 // view (card gone) can arrive before its answer, and must not flash the pill.
 function decide(request: Request, allow: boolean, buttons: HTMLButtonElement[]) {
+  answer(request, allow, undefined, () => invoke("decide", { id: request.id, allow }), buttons);
+}
+
+/** Sends one answer for the card (`call`), showing `text` (or Allowed /
+ * Denied) from the press; a refusal (too soon, already answered elsewhere)
+ * shows the current state again. */
+function answer(request: Request, ok: boolean, text: string | undefined, call: () => Promise<unknown>, buttons: HTMLButtonElement[]) {
   for (const b of buttons) b.disabled = true;
-  const shown = { request, ok: allow, until: performance.now() + TOAST_MS };
+  const shown = { request, ok, until: performance.now() + TOAST_MS, text };
   toast = shown;
-  invoke("decide", { id: request.id, allow })
-    .then(() => play(allow ? "allowed" : "denied"))
+  call()
+    .then(() => play(ok ? "allowed" : "denied"))
     .catch(() => {
-      // Refused (too soon, or already answered): show the current state again.
       if (toast === shown) toast = null;
     })
     .finally(() => current && render(current));
+}
+
+/** The options picked on the question card at the front, per question
+ * (kept across re-renders; a new card starts empty). */
+let picked: { id: string; chosen: number[][] } = { id: "", chosen: [] };
+
+/** A question card (roadmap c2): every question with its options, and Send
+ * answer, which arms like Allow and only once every question has a pick.
+ * The page sends only the option numbers. */
+function questionParts(request: Request): HTMLElement[] {
+  const qs = request.questions ?? [];
+  if (picked.id !== request.id) picked = { id: request.id, chosen: qs.map(() => []) };
+  const list = el("div", "qs");
+  qs.forEach((q, i) => {
+    const box = el("div", "q");
+    if (q.header) {
+      const h = el("div", "qhead");
+      agentText(h, q.header);
+      box.append(h);
+    }
+    const text = el("div", "qtext");
+    agentText(text, q.question);
+    box.append(text);
+    if (q.multi) box.append(el("div", "qhint", "Pick any"));
+    const opts = el("div", "opts");
+    q.options.forEach((o, n) => {
+      const b = el("button", q.multi ? "opt multi" : "opt");
+      b.dataset.key = `opt:${request.id}:${i}:${n}`;
+      b.setAttribute("aria-pressed", String(picked.chosen[i].includes(n)));
+      const label = el("span", "ol");
+      agentText(label, o.label);
+      b.append(el("span", "mark"), label);
+      if (o.description) {
+        const d = el("span", "od");
+        agentText(d, o.description);
+        b.append(d);
+      }
+      // A pick only selects: it never sends anything.
+      b.addEventListener("click", () => {
+        picked.chosen[i] = togglePick(picked.chosen[i], n, q.multi);
+        if (current) render(current);
+      });
+      opts.append(b);
+    });
+    box.append(opts);
+    list.append(box);
+  });
+  const send = armed("Send answer", front.since);
+  if (!ready(picked.chosen, qs.length)) {
+    send.disabled = true;
+    send.classList.add("incomplete");
+  }
+  send.addEventListener("click", () => {
+    const picks = picked.chosen.map((c) => [...c]);
+    answer(request, true, "Answered. Back to work.", () => invoke("answer", { id: request.id, picks }), [send]);
+  });
+  const actions = el("div", "actions");
+  actions.append(el("span", "alt", "Or answer in the terminal."), send);
+  return [list, actions];
+}
+
+/** A plan card (roadmap c2): the plan as Markdown built from text, its file,
+ * then Keep planning and Approve plan (armed like Allow). */
+function planParts(request: Request): HTMLElement[] {
+  const plan = request.plan ?? { text: "", path: null };
+  const box = el("div", "planbox");
+  box.tabIndex = 0;
+  box.dataset.key = `plan:${request.id}`;
+  if (plan.text.trim()) answerInto(box, plan.text);
+  else box.append(el("p", "none", "No plan text was sent. Read it in the terminal."));
+  const parts: HTMLElement[] = [box];
+  if (plan.path) {
+    const file = el("div", "planfile");
+    agentText(file, plan.path);
+    parts.push(file);
+  }
+  const keep = el("button", "btn deny", "Keep planning");
+  keep.dataset.key = `keep:${request.id}`;
+  const approve = armed("Approve plan", front.since);
+  const buttons = [keep, approve];
+  keep.addEventListener("click", () =>
+    answer(request, false, "Kept planning. Claude Code was told.", () => invoke("plan", { id: request.id, approve: false }), buttons),
+  );
+  approve.addEventListener("click", () =>
+    answer(request, true, "Approved. Back to work.", () => invoke("plan", { id: request.id, approve: true }), buttons),
+  );
+  const actions = el("div", "actions");
+  actions.append(...buttons);
+  parts.push(actions);
+  return parts;
 }
 
 /** An Allow-style button that stays disabled until ARM_MS after `since`
@@ -541,7 +649,16 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const who = el("span");
   who.append(el("b", "", AGENTS[request.agent] ?? request.agent), ` · ${folder(request.project)}`);
   top.append(who, el("span", "", queue.length > 1 ? `1 of ${queue.length}` : ""));
-  c.append(top, el("div", "what", what(request.tool)));
+  c.append(top);
+  if (request.kind !== "permission") {
+    const n = request.questions?.length ?? 0;
+    const asks = request.kind === "plan" ? "Wants to start this plan" : n > 1 ? `Asks you ${n} questions` : "Asks you a question";
+    c.append(el("div", "what", asks), ...(request.kind === "plan" ? planParts(request) : questionParts(request)));
+    const after = queue[1];
+    if (after) c.append(el("div", "after", `Next: ${what(after.tool)} in ${folder(after.project)}`));
+    return c;
+  }
+  c.append(el("div", "what", what(request.tool)));
   if (request.risk) c.append(el("div", "reason", request.risk));
   if (request.would) {
     const would = el("div", "would");
@@ -679,7 +796,8 @@ function renderApproval(view: View, request: Request, done?: boolean) {
     return;
   }
   setShape("open");
-  const waiting = view.queue.length > 1 ? `· ${view.queue.length} waiting` : "";
+  const asking = request.kind === "question" ? "· a question" : request.kind === "plan" ? "· a plan" : "";
+  const waiting = view.queue.length > 1 ? `· ${view.queue.length} waiting` : asking;
   const body = el("div", "body");
   body.dataset.screen = `card:${request.id}`;
   body.append(card(request, view.queue, done));
@@ -1132,7 +1250,7 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
   // The keyboard arriving with this card up goes to Deny, unless the press
   // that took it was on the card's Explain control: it stays there.
   const arrived = newCard && card.id === before && !keyboardBefore;
-  const target = newCard ? (arrived ? arrivalFocus(card.id, pressed) : `deny:${card.id}`) : had;
+  const target = newCard ? arrivalFocus(card.id, arrived ? pressed : null, card.kind) : had;
   pressed = null;
   let next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
   // Nothing to go back to (the keyboard just arrived, or the focused control

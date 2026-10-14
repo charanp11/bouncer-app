@@ -635,6 +635,199 @@ pre.cmd {
   min-width: 0;
 }
 
+/* Questions and plans (roadmap c2, prototype v0.28): the user picks, a
+   click answers. A pick shows as a filled mark and a border, not color alone. */
+.qs {
+  display: grid;
+  gap: 12px;
+}
+
+.q {
+  display: grid;
+  gap: 6px;
+}
+
+.q .qhead {
+  font: 600 10.5px var(--ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.q .qtext {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.q .qhint {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.opts {
+  display: grid;
+  gap: 4px;
+}
+
+.opt {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 9px;
+  align-items: start;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--island);
+  color: var(--text);
+  font: 13px var(--ui);
+  cursor: pointer;
+}
+
+.opt:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.opt .mark {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+}
+
+.opt.multi .mark {
+  border-radius: 4px;
+}
+
+.opt[aria-pressed="true"] {
+  border-color: var(--text);
+}
+
+.opt[aria-pressed="true"] .mark {
+  background: var(--text);
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 2.5px var(--island);
+}
+
+.opt .ol {
+  font-weight: 500;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.opt .od {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Not every question has a pick yet. */
+.btn.allow.incomplete,
+.btn.allow.incomplete:hover {
+  cursor: default;
+  background: rgba(238, 240, 244, 0.18);
+  color: var(--muted);
+  border-color: transparent;
+}
+
+.actions .alt {
+  align-self: center;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.planbox {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--island);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.planbox:focus-visible {
+  outline: 2px solid var(--sun);
+  outline-offset: 2px;
+}
+
+.planbox > * {
+  margin: 0;
+}
+
+.planbox > * + * {
+  margin-top: 6px;
+}
+
+.planbox ul,
+.planbox ol {
+  padding-left: 18px;
+}
+
+.planbox li + li {
+  margin-top: 2px;
+}
+
+.planbox .md-h {
+  font-weight: 600;
+}
+
+.planbox .md-h1 {
+  font-size: 14px;
+}
+
+.planbox code,
+.planbox pre.md-code {
+  font: 12px var(--mono);
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.planbox pre.md-code {
+  line-height: 1.5;
+  color: #dfe3ea;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  white-space: pre;
+  overflow: auto;
+}
+
+.planbox blockquote {
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  padding-left: 8px;
+  color: var(--muted);
+}
+
+.planbox hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.planbox .none {
+  color: var(--faint);
+}
+
+.planfile {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
 .toast {
   text-align: center;
   font-size: 13px;

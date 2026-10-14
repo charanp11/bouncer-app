@@ -30,6 +30,7 @@ export function latest(groups: Group[], max = SHOWN): { shown: Group[]; earlier:
  * neutral until Bouncer knows, and one that didn't run is a grey dash. */
 const OUTCOME_ICON: Record<string, string> = {
   "you denied": "no",
+  "you kept planning": "no",
   "answered in terminal": "mid",
   "not run (answered in terminal)": "skip",
   failed: "warn",

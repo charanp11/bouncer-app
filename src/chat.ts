@@ -194,7 +194,11 @@ export function heldCard(held: string, card: string | null, newCard: boolean, ha
 /** Where the keyboard goes when it arrives with a card up: Deny, unless
  * the press that brought it was on that card's Explain control or its box
  * (`pressed`, as `explain:<id>`), where it stays. Never Allow. */
-export function arrivalFocus(card: string, pressed: string | null): string {
+export function arrivalFocus(card: string, pressed: string | null, kind = "permission"): string {
+  // A question: its first option (a pick only selects, it never sends).
+  // A plan: Keep planning (the "no"). Never Send answer or Approve plan.
+  if (kind === "question") return `opt:${card}:0:0`;
+  if (kind === "plan") return `keep:${card}`;
   return pressed === `explain:${card}` ? pressed : `deny:${card}`;
 }
 
