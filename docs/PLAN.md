@@ -3266,6 +3266,92 @@ Roadmap after v0.7.0 (decision 7). One feature per release:
 | then | Music | e (Phase 8) |
 | optional | Linux | i |
 
+**c3: guard every mode (2026-10-14).**
+
+Audit. Bouncer only sees what Claude Code asks (README, "Known limit"): in
+`bypassPermissions` nothing is asked, in `auto` little, in `acceptEdits`
+not edits or file commands. Since 2.1.283, auto is the starting mode for
+terminal and VS Code sessions. Claude Code's hooks reference: a PreToolUse
+hook may return `permissionDecision` `allow` / `deny` / `ask` / `defer`;
+"ask" prompts the user; precedence among hooks is deny > defer > ask >
+allow; ask "also forces a permission prompt in auto mode". Nothing on
+bypass, so it was measured (Claude Code 2.1.295, the desktop app's
+`claude.exe` started stream-json with `--permission-prompt-tool stdio`,
+playground hooks, the test instance, a throwaway PreToolUse hook that
+always says "ask", passed with `--settings` only; `node -e
+"console.log(1)"`):
+
+| Mode | Hook says "ask" | No hook |
+| --- | --- | --- |
+| default | prompt, Bouncer's card, island Deny reached Claude Code | prompt |
+| auto | the same | — |
+| acceptEdits | the same | — |
+| bypassPermissions | the same | ran, unasked |
+| `claude -p`, bypassPermissions | refused at once, no prompt, no card (Allow or Deny made no difference) | — |
+| `claude -p`, default | — | prompt → card → island Allow ran it |
+
+So an "ask" from our PreToolUse hook brings the card back in every mode,
+but in a `-p` run it is a refusal. The hook input has no field that tells
+a `-p` run apart (PreToolUse and SessionStart payloads compared:
+`effort`, `permission_mode`, `prompt_id`, `scratchpad_dir`, `tool_name`,
+`tool_use_id`, `source`); environment variables aren't used (VS Code and
+the desktop app may share them).
+
+Decisions (Charan, 2026-10-14):
+
+1. Skip `dontAsk` (`permission_mode`): there, anything that would prompt
+   is denied, so "ask" would be Bouncer denying. `-p` can't be told apart:
+   bypass stays in, and with the switch on a risky command in a `-p` run is
+   refused instead of run (documented in the switch's text and the README).
+2. An opt-in Settings switch, off by default, whose text says exactly what
+   it changes.
+3. Risky requests only (a risk reason, as the card's red flag), not
+   compound / unparseable ones.
+4. A terminal hand check (dev build, playground) before the release.
+5. "ask" only when Bouncer is running and the request is risky; otherwise
+   nothing is printed, as today. Never "deny", never "allow".
+
+Found while measuring (Claude): in `default` and `plan` Claude Code
+prompts anyway, and in a default-mode `-p` run our "ask" would turn
+today's card into a refusal. So "ask" is returned only in `auto`,
+`acceptEdits` and `bypassPermissions`: the modes where Claude Code
+wouldn't ask by itself. Any other or unknown mode prints nothing.
+
+Design:
+
+- The switch is policy, so it lives in `rules.toml` beside `mode`
+  (`guard = true`; missing = off), written by Settings like the auto-allow
+  switch (checked, atomic, reloaded, shown like any edit). Not
+  `preferences.json` ("never security policy").
+- `Event` keeps `permission_mode`. The desk answers a PreToolUse with
+  `Ask` only if: guard on, not paused, the mode is one of the three, and
+  core's check gives at least one risk reason. It records the event as
+  before; the card comes from the PermissionRequest that follows.
+- Wire: for a PreToolUse the server may write exactly `ask`; allow / deny
+  stay for PermissionRequest only. The relay prints the documented
+  PreToolUse JSON (`permissionDecision: "ask"`, a fixed reason) only for
+  exactly `ask` on a PreToolUse, inside the existing 2 s fire-and-forget
+  budget; anything else, late or missing prints nothing.
+
+| Threat | Fix |
+| --- | --- |
+| The guard approves something | The relay can only print "ask" for a PreToolUse; allow / deny are still PermissionRequest-only, and the desk's PreToolUse path returns only `Ask` or nothing (tested on both ends) |
+| The guard denies on its own | Never "deny"; `dontAsk` skipped; `-p` refusal is the one documented exception, behind the opt-in switch |
+| Bouncer closed, paused, slow or confused blocks or changes Claude Code | No answer in 2 s, app absent, paused, guard off, unknown mode, parse error: nothing printed, as today |
+| Agent text in the reason Claude Code shows | The reason is a fixed string in the relay; the card shows core's fixed risk clauses |
+| A broken or older rules file | `guard` is a known key; a wrong type is a refused file (built-in rules, guard off), like a bad `mode` |
+| The switch turned on behind the user's back | It only adds prompts; any change to `rules.toml` is shown in the island ("Rules changed") |
+| More prompts than wanted in default mode | Not touched: "ask" only in auto, acceptEdits, bypass |
+
+Done when:
+
+- [ ] `rules.toml` `guard` (missing = off), parsed and written (`set_guard`); Settings switch, off by default, with what it changes (prototype v0.27)
+- [ ] The desk asks only for risky PreToolUse requests in auto / acceptEdits / bypassPermissions, guard on, not paused; nothing otherwise
+- [ ] The wire and the relay: exactly `ask` on a PreToolUse prints the documented JSON; nothing else ever does; allow / deny unchanged
+- [ ] TESTS rows (unit, integration through the real relay); README and the "Known limit" updated
+- [ ] Test instance: a real Claude Code (playground hooks) in bypass, auto and acceptEdits shows the card for a risky command with the switch on, and runs unasked with it off
+- [ ] Charan's terminal hand check written (dev build, playground)
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
