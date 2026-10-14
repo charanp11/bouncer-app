@@ -824,7 +824,10 @@ function guardRow(view: View): HTMLElement {
   });
   sw.disabled = broken;
   sw.dataset.key = "guard";
-  return setRow("Guard every mode", [on ? "On" : "Off", sw], broken ? "Fix the rules file first." : GUARD_HINT);
+  const row = setRow("Guard every mode", [on ? "On" : "Off", sw], broken ? "Fix the rules file first." : GUARD_HINT);
+  // Read whole: it says everything the switch changes.
+  row.querySelector(".hint")?.classList.add("wrap");
+  return row;
 }
 
 /** Observe / auto. Turning auto on asks first (focus on Cancel, Esc cancels,
