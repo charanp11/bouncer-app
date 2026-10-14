@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub mod questions;
 #[cfg(unix)]
 pub mod unix;
 #[cfg(windows)]
