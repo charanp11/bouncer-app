@@ -3237,6 +3237,24 @@ first).
 
 - [x] Known limit in the README and the v0.7.0 draft notes, from the check above
 
+Manual checks (Charan, 2026-10-13, Claude Code 2.1.295, Windows, the
+v0.7.0 draft's installer, his own desktop; TESTS, Phase 9 hand checks):
+
+- Passed: install, SmartScreen (More info → Run anyway), hooks from
+  Settings, the island picked up a real session, chat, Ctrl+Alt+B, Start
+  with Windows, uninstall with the hooks removed (the console's diff and
+  "Answer N to keep them" above `[y/N]`).
+- Skipped: reinstall (CI's installer test, W10).
+- Not reported: the hash check, a card answered from a real session, and
+  step 5 (risky card + Explain + Deny; the note left "checked in my dev app
+  / covered by CI" open). Covered by CI (A1, A8, E1–E8) and the c-7
+  test-instance runs.
+- Found on the way, not Bouncer: this repo's own `.claude/settings.json`
+  had `attribution.commit` / `.pr` as `false`; Claude Code 2.1.295 wants
+  strings (`""`) and stops at a settings error before the session starts,
+  so no hooks fire there until it's fixed. The auto-mode session showed in
+  the island with no card (Known limit above).
+
 Roadmap after v0.7.0 (decision 7). One feature per release:
 
 | Release | What | Roadmap item |
