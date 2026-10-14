@@ -277,10 +277,10 @@ never the real `~/.claude/settings.json`.
    Claude Code 2.1.295, the draft's installer): install, SmartScreen, hooks
    from Settings, a real session in the island, chat, Ctrl+Alt+B, Start
    with Windows, uninstall with the hooks removed. Step 10 (reinstall)
-   skipped: CI's installer test covers it (W10). Not in the report: the hash
-   check, a card with Deny / Allow (step 4) and a confirmed result for
-   step 5 (risky card, Explain, Deny); those are covered by CI (A1, A8,
-   E1–E8) and the c-7 test-instance runs (W12).
+   skipped: CI's installer test covers it (W10). Step 5 (risky card, Explain,
+   Deny) not run. Not in the report: the hash check and a card with Deny /
+   Allow (step 4). Those are covered by CI (A1, A8, E1–E8) and the c-7
+   test-instance runs (W12).
    Charan, on his own desktop from Explorer and Edge (outside any app's
    container; no Windows Sandbox on Windows 11 Home). Quit the dev app
    first: the release has its own folders, pipe and WebView2 data, so
