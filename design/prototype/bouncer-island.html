@@ -178,6 +178,30 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .explain .xfoot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .explain .xstate { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted); }
 .explain .btn.small { padding: 0 12px; }
+/* Questions and plans (roadmap c2): the user picks, a click answers. */
+.qs { display: grid; gap: 12px; }
+.q { display: grid; gap: 6px; }
+.q .qhead { font: 600 10.5px var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); overflow-wrap: anywhere; }
+.q .qtext { font-size: 13.5px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.q .qhint { font-size: 11.5px; color: var(--faint); }
+.opts { display: grid; gap: 4px; }
+.opt { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 9px; align-items: start; text-align: left; padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--island); color: var(--text); font: 13px var(--ui); cursor: pointer; }
+.opt:hover { border-color: rgba(255,255,255,0.22); }
+.opt .mark { width: 14px; height: 14px; margin-top: 2px; box-sizing: border-box; border: 1.5px solid var(--muted); border-radius: 50%; }
+.opt.multi .mark { border-radius: 4px; }
+.opt[aria-pressed="true"] { border-color: var(--text); }
+.opt[aria-pressed="true"] .mark { background: var(--text); border-color: var(--text); box-shadow: inset 0 0 0 2.5px var(--island); }
+.opt .ol { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.opt .od { grid-column: 2; font-size: 12px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.btn.allow.incomplete, .btn.allow.incomplete:hover { cursor: default; background: rgba(238,240,244,0.18); color: var(--muted); border-color: transparent; } /* not every question has a pick yet */
+.actions .alt { align-self: center; font-size: 12px; color: var(--faint); }
+.planbox { max-height: 220px; overflow-y: auto; padding: 8px 10px; border-radius: 8px; background: var(--island); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
+.planbox > * { margin: 0; } .planbox > * + * { margin-top: 6px; }
+.planbox ul, .planbox ol { padding-left: 18px; }
+.planbox .md-h { font-weight: 600; } .planbox .md-h1 { font-size: 14px; }
+.planbox code { font: 12px var(--mono); background: var(--raised); border-radius: 4px; padding: 0 4px; }
+.planbox .none { color: var(--faint); }
+.planfile { font: 11.5px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
 .toast { text-align: center; font-size: 13px; padding: 6px 0 2px; }
 .toast.ok { color: var(--ok); } .toast.no { color: #ffb4ae; }
 
@@ -469,7 +493,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.27 · Oct 14 2026</div>
+    <div class="meta">design/prototype · v0.28 · Oct 14 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -517,6 +541,10 @@ a.chip { text-decoration: none; }
     </div>
     <div class="group"><span class="label">Roadmap b</span>
       <button class="chip" data-s="explain">Risky · explained</button>
+    </div>
+    <div class="group"><span class="label">Roadmap c2</span>
+      <button class="chip" data-s="question">Question</button>
+      <button class="chip" data-s="plan">Plan</button>
     </div>
     <div class="group"><span class="label">Phase 7–8</span>
       <button class="chip" data-s="drop">File drop</button>
@@ -642,6 +670,7 @@ a.chip { text-decoration: none; }
         <li><b>A card is never animated in.</b> It appears at full size once the window has grown to hold it, and its 600ms arm starts only then. Nothing morphs while a card is in front, so its buttons never move.</li>
         <li><b>Chat is text, locked down and second:</b> answers stream in with <code>textContent</code>; no chat runs before the claude path is confirmed; a permission card always replaces the chat panel, which keeps streaming behind it; streaming never resizes the window and starts no endless animation.</li>
         <li><b>An explanation never decides:</b> "Explain this command" sits below Deny and Allow at a fixed height, never moves them, re-arms Allow when it opens or closes, never takes the keyboard to Allow, and its text is only text.</li>
+        <li><b>Questions and plans are answered only by a click:</b> Claude Code's question (pick options) and plan (Approve plan / Keep planning) get a card; no rule, mode or timeout ever answers them, and the terminal asks meanwhile. "Send answer" and "Approve plan" arm after 600ms like Allow, Send only once every question has a pick; focus arrives on the first option or on Keep planning, never on a button that answers; Enter never answers. The page sends only option numbers. Question, option and plan text is agent text (plans are Markdown, built from text).</li>
         <li><b>The ticker is numbers only:</b> <code>+N −M</code> lines for Edit / MultiEdit, <code>+N</code> for Write (the old file is never read). The label shortens first; the numbers are never cut.</li>
       </ol>
     </section>
@@ -1231,6 +1260,109 @@ Object.assign(STATES, {
       island.append(b);
     }, notes: ["Shell commands only (Bash, PowerShell). \"Explain this command\" asks the locked, read-only chat what it does and what could go wrong; the backend takes the command from the waiting request (the page sends only its ID) and passes it as data on stdin.", "It never decides: Deny and Allow work as always while it answers. The box sits below them at a fixed height, so they never move and the window doesn't resize while it streams; Allow re-arms (600ms) when the box opens or closes.", "Explain, Stop and Hide are one control for the keyboard: focus stays put, never on Allow.", "It stops with Stop, when the card is answered or leaves, and at quit. The text is built from text nodes (Markdown as in chat)."] },
 });
+// ---- questions and plans (roadmap c2) ----------------------------------------
+function cardTop(c, folder) {
+  const top = el("div", "top");
+  const left = el("span");
+  left.append(el("b", "", "Claude Code"), document.createTextNode(" · " + folder));
+  top.append(left, el("span", "", ""));
+  c.append(top);
+}
+function questionCard(qs) {
+  const c = el("section", "card");
+  cardTop(c, "bouncer-app");
+  c.append(el("div", "what", qs.length > 1 ? `Asks you ${qs.length} questions` : "Asks you a question"));
+  const picks = qs.map(() => new Set());
+  const send = el("button", "btn allow");
+  send.append(el("span", "arm"), el("span", "", "Send answer"));
+  send.lastChild.style.position = "relative";
+  armOnVisible(send);
+  const ready = () => picks.every((p) => p.size > 0);
+  const list = el("div", "qs");
+  qs.forEach((q, i) => {
+    const box = el("div", "q");
+    if (q.header) box.append(el("div", "qhead", q.header));
+    box.append(el("div", "qtext", q.question));
+    if (q.multi) box.append(el("div", "qhint", "Pick any"));
+    const opts = el("div", "opts");
+    q.options.forEach(([label, description], n) => {
+      const o = el("button", "opt" + (q.multi ? " multi" : ""));
+      o.setAttribute("aria-pressed", "false");
+      o.append(el("span", "mark"), el("span", "ol", label));
+      if (description) o.append(el("span", "od", description));
+      o.addEventListener("click", () => {
+        if (!q.multi) picks[i].clear();
+        if (picks[i].has(n)) picks[i].delete(n); else picks[i].add(n);
+        opts.querySelectorAll(".opt").forEach((b, k) => b.setAttribute("aria-pressed", String(picks[i].has(k))));
+        send.classList.toggle("incomplete", !ready());
+      });
+      opts.append(o);
+    });
+    box.append(opts);
+    list.append(box);
+  });
+  send.classList.add("incomplete");
+  send.addEventListener("click", () => {
+    if (!ready()) return;
+    c.replaceChildren(el("div", "toast ok", "Answered. Back to work."));
+    setTimeout(() => show("working"), 1400);
+  });
+  const actions = el("div", "actions");
+  actions.append(el("span", "alt", "Or answer in the terminal."), send);
+  c.append(list, actions);
+  return c;
+}
+function planCard(md) {
+  const c = el("section", "card");
+  cardTop(c, "bouncer-app");
+  c.append(el("div", "what", "Wants to start this plan"));
+  const box = el("div", "planbox");
+  box.append(...md);
+  c.append(box, el("div", "planfile", "C:\\Users\\dev\\.claude\\plans\\add-questions.md"));
+  const keep = el("button", "btn deny", "Keep planning");
+  const ok = el("button", "btn allow");
+  ok.append(el("span", "arm"), el("span", "", "Approve plan"));
+  ok.lastChild.style.position = "relative";
+  armOnVisible(ok);
+  keep.addEventListener("click", () => { c.replaceChildren(el("div", "toast no", "Kept planning. Claude Code was told.")); setTimeout(() => show("working"), 1400); });
+  ok.addEventListener("click", () => { c.replaceChildren(el("div", "toast ok", "Approved. Back to work.")); setTimeout(() => show("working"), 1400); });
+  const actions = el("div", "actions");
+  actions.append(keep, ok);
+  c.append(actions);
+  return c;
+}
+function planMarkdown() {
+  const h = el("p", "md-h md-h1", "Questions in the island");
+  const ol = el("ol");
+  [["Relay", ": build the answer from its own copy of the input"], ["Desk", ": a card for each question, answered only by a click"], ["Island", ": options, then "]].forEach(([b, t], i) => {
+    const li = el("li"); li.append(el("b", "", b), document.createTextNode(t));
+    if (i === 2) li.append(el("code", "", "Send answer"));
+    ol.append(li);
+  });
+  const tail = el("p"); tail.append(document.createTextNode("Tests first: "), el("i", "", "partial answers are refused"), document.createTextNode("."));
+  return [h, ol, tail];
+}
+Object.assign(STATES, {
+  question: { phase: "Roadmap c2", title: "Question", render() {
+      island.className = "island open";
+      island.append(head("needs", "Needs you", "· a question"));
+      const b = el("div", "body");
+      b.append(questionCard([
+        { header: "Approach", question: "Which way should the island answer?", multi: false,
+          options: [["Option numbers only", "The relay looks the labels up itself"], ["Labels from the page", "Text from the page reaches Claude Code"]] },
+        { header: "Tests", question: "Which tests should ship with it?", multi: true,
+          options: [["Unit", null], ["Through the real relay", null], ["Page", null]] },
+      ]));
+      island.append(b);
+    }, notes: ["Claude Code's AskUserQuestion: 1–4 questions, 2–4 options each. The terminal shows the same question meanwhile; whichever answers first wins, and the card leaves as soon as Claude Code moves on.", "Pick one option (round mark) or any number (square mark, \"Pick any\"). The pick is shown by the filled mark and the border, not color alone. Picking never sends.", "\"Send answer\" arms after 600ms like Allow and only once every question has a pick. Focus arrives on the first option, never on Send; Enter never sends.", "Listed options only: free text (\"Type something\") stays in the terminal. Paused, or a question Bouncer can't show unambiguously: no card, the row says \"question in the terminal\".", "Every word here came from the agent: text only, hidden characters shown as red tags. The page sends only option numbers."] },
+  plan: { phase: "Roadmap c2", title: "Plan", render() {
+      island.className = "island open";
+      island.append(head("needs", "Needs you", "· a plan"));
+      const b = el("div", "body");
+      b.append(planCard(planMarkdown()));
+      island.append(b);
+    }, notes: ["Claude Code's ExitPlanMode: the plan, as Markdown built from text (roadmap a; links are text), scrolls in its box; the plan file's path is below it.", "Keep planning (outlined, where focus arrives) tells Claude Code no with fixed text. Approve plan arms after 600ms like Allow. Approving never changes the session's mode.", "The terminal shows the same plan meanwhile; whichever answers first wins.", "No plan text (no plan file): the box says so; read it in the terminal."] },
+});
 function answering() { const a = el("div", "answering"); a.append(el("span", "ic spin"), el("span", "", "Claude is answering…")); return a; }
 function errorBox(text) { return el("div", "reason", text); }
 function newChat(label = "New chat") { return el("div", "newchat", label); }
@@ -1275,7 +1407,7 @@ Object.assign(STATES, {
 const RM = matchMedia("(prefers-reduced-motion: reduce)");
 const screenEl = document.querySelector(".screen");
 const win = document.getElementById("win");
-const CARDS = new Set(["approval", "queue", "risky", "editask", "explain"]);
+const CARDS = new Set(["approval", "queue", "risky", "editask", "explain", "question", "plan"]);
 const OS_MS = 60; // the OS takes a frame or two to resize a window
 const SHADOW_X = 20, SHADOW_B = 32; // the window's room for the shadow (at 100%)
 const PROPS = ["width", "height", "minHeight", "top", "borderRadius", "backgroundColor"];
