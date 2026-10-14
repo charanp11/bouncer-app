@@ -274,8 +274,7 @@ mod tests {
             "answer 0;0",
             "Answer 0",
             "answer  0",
-            "answer 0
-",
+            "answer 0\n",
         ] {
             assert!(
                 decision_json(answer, Some(ASK), &question()).is_none(),
@@ -289,8 +288,8 @@ mod tests {
     /// keep is a deny with fixed text. Nothing else prints.
     #[test]
     fn a_plan_is_approved_as_it_came_or_kept_in_planning() {
-        let plan = serde_json::json!({ "plan": "# Plan
-1. Print hello", "planFilePath": "/p/plan.md" });
+        let plan =
+            serde_json::json!({ "plan": "# Plan\n1. Print hello", "planFilePath": "/p/plan.md" });
         let out: Value =
             serde_json::from_str(&decision_json("approve", Some(PLAN), &plan).unwrap()).unwrap();
         assert_eq!(
@@ -304,8 +303,7 @@ mod tests {
             serde_json::json!({ "behavior": "deny", "message": KEEP_PLANNING })
         );
         for answer in [
-            "allow", "deny", "answer 0", "Approve", "approve ", "keep
-", "",
+            "allow", "deny", "answer 0", "Approve", "approve ", "keep\n", "",
         ] {
             assert!(
                 decision_json(answer, Some(PLAN), &plan).is_none(),
