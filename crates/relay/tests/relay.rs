@@ -63,7 +63,7 @@ fn wait_for<T>(seen: &Mutex<Vec<T>>, count: usize) {
 }
 
 fn always(decision: Option<Decision>) -> Handler {
-    Arc::new(move |_, _| decision)
+    Arc::new(move |_, _| decision.clone())
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn a_relay_that_goes_away_takes_its_card_with_it() {
         "gone",
         Arc::new(move |e, gone| {
             let answer = handler.handle_until(e, gone);
-            seen.lock().unwrap().push(answer);
+            seen.lock().unwrap().push(answer.clone());
             answer
         }),
     );
@@ -427,34 +427,154 @@ fn a_relay_that_goes_away_takes_its_card_with_it() {
     assert_eq!(session["status"], "working");
 }
 
-#[test]
-fn questions_print_nothing_so_the_terminal_asks() {
+/// A question or plan PermissionRequest as Claude Code 2.1.295 sends it
+/// (the fields seen in the c2 audit; paths use `dev`).
+fn asking(tool: &str, input: serde_json::Value) -> Vec<u8> {
+    serde_json::json!({
+        "session_id": "q", "cwd": r"C:\Users\dev\projects\my-app",
+        "permission_mode": "default", "effort": { "level": "medium" },
+        "hook_event_name": "PermissionRequest", "tool_name": tool, "tool_input": input,
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn two_questions() -> serde_json::Value {
+    serde_json::json!({ "questions": [
+        { "question": "Which color do you prefer?", "header": "Color", "multiSelect": false,
+          "options": [{ "label": "Red", "description": "Choose red" }, { "label": "Blue", "description": "Choose blue" }] },
+        { "question": "Which sizes?", "header": "Size", "multiSelect": true,
+          "options": [{ "label": "Small" }, { "label": "Medium" }, { "label": "Large" }] },
+    ]})
+}
+
+fn desk_server(name: &str) -> (Arc<bouncer_core::approvals::Desk>, PathBuf) {
     use bouncer_core::approvals::{Desk, WAIT};
     let desk = Arc::new(Desk::new(WAIT, None, |_| {}));
     let handler = desk.clone();
-    let path = serve(
-        "question",
-        Arc::new(move |e, gone| handler.handle_until(e, gone)),
-    );
-    for tool in ["AskUserQuestion", "ExitPlanMode"] {
-        let input = serde_json::json!({
-            "session_id": "s",
-            "cwd": "/p",
-            "hook_event_name": "PermissionRequest",
-            "tool_name": tool,
-            "tool_input": { "questions": [{ "question": "Which binary?" }] },
-        });
-        let started = Instant::now();
-        assert_silent(&relay(&path, input.to_string().as_bytes()));
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{tool}: never waits"
-        );
+    let path = serve(name, Arc::new(move |e, gone| handler.handle_until(e, gone)));
+    (desk, path)
+}
+
+fn first_card(desk: &bouncer_core::approvals::Desk) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let card = desk.view()["queue"][0].clone();
+        if !card.is_null() {
+            return card;
+        }
+        assert!(Instant::now() < deadline, "request never queued");
+        std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// Through the real relay: the island's option numbers become Claude Code's
+/// own input plus the labels they name; a plan is approved as it came or
+/// kept in planning with fixed text.
+#[test]
+fn questions_and_plans_are_answered_from_the_island_through_the_real_relay() {
+    use bouncer_core::approvals::ARM;
+    let (desk, path) = desk_server("question");
+    let child = spawn_relay(&path, &asking("AskUserQuestion", two_questions()));
+    let card = first_card(&desk);
+    assert_eq!(card["kind"], "question");
+    assert_eq!(card["questions"][1]["options"][2]["label"], "Large");
+    std::thread::sleep(ARM);
+    let id = card["id"].as_str().unwrap();
+    desk.answer(id, vec![vec![1], vec![0, 2]]).unwrap();
+    let out = stdout_json(&child.wait_with_output().unwrap());
+    let mut want = two_questions();
+    want["answers"] =
+        serde_json::json!({ "Which color do you prefer?": "Blue", "Which sizes?": "Small, Large" });
+    assert_eq!(
+        out["hookSpecificOutput"]["decision"],
+        serde_json::json!({ "behavior": "allow", "updatedInput": want })
+    );
+
+    let plan = serde_json::json!({ "plan": "# Test plan\n\n1. Print hello\n", "planFilePath": r"C:\Users\dev\.claude\plans\test.md" });
+    for approve in [true, false] {
+        let child = spawn_relay(&path, &asking("ExitPlanMode", plan.clone()));
+        let card = first_card(&desk);
+        assert_eq!(card["kind"], "plan");
+        assert_eq!(card["plan"]["text"], "# Test plan\n\n1. Print hello\n");
+        std::thread::sleep(ARM);
+        desk.plan(card["id"].as_str().unwrap(), approve).unwrap();
+        let decision =
+            stdout_json(&child.wait_with_output().unwrap())["hookSpecificOutput"]["decision"]
+                .clone();
+        if approve {
+            assert_eq!(
+                decision,
+                serde_json::json!({ "behavior": "allow", "updatedInput": plan })
+            );
+        } else {
+            assert_eq!(decision["behavior"], "deny");
+            assert_eq!(
+                decision["message"],
+                "Not approved in Bouncer: keep planning."
+            );
+        }
+    }
+}
+
+/// Shapes Bouncer can't answer unambiguously, and any question while paused:
+/// no card, nothing printed at once, so only the terminal asks.
+#[test]
+fn questions_bouncer_cant_show_print_nothing_so_the_terminal_asks() {
+    let (desk, path) = desk_server("question-odd");
+    let mut ambiguous = two_questions();
+    ambiguous["questions"][1]["options"][0]["label"] = "Small, round".into();
+    let cases = [
+        asking(
+            "AskUserQuestion",
+            serde_json::json!({ "questions": [{ "question": "Which binary?" }] }),
+        ),
+        asking("AskUserQuestion", ambiguous),
+        asking("ExitPlanMode", serde_json::json!({ "plan": 7 })),
+        asking("ExitPlanMode", serde_json::json!("plan")),
+    ];
+    for input in &cases {
+        let started = Instant::now();
+        assert_silent(&relay(&path, input));
+        assert!(started.elapsed() < Duration::from_secs(2), "never waits");
+    }
+    desk.set_paused(true);
+    let started = Instant::now();
+    assert_silent(&relay(&path, &asking("AskUserQuestion", two_questions())));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "paused: never waits"
+    );
     assert_eq!(desk.view()["queue"], serde_json::json!([]));
     assert_eq!(
         desk.view()["sessions"][0]["step"],
         "question in the terminal"
+    );
+}
+
+/// Answered in the terminal (or the app) first: Claude Code stops the hook,
+/// the card leaves at once, and a late click is refused and sends nothing.
+#[test]
+fn a_question_answered_elsewhere_leaves_and_a_late_click_sends_nothing() {
+    use bouncer_core::approvals::ARM;
+    let (desk, path) = desk_server("question-gone");
+    let mut child = spawn_relay(&path, &asking("AskUserQuestion", two_questions()));
+    let id = first_card(&desk)["id"].as_str().unwrap().to_owned();
+    std::thread::sleep(ARM);
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let killed = Instant::now();
+    while desk.view()["queue"]
+        .as_array()
+        .is_some_and(|q| !q.is_empty())
+    {
+        assert!(killed.elapsed() < Duration::from_secs(1), "card still up");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(desk.answer(&id, vec![vec![0], vec![1]]).is_err());
+    assert_eq!(
+        desk.view()["sessions"][0]["history"][0]["how"],
+        "answered in terminal"
     );
 }
 

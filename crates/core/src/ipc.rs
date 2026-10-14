@@ -1,8 +1,10 @@
 //! The app's end of the relay connection.
 //!
 //! Wire format: the relay sends one JSON line (the hook event). For a
-//! `PermissionRequest` the server may answer one line, exactly `allow` or
-//! `deny`; for a `PreToolUse`, only `ask` ("guard every mode": Claude Code
+//! `PermissionRequest` the server may answer one line: exactly `allow` or
+//! `deny`; for a question (`AskUserQuestion`) only `answer <picks>` (option
+//! numbers, never text); for a plan (`ExitPlanMode`) only `approve` or
+//! `keep`. For a `PreToolUse`, only `ask` ("guard every mode": Claude Code
 //! then asks, so the card comes). Closing without an answer leaves Claude
 //! Code to its own flow.
 //!
@@ -14,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::event::Event;
+use bouncer_relay::questions::{ASK, PLAN, picks_line};
 
 pub use bouncer_relay::{NAME, endpoint};
 
@@ -26,12 +29,16 @@ pub fn answers(path: &Path) -> bool {
 /// Longest event line accepted; the relay already drops bigger events.
 const MAX_LINE: u64 = 1024 * 1024 + 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     Allow,
     Deny,
     /// Only for a `PreToolUse`: make Claude Code ask (never allows or denies).
     Ask,
+    /// Only for an `AskUserQuestion`: the chosen option numbers, per question.
+    Answer(Vec<Vec<usize>>),
+    /// Only for an `ExitPlanMode`: approve the plan (`true`) or keep planning.
+    Plan(bool),
 }
 
 /// Called once per event, on its own thread, with a check that says whether
@@ -65,10 +72,16 @@ fn handle(mut stream: impl Conn, handler: &Handler) {
     };
     let asks = event.is_permission_request();
     let pre = event.kind == "PreToolUse";
+    let tool = event.tool.clone().unwrap_or_default();
+    let (question, plan) = (asks && tool == ASK, asks && tool == PLAN);
+    let other = asks && !question && !plan;
     let answer = match handler(event, &|| stream.gone()) {
-        Some(Decision::Allow) if asks => "allow\n",
-        Some(Decision::Deny) if asks => "deny\n",
-        Some(Decision::Ask) if pre => "ask\n",
+        Some(Decision::Allow) if other => "allow\n".to_owned(),
+        Some(Decision::Deny) if other => "deny\n".to_owned(),
+        Some(Decision::Ask) if pre => "ask\n".to_owned(),
+        Some(Decision::Answer(picks)) if question => format!("answer {}\n", picks_line(&picks)),
+        Some(Decision::Plan(true)) if plan => "approve\n".to_owned(),
+        Some(Decision::Plan(false)) if plan => "keep\n".to_owned(),
         _ => return,
     };
     let _ = stream.write_all(answer.as_bytes());
@@ -314,7 +327,7 @@ mod tests {
     }
 
     fn reply(input: &str, decision: Option<Decision>) -> String {
-        let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision);
+        let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision.clone());
         let mut fake = Fake(Cursor::new(input.as_bytes().to_vec()), Vec::new());
         handle(&mut fake, &handler);
         String::from_utf8(fake.1).unwrap()
@@ -344,6 +357,36 @@ mod tests {
         let stop = r#"{"session_id":"s","cwd":"/p","hook_event_name":"Stop"}
 "#;
         assert_eq!(reply(stop, Some(Decision::Ask)), "");
+    }
+
+    /// A question gets only `answer`, a plan only `approve` / `keep`, and
+    /// neither ever `allow` / `deny`; those words go to no other tool.
+    #[test]
+    fn questions_and_plans_get_only_their_own_words() {
+        let request = |tool: &str| {
+            format!(
+                r#"{{"session_id":"s","cwd":"/p","hook_event_name":"PermissionRequest","tool_name":"{tool}"}}"#
+            ) + "\n"
+        };
+        let (ask, plan, bash) = (
+            request("AskUserQuestion"),
+            request("ExitPlanMode"),
+            request("Bash"),
+        );
+        let picks = || Some(Decision::Answer(vec![vec![1], vec![0, 2]]));
+        assert_eq!(reply(&ask, picks()), "answer 1;0,2\n");
+        assert_eq!(reply(&plan, Some(Decision::Plan(true))), "approve\n");
+        assert_eq!(reply(&plan, Some(Decision::Plan(false))), "keep\n");
+        for decision in [Decision::Allow, Decision::Deny, Decision::Ask] {
+            assert_eq!(reply(&ask, Some(decision.clone())), "", "{decision:?}");
+            assert_eq!(reply(&plan, Some(decision)), "");
+        }
+        assert_eq!(reply(&plan, picks()), "");
+        assert_eq!(reply(&ask, Some(Decision::Plan(true))), "");
+        assert_eq!(reply(&bash, picks()), "");
+        assert_eq!(reply(&bash, Some(Decision::Plan(true))), "");
+        assert_eq!(reply(PRE, picks()), "");
+        assert_eq!(reply(&bash, Some(Decision::Allow)), "allow\n");
     }
 
     #[test]

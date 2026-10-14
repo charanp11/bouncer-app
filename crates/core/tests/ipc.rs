@@ -18,7 +18,7 @@ fn endpoint(name: &str) -> PathBuf {
 fn start(name: &str, decision: Option<Decision>) -> PathBuf {
     let path = endpoint(name);
     let server = Server::bind(&path).unwrap();
-    let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision);
+    let handler: Handler = Arc::new(move |_: Event, _: &dyn Fn() -> bool| decision.clone());
     std::thread::spawn(move || server.run(handler));
     path
 }

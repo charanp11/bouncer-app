@@ -25,6 +25,7 @@ use crate::code::{code_view, line_counts};
 use crate::event::Event;
 use crate::ipc::Decision;
 use crate::rules::{self, Loaded, Mode, Rule, Rules};
+use bouncer_relay::questions::{self, ASK, PLAN};
 
 /// How long a request waits for the user: well under the relay's budget, so
 /// the relay is still listening when the app gives up.
@@ -53,8 +54,10 @@ const HISTORY: usize = 40;
 /// How a step that a rule answered is tagged.
 const BY_RULE: &str = "auto-allowed by rule";
 /// Tools whose "permission request" is really a question for the user (pick
-/// an option, approve a plan). Bouncer never answers them; the terminal does.
-const QUESTIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+/// an option, approve a plan). Only a click on their own card answers them
+/// (never a rule, the guard or a timeout); while it waits, or when Bouncer
+/// can't show it, the terminal asks.
+const QUESTIONS: &[&str] = &[ASK, PLAN];
 /// The permission modes in which Claude Code doesn't ask by itself, so "guard
 /// every mode" may make it ask (`State::guards`).
 const GUARDED_MODES: &[&str] = &["auto", "acceptEdits", "bypassPermissions"];
@@ -115,8 +118,37 @@ struct Terminal {
     not_run: bool,
 }
 
+/// What a card asks the user.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// Allow or deny a tool call.
+    Permission,
+    /// Pick options (`AskUserQuestion`).
+    Question,
+    /// Approve a plan or keep planning (`ExitPlanMode`).
+    Plan,
+}
+
+impl Kind {
+    /// The card for a permission request, or `None` for a question or plan
+    /// Bouncer can't show (the shared shape check refuses it, or a plan whose
+    /// `plan` isn't text): then the terminal asks.
+    fn of(event: &Event) -> Option<Kind> {
+        let input = event.input.as_ref();
+        match event.tool.as_deref() {
+            Some(ASK) => questions::questions(input?).map(|_| Kind::Question),
+            Some(PLAN) => match input?.as_object()?.get("plan") {
+                None | Some(Value::String(_)) => Some(Kind::Plan),
+                _ => None,
+            },
+            _ => Some(Kind::Permission),
+        }
+    }
+}
+
 struct Pending {
     id: String,
+    kind: Kind,
     event: Event,
     issued: Instant,
     answer: Sender<Decision>,
@@ -437,6 +469,47 @@ impl State {
         }
     }
 
+    /// Queues a card and returns its ID. No ID (the OS random source failed)
+    /// means no card: the terminal asks.
+    fn enqueue(
+        &mut self,
+        event: Event,
+        kind: Kind,
+        answer: Sender<Decision>,
+        risk: Option<String>,
+        would: Option<String>,
+        offer: Option<Rule>,
+    ) -> Option<String> {
+        let Some(id) = request_id() else {
+            self.answered(&event, "asked in terminal");
+            return None;
+        };
+        self.queue.push_back(Pending {
+            id: id.clone(),
+            kind,
+            event,
+            issued: Instant::now(),
+            answer,
+            risk,
+            would,
+            offer,
+        });
+        Some(id)
+    }
+
+    /// The waiting card with this ID, if it is of this kind.
+    fn pending(&self, id: &str, kind: Kind) -> Result<&Pending, &'static str> {
+        let pending = self
+            .queue
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or("unknown or already answered request")?;
+        if pending.kind != kind {
+            return Err("not this kind of request");
+        }
+        Ok(pending)
+    }
+
     /// A rule answered this request: tag the step and flash the pill.
     fn auto_allowed(&mut self, event: &Event) {
         self.answered(event, BY_RULE);
@@ -480,6 +553,7 @@ impl State {
     /// ask into a denial; an unknown one) is left alone.
     fn guards(&self, event: &Event) -> bool {
         event.kind == "PreToolUse"
+            && !QUESTIONS.contains(&event.tool.as_deref().unwrap_or_default())
             && self.rules.loaded.rules.guard
             && !self.paused
             && GUARDED_MODES.contains(&event.mode.as_deref().unwrap_or_default())
@@ -663,10 +737,17 @@ impl Desk {
             }
             let question = QUESTIONS.contains(&event.tool.as_deref().unwrap_or_default());
             if event.is_permission_request() && question {
-                // No card, no answer: Claude Code asks it in the terminal.
-                // The session says so, so the user notices.
-                state.waiting_in_terminal(&event);
-                None
+                match Kind::of(&event) {
+                    // A card of its own; never a rule, a "would" or an offer.
+                    // Claude Code asks in the terminal meanwhile.
+                    Some(kind) if !state.paused => state.enqueue(event, kind, tx, None, None, None),
+                    // Paused, or a shape Bouncer can't show: only the
+                    // terminal asks. The session says so, so the user notices.
+                    _ => {
+                        state.waiting_in_terminal(&event);
+                        None
+                    }
+                }
             } else if !event.is_permission_request() {
                 guard = state.guards(&event);
                 None
@@ -681,22 +762,15 @@ impl Desk {
                     self.publish();
                     return Some(Decision::Allow);
                 }
-                // No ID (the OS random source failed) means no card: the terminal asks.
-                let id = request_id();
-                if id.is_none() {
-                    state.answered(&event, "asked in terminal");
-                }
-                id.inspect(|id| {
-                    state.queue.push_back(Pending {
-                        id: id.clone(),
-                        event,
-                        issued: Instant::now(),
-                        answer: tx,
-                        risk: sentence(&verdict.reasons),
-                        would: verdict.allow,
-                        offer: verdict.offer,
-                    });
-                })
+                let risk = sentence(&verdict.reasons);
+                state.enqueue(
+                    event,
+                    Kind::Permission,
+                    tx,
+                    risk,
+                    verdict.allow,
+                    verdict.offer,
+                )
             }
         };
         self.publish();
@@ -737,14 +811,7 @@ impl Desk {
     pub fn decide(&self, id: &str, allow: bool) -> Result<(), &'static str> {
         let pending = {
             let mut state = self.lock();
-            let early = state
-                .queue
-                .iter()
-                .find(|p| p.id == id)
-                .ok_or("unknown or already answered request")?
-                .issued
-                .elapsed()
-                < ARM;
+            let early = state.pending(id, Kind::Permission)?.issued.elapsed() < ARM;
             if allow && early {
                 return Err("too soon to allow");
             }
@@ -768,11 +835,7 @@ impl Desk {
     pub fn always(&self, id: &str) -> Result<(), &'static str> {
         let (rule, path, event) = {
             let state = self.lock();
-            let pending = state
-                .queue
-                .iter()
-                .find(|p| p.id == id)
-                .ok_or("unknown or already answered request")?;
+            let pending = state.pending(id, Kind::Permission)?;
             if pending.issued.elapsed() < ARM {
                 return Err("too soon to allow");
             }
@@ -797,6 +860,56 @@ impl Desk {
             drop(state);
             self.publish();
         }
+        Ok(())
+    }
+
+    /// Answers the question card with this ID, once, with the option numbers
+    /// the user picked (one group per question). Refused within `ARM` of the
+    /// card arriving, and unless the picks fit its questions exactly (every
+    /// question, numbers in range, one for a single-select). Only numbers
+    /// leave here: the relay looks the labels up in its own copy.
+    pub fn answer(&self, id: &str, picks: Vec<Vec<usize>>) -> Result<(), &'static str> {
+        let pending = {
+            let mut state = self.lock();
+            let pending = state.pending(id, Kind::Question)?;
+            if pending.issued.elapsed() < ARM {
+                return Err("too soon to answer");
+            }
+            let input = pending.event.input.as_ref().ok_or("no question")?;
+            let qs = questions::questions(input).ok_or("no question")?;
+            if questions::picks(&qs, &questions::picks_line(&picks)).as_ref() != Some(&picks) {
+                return Err("those picks don't fit the question");
+            }
+            state
+                .take(id, "working", "you answered")
+                .ok_or("unknown or already answered request")?
+        };
+        let _ = pending.answer.send(Decision::Answer(picks));
+        self.publish();
+        Ok(())
+    }
+
+    /// Approves the plan card with this ID, or keeps planning, once.
+    /// Approving is refused within `ARM` of the card arriving; keeping
+    /// planning (a "no") never is, like Deny.
+    pub fn plan(&self, id: &str, approve: bool) -> Result<(), &'static str> {
+        let pending = {
+            let mut state = self.lock();
+            let early = state.pending(id, Kind::Plan)?.issued.elapsed() < ARM;
+            if approve && early {
+                return Err("too soon to approve");
+            }
+            let how = if approve {
+                "you approved the plan"
+            } else {
+                "you kept planning"
+            };
+            state
+                .take(id, "working", how)
+                .ok_or("unknown or already answered request")?
+        };
+        let _ = pending.answer.send(Decision::Plan(approve));
+        self.publish();
         Ok(())
     }
 
@@ -945,6 +1058,13 @@ impl Desk {
                     "risk": p.risk,
                     "would": p.would.as_deref().map(visible),
                     "offer": p.offer.as_ref().map(|r| visible(&r.to_toml())),
+                    "kind": match p.kind {
+                        Kind::Permission => "permission",
+                        Kind::Question => "question",
+                        Kind::Plan => "plan",
+                    },
+                    "questions": (p.kind == Kind::Question).then(|| question_view(&p.event)),
+                    "plan": (p.kind == Kind::Plan).then(|| plan_view(&p.event)),
                 })
             })
             .collect();
@@ -989,6 +1109,36 @@ impl Desk {
             })),
         })
     }
+}
+
+/// A question card's questions, as the island shows them (made visible-safe).
+fn question_view(event: &Event) -> Value {
+    let qs = event.input.as_ref().and_then(questions::questions);
+    let qs = qs.iter().flatten().map(|q| {
+        json!({
+            "question": visible(q.text),
+            "header": q.header.map(visible),
+            "multi": q.multi,
+            "options": q.options.iter().map(|(label, description)| json!({
+                "label": visible(label),
+                "description": description.map(visible),
+            })).collect::<Vec<_>>(),
+        })
+    });
+    Value::Array(qs.collect())
+}
+
+/// A plan card's plan (Markdown) and its file, made visible-safe.
+fn plan_view(event: &Event) -> Value {
+    let text = |key: &str| {
+        event
+            .input
+            .as_ref()
+            .and_then(|i| i.get(key))
+            .and_then(Value::as_str)
+            .map(visible)
+    };
+    json!({ "text": text("plan").unwrap_or_default(), "path": text("planFilePath") })
 }
 
 fn epoch_ms(time: SystemTime) -> u64 {
@@ -2028,14 +2178,183 @@ mod tests {
         assert_eq!(desk.view()["flash"]["strong"], "Rules changed");
     }
 
+    /// A question (or plan) PermissionRequest with this input.
+    fn asking(tool: &str, input: Value) -> Event {
+        Event {
+            tool: Some(tool.into()),
+            input: Some(input),
+            ..event("q", "PermissionRequest", "")
+        }
+    }
+
+    fn color() -> Value {
+        json!({ "questions": [
+            { "question": "Which color?\u{202E}", "header": "<b>Color</b>", "options": [
+                { "label": "Red", "description": "Warm\u{200B}" }, { "label": "Blue" } ] },
+            { "question": "Which sizes?", "multiSelect": true, "options": [
+                { "label": "S" }, { "label": "M" }, { "label": "L" } ] },
+        ]})
+    }
+
+    /// Auto mode with a rule: rules can't name these tools (a `tool` rule
+    /// takes file tools only), and questions skip the rules anyway.
+    const AUTO_QUESTIONS: &str = AUTO;
+
+    /// Auto mode with rules for both tools, and the guard on: a question gets
+    /// a card of its own (no rule, "would" or offer), visible-safe, and only
+    /// the user's picks answer it: armed, checked, single-use; Allow / Deny /
+    /// Always allow are refused for it.
     #[test]
-    fn questions_go_to_the_terminal_and_flag_the_session() {
+    fn a_question_gets_a_card_that_only_its_picks_answer() {
+        let (desk, _, _dir) =
+            desk_with_rules("question-card", &format!("guard = true\n{AUTO_QUESTIONS}"));
+        assert_eq!(desk.view()["rules"]["error"], json!(null));
+        let mut pre = asking(ASK, color());
+        pre.kind = "PreToolUse".into();
+        pre.mode = Some("bypassPermissions".into());
+        assert_eq!(
+            desk.handle(pre),
+            None,
+            "the guard never asks for a question"
+        );
+        let (d, e) = (desk.clone(), asking(ASK, color()));
+        let waiting = std::thread::spawn(move || d.handle(e));
+        let id = queued(&desk, 1).remove(0);
+        let card = desk.view()["queue"][0].clone();
+        assert_eq!(card["kind"], "question");
+        assert_eq!(
+            (&card["risk"], &card["would"], &card["offer"]),
+            (&json!(null), &json!(null), &json!(null))
+        );
+        assert_eq!(card["plan"], json!(null));
+        assert_eq!(
+            card["questions"],
+            json!([
+                { "question": "Which color?\\u{202E}", "header": "<b>Color</b>", "multi": false, "options": [
+                    { "label": "Red", "description": "Warm\\u{200B}" }, { "label": "Blue", "description": null } ] },
+                { "question": "Which sizes?", "header": null, "multi": true, "options": [
+                    { "label": "S", "description": null }, { "label": "M", "description": null }, { "label": "L", "description": null } ] },
+            ])
+        );
+        assert_eq!(desk.view()["sessions"][0]["status"], "needs you");
+        assert_eq!(
+            desk.answer(&id, vec![vec![1], vec![0]]),
+            Err("too soon to answer")
+        );
+        std::thread::sleep(ARM);
+        assert_eq!(desk.decide(&id, true), Err("not this kind of request"));
+        assert_eq!(desk.decide(&id, false), Err("not this kind of request"));
+        assert_eq!(desk.always(&id), Err("not this kind of request"));
+        assert_eq!(desk.plan(&id, true), Err("not this kind of request"));
+        for bad in [
+            vec![vec![1]],
+            vec![vec![1], vec![]],
+            vec![vec![], vec![0]],
+            vec![vec![0, 1], vec![0]],
+            vec![vec![2], vec![0]],
+            vec![vec![1], vec![2, 0]],
+            vec![vec![1], vec![0, 0]],
+            vec![vec![1], vec![3]],
+            vec![vec![1], vec![0], vec![0]],
+            vec![vec![10], vec![0]],
+        ] {
+            assert_eq!(
+                desk.answer(&id, bad.clone()),
+                Err("those picks don't fit the question"),
+                "{bad:?}"
+            );
+        }
+        desk.answer(&id, vec![vec![1], vec![0, 2]]).unwrap();
+        assert_eq!(
+            waiting.join().unwrap(),
+            Some(Decision::Answer(vec![vec![1], vec![0, 2]]))
+        );
+        assert!(
+            desk.answer(&id, vec![vec![1], vec![0]]).is_err(),
+            "single use"
+        );
+        let view = desk.view();
+        assert_eq!(view["sessions"][0]["history"][0]["how"], "you answered");
+        assert_eq!(view["sessions"][0]["status"], "working");
+    }
+
+    /// A plan: its own card with the plan text; Keep planning at once (a
+    /// "no"), Approve armed; single-use; Allow / answers refused.
+    #[test]
+    fn a_plan_gets_a_card_approved_or_kept_only_by_the_user() {
+        let (desk, _, _dir) = desk_with_rules("plan-card", AUTO_QUESTIONS);
+        let plan = json!({ "plan": "# Plan\n\n1. Print **hello**\u{202E}", "planFilePath": "/p/.claude/plans/a.md" });
+        for approve in [false, true] {
+            let (d, e) = (desk.clone(), asking(PLAN, plan.clone()));
+            let waiting = std::thread::spawn(move || d.handle(e));
+            let id = queued(&desk, 1).remove(0);
+            let card = desk.view()["queue"][0].clone();
+            assert_eq!(card["kind"], "plan");
+            assert_eq!(
+                card["plan"],
+                json!({ "text": "# Plan\n\n1. Print **hello**\\u{202E}", "path": "/p/.claude/plans/a.md" })
+            );
+            assert_eq!(card["questions"], json!(null));
+            assert_eq!(desk.decide(&id, true), Err("not this kind of request"));
+            assert_eq!(
+                desk.answer(&id, vec![vec![0]]),
+                Err("not this kind of request")
+            );
+            if approve {
+                assert_eq!(desk.plan(&id, true), Err("too soon to approve"));
+                std::thread::sleep(ARM);
+            }
+            desk.plan(&id, approve).unwrap();
+            assert_eq!(waiting.join().unwrap(), Some(Decision::Plan(approve)));
+            assert!(desk.plan(&id, approve).is_err(), "single use");
+            let how = if approve {
+                "you approved the plan"
+            } else {
+                "you kept planning"
+            };
+            assert_eq!(
+                desk.view()["sessions"][0]["history"]
+                    .as_array()
+                    .unwrap()
+                    .last()
+                    .unwrap()["how"],
+                how
+            );
+        }
+        // No plan text (no plan file): still a card, with nothing to show.
+        let (d, e) = (desk.clone(), asking(PLAN, json!({})));
+        let waiting = std::thread::spawn(move || d.handle(e));
+        let id = queued(&desk, 1).remove(0);
+        assert_eq!(
+            desk.view()["queue"][0]["plan"],
+            json!({ "text": "", "path": null })
+        );
+        desk.plan(&id, false).unwrap();
+        assert_eq!(waiting.join().unwrap(), Some(Decision::Plan(false)));
+    }
+
+    /// Unanswered, a question card times out with no answer: the terminal
+    /// (which asked all along) decides.
+    #[test]
+    fn an_unanswered_question_times_out_with_no_answer() {
+        let desk = desk(Duration::from_millis(200));
+        assert_eq!(desk.handle(asking(ASK, color())), None);
+        assert_eq!(desk.view()["queue"], json!([]));
+    }
+
+    #[test]
+    fn questions_bouncer_cant_show_go_to_the_terminal_and_flag_the_session() {
         // Auto mode and a rule set: still never answered, never queued.
         let (desk, _, _dir) = desk_with_rules("question", AUTO);
         for tool in ["AskUserQuestion", "ExitPlanMode"] {
             let mut e = event("q", "PreToolUse", "");
             e.tool = Some(tool.into());
-            e.input = Some(json!({ "questions": [{ "question": "Which one?" }] }));
+            // No options (a question) / not an object (a plan): no card.
+            e.input = Some(if tool == ASK {
+                json!({ "questions": [{ "question": "Which one?" }] })
+            } else {
+                json!("plan")
+            });
             desk.handle(e.clone());
             e.kind = "PermissionRequest".into();
             let started = Instant::now();
@@ -2060,10 +2379,16 @@ mod tests {
             desk.view()["sessions"][0]["history"][0]["label"],
             "Asking you a question"
         );
+        // Paused: a question Bouncer could show gets no card either.
         desk.set_paused(true);
-        let mut e = event("q", "PermissionRequest", "");
-        e.tool = Some("AskUserQuestion".into());
-        assert_eq!(desk.handle(e), None, "paused");
+        let started = Instant::now();
+        assert_eq!(desk.handle(asking(ASK, color())), None, "paused");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "paused: no wait"
+        );
+        assert_eq!(desk.view()["queue"], json!([]));
+        assert_eq!(desk.view()["sessions"][0]["step"], QUESTION_STEP);
     }
 
     #[test]
