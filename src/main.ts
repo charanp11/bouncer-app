@@ -83,7 +83,7 @@ type View = {
   rounded: boolean;
   sessions: Session[];
   queue: Request[];
-  rules: { mode: string; error: string | null; notice: { n: number; text: string } | null };
+  rules: { mode: string; guard: boolean; error: string | null; notice: { n: number; text: string } | null };
   flash: Flash | null;
   away: Away | null;
   /** Why the activity log is off today, if it is. */
@@ -810,6 +810,23 @@ function closeSettings() {
   invoke("settings", { open: false });
 }
 
+/** What "Guard every mode" changes, word for word (the switch's hint). */
+const GUARD_HINT =
+  "Claude Code's auto, accept-edits and bypass modes don't ask before risky commands. On: those stop for a card here. In a claude -p run they're refused instead. Off by default.";
+
+/** "Guard every mode": off by default. Turning it on only adds cards, so it
+ * doesn't ask first; off goes back to watching those modes. */
+function guardRow(view: View): HTMLElement {
+  const on = view.rules.guard;
+  const broken = view.rules.error !== null;
+  const sw = toggle("Guard every mode", on, () => {
+    invoke("set_guard", { on: !on }).catch(() => {});
+  });
+  sw.disabled = broken;
+  sw.dataset.key = "guard";
+  return setRow("Guard every mode", [on ? "On" : "Off", sw], broken ? "Fix the rules file first." : GUARD_HINT);
+}
+
 /** Observe / auto. Turning auto on asks first (focus on Cancel, Esc cancels,
  * Enter never turns it on, the button arms after ARM_MS); off doesn't ask. */
 function autoRow(view: View): HTMLElement {
@@ -969,6 +986,7 @@ function renderSettings(view: View, state: BallState) {
   list.append(...soundRows(prefs));
 
   list.append(autoRow(view));
+  list.append(guardRow(view));
 
   const wipe = el("button", "btn deny small", "Wipe…");
   wipe.dataset.key = "wipe";
