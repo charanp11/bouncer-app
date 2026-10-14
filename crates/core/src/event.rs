@@ -22,6 +22,9 @@ pub struct Event {
     /// A `PostToolUseFailure` caused by the user stopping the call (Esc),
     /// not by the tool failing.
     pub interrupted: bool,
+    /// Claude Code's permission mode for this event (`default`, `auto`,
+    /// `acceptEdits`, `bypassPermissions`, ...), when it sent one.
+    pub mode: Option<String>,
 }
 
 impl Event {
@@ -41,6 +44,7 @@ impl Event {
             input: hook.get("tool_input").cloned(),
             time: SystemTime::now(),
             interrupted: hook.get("is_interrupt") == Some(&Value::Bool(true)),
+            mode: text("permission_mode"),
         })
     }
 
