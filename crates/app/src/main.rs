@@ -145,7 +145,8 @@ fn main() {
             hooks_preview,
             hooks_write,
             set_autostart,
-            set_shortcut
+            set_shortcut,
+            set_guard
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -830,6 +831,14 @@ fn set_mode(island: State<'_, Island>, mode: String) -> Result<(), String> {
     island.desk.set_mode(mode).map_err(str::to_owned)
 }
 
+/// Settings' "Guard every mode" switch (off by default): on, a risky request
+/// in Claude Code's auto, accept-edits or bypass-permissions mode is asked
+/// (a card) instead of run. Takes a bool only, never file text.
+#[tauri::command]
+fn set_guard(island: State<'_, Island>, on: bool) -> Result<(), String> {
+    island.desk.set_guard(on).map_err(str::to_owned)
+}
+
 /// "Wipe history" from the settings screen (after its confirm step).
 #[tauri::command]
 fn wipe(island: State<'_, Island>) -> Result<(), String> {
@@ -1073,6 +1082,7 @@ fn tray(",
             "hooks-write",
             "set-autostart",
             "set-shortcut",
+            "set-guard",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-guard"
+description = "Enables the set_guard command without any pre-configured scope."
+commands.allow = ["set_guard"]
+
+[[permission]]
+identifier = "deny-set-guard"
+description = "Denies the set_guard command without any pre-configured scope."
+commands.deny = ["set_guard"]
