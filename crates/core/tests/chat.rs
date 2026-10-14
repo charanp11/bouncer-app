@@ -27,7 +27,9 @@ const EXE: &str = "claude";
 /// runs this same file: a fresh copy per test made macOS's first launch of
 /// each new executable land inside the test's quiet limit (up to ~300 ms at
 /// times on CI; 4 in 240 runs went Silent). Under `target/tmp`, the build's
-/// drive, as a link needs; nothing runs there.
+/// drive, as a link needs; nothing runs there. Each run leaves its link
+/// (no disk space; `cargo clean` removes it): deleting another run's link
+/// could break that run's next spawn on macOS.
 fn fake() -> Binary {
     static FAKE: OnceLock<Binary> = OnceLock::new();
     FAKE.get_or_init(|| {
@@ -40,18 +42,9 @@ fn fake() -> Binary {
             .join("examples");
         let built = examples.join(format!("fake_claude{}", std::env::consts::EXE_SUFFIX));
         let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
-        // Earlier runs' links (a link in use isn't harmed: Windows refuses,
-        // macOS keeps the running file).
-        for old in fs::read_dir(tmp).into_iter().flatten().flatten() {
-            if old
-                .file_name()
-                .to_string_lossy()
-                .starts_with("fake-claude-")
-            {
-                let _ = fs::remove_dir_all(old.path());
-            }
-        }
+        // Only this run's own folder (left by an earlier run with the same pid).
         let dir = tmp.join(format!("fake-claude-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::hard_link(&built, dir.join(EXE)).unwrap_or_else(|e| {
             panic!(
