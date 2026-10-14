@@ -41,6 +41,11 @@ pub const DEFAULTS: &str = r#"# Bouncer rules. Bouncer checks this file every fe
 # mode = "auto":    requests a rule allows are approved without asking.
 mode = "observe"
 
+# guard = true: in Claude Code's auto, accept-edits and bypass-permissions
+# modes, which don't ask, a risky request still stops for a card (a
+# `claude -p` run refuses it instead). Settings: "Guard every mode".
+guard = false
+
 # A Bash command is allowed when every part of it (`a && b`, `a | b`, ...)
 # starts with the words of a `command` rule, and every path it names is inside
 # the project. Commands with `$(...)`, backticks, variables, redirections to
@@ -230,6 +235,9 @@ fn shell_quoted(word: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rules {
     pub mode: Mode,
+    /// "Guard every mode": a risky request still stops for a card in Claude
+    /// Code's auto, accept-edits and bypass-permissions modes. Off unless set.
+    pub guard: bool,
     pub allow: Vec<Rule>,
 }
 
@@ -309,34 +317,52 @@ pub fn add(path: &Path, rule: &Rule) -> Result<(), String> {
     let new = parse(&new_text).map_err(|e| format!("can't add the rule: {e}"))?;
     let mut want = old.allow.clone();
     want.push(rule.clone());
-    if new.mode != old.mode || new.allow != want {
+    if new != (Rules { allow: want, ..old }) {
         return Err("can't add the rule: the file wouldn't read back as expected".into());
     }
     replace(path, &new_text).map_err(|e| format!("can't save {}: {e}", path.display()))
 }
 
-/// Sets the file's mode. Only the top-level `mode = ...` line is rewritten
-/// (or one is added above the first table); the result must read back as the
-/// same rules with only the mode changed. Written to a temp file and renamed.
+/// Sets the file's mode (see [`set_top`]).
 pub fn set_mode(path: &Path, mode: Mode) -> Result<(), String> {
-    let text = read(path)?;
-    let old = parse(&text)?;
     let value = match mode {
-        Mode::Auto => "auto",
-        Mode::Observe => "observe",
+        Mode::Auto => "\"auto\"",
+        Mode::Observe => "\"observe\"",
     };
-    let new_line = format!("mode = \"{value}\"");
+    set_top(path, "mode", value, "the mode", |r| r.mode = mode)
+}
+
+/// Turns "guard every mode" on or off (see [`set_top`]).
+pub fn set_guard(path: &Path, on: bool) -> Result<(), String> {
+    let value = if on { "true" } else { "false" };
+    set_top(path, "guard", value, "the guard", |r| r.guard = on)
+}
+
+/// Rewrites only the top-level `key = ...` line (or adds one above the
+/// first table); the result must read back as the same rules with only
+/// `change` applied. Written to a temp file and renamed.
+fn set_top(
+    path: &Path,
+    key: &str,
+    value: &str,
+    what: &str,
+    change: impl FnOnce(&mut Rules),
+) -> Result<(), String> {
+    let text = read(path)?;
+    let mut want = parse(&text)?;
+    change(&mut want);
+    let new_line = format!("{key} = {value}");
     let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
     let tables = lines
         .iter()
         .position(|l| l.trim_start().starts_with('['))
         .unwrap_or(lines.len());
-    let is_mode = |l: &String| {
+    let is_key = |l: &String| {
         l.trim_start()
-            .strip_prefix("mode")
+            .strip_prefix(key)
             .is_some_and(|rest| rest.trim_start().starts_with('='))
     };
-    match lines[..tables].iter().position(is_mode) {
+    match lines[..tables].iter().position(is_key) {
         Some(i) => {
             let end = if lines[i].ends_with("\r\n") {
                 "\r\n"
@@ -355,9 +381,11 @@ pub fn set_mode(path: &Path, mode: Mode) -> Result<(), String> {
         }
     }
     let new_text = lines.concat();
-    let new = parse(&new_text).map_err(|e| format!("can't change the mode: {e}"))?;
-    if new.mode != mode || new.allow != old.allow {
-        return Err("can't change the mode: the file wouldn't read back as expected".into());
+    let new = parse(&new_text).map_err(|e| format!("can't change {what}: {e}"))?;
+    if new != want {
+        return Err(format!(
+            "can't change {what}: the file wouldn't read back as expected"
+        ));
     }
     if new_text == text {
         return Ok(());
@@ -462,6 +490,7 @@ pub fn parse(text: &str) -> Result<Rules, String> {
         .map_err(|e| format!("rules.toml {}{}", line(text, e.span()), e.message()))?;
     let mut rules = Rules {
         mode: Mode::Observe,
+        guard: false,
         allow: Vec::new(),
     };
     for (key, value) in table.get_ref().iter() {
@@ -473,6 +502,10 @@ pub fn parse(text: &str) -> Result<Rules, String> {
                     value.span(),
                     r#"`mode` must be "observe" or "auto""#.into(),
                 ));
+            }
+            ("guard", DeValue::Boolean(on)) => rules.guard = *on,
+            ("guard", _) => {
+                return Err(fail(value.span(), "`guard` must be true or false".into()));
             }
             ("allow", DeValue::Array(items)) => {
                 for item in items.iter() {
@@ -1085,6 +1118,59 @@ pub(crate) mod tests {
         replace(&path, "# only a comment").unwrap();
         set_mode(&path, Mode::Auto).unwrap();
         assert_eq!(read(&path).unwrap(), "# only a comment\nmode = \"auto\"\n");
+    }
+
+    #[test]
+    fn guard_is_off_unless_set_and_must_be_true_or_false() {
+        assert!(!Rules::builtin().guard, "off in the shipped rules");
+        assert!(!parse("mode = \"auto\"\n").unwrap().guard, "missing = off");
+        assert!(parse("guard = true\n").unwrap().guard);
+        assert!(!parse("guard = false\n").unwrap().guard);
+        for bad in ["guard = \"true\"\n", "guard = 1\n", "guard = \"on\"\n"] {
+            assert!(
+                parse(bad)
+                    .unwrap_err()
+                    .contains("`guard` must be true or false"),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_guard_changes_only_the_guard_line() {
+        let tmp = temp_dir("set-guard");
+        let path = tmp.join("rules.toml");
+        assert_eq!(load(&path).error, None);
+        let before = read(&path).unwrap();
+        set_guard(&path, true).unwrap();
+        let after = read(&path).unwrap();
+        let rules = load(&path).rules;
+        assert!(rules.guard);
+        assert_eq!(rules.mode, Mode::Observe);
+        assert_eq!(rules.allow, parse(&before).unwrap().allow);
+        let changed: Vec<_> = before
+            .lines()
+            .zip(after.lines())
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert_eq!(changed, [("guard = false", "guard = true")]);
+        set_guard(&path, false).unwrap();
+        assert_eq!(read(&path).unwrap(), before);
+        // A file from before the guard (no line): one is added above the tables.
+        replace(&path, "mode = \"auto\"\n[[allow]]\ncommand = \"ls\"\n").unwrap();
+        set_guard(&path, true).unwrap();
+        assert_eq!(
+            read(&path).unwrap(),
+            "mode = \"auto\"\nguard = true\n[[allow]]\ncommand = \"ls\"\n"
+        );
+        let rules = load(&path).rules;
+        assert_eq!(
+            (rules.mode, rules.guard, rules.allow.len()),
+            (Mode::Auto, true, 1)
+        );
+        // Turning the mode leaves the guard alone, and the other way round.
+        set_mode(&path, Mode::Observe).unwrap();
+        assert!(load(&path).rules.guard);
     }
 
     #[test]
