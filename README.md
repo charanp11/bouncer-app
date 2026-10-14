@@ -116,7 +116,12 @@ see the first item under "What it can't do".
   does, so Bouncer mostly watches. Accept-edits mode doesn't ask before file
   edits or file commands such as `mkdir`, but still asks before other
   commands, and those get a card. For a card on everything, use default mode
-  (`claude --permission-mode default`).
+  (`claude --permission-mode default`). Or turn on Settings → **Guard every
+  mode** (off by default): then a risky request in auto, accept-edits or
+  bypass mode stops for Claude Code's prompt and Bouncer's card instead of
+  running. In a `claude -p` run, which can't show a prompt, it's refused
+  instead. Safe requests in those modes still run unasked, and Bouncer never
+  allows or denies anything on its own.
 - **Only Claude Code for now.** Other agents come one per release.
 - **Questions are answered in the terminal.** When Claude Code asks you a
   question or wants a plan approved, Bouncer shows the session waits; you
