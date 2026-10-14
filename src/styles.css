@@ -1198,6 +1198,11 @@ pre.cmd {
   text-overflow: ellipsis;
 }
 
+/* A hint that must be read whole (Guard every mode says all it changes). */
+.setrow .hint.wrap {
+  white-space: normal;
+}
+
 .setrow .ctl {
   grid-row: 1;
   grid-column: 2;
