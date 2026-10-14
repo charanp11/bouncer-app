@@ -45,13 +45,14 @@ test("only a step whose PostToolUse came gets the green check", () => {
       for (const waiting of [false, true]) {
         const at = `ran ${ran}, now ${now}, waiting ${waiting}`;
         assert.equal(stepIcon("you denied", ran, now, waiting), "no", at);
+        assert.equal(stepIcon("you kept planning", ran, now, waiting), "no", at);
         assert.equal(stepIcon("failed", ran, now, waiting), "warn", at);
         assert.notEqual(stepIcon("not run (answered in terminal)", ran, now, waiting), "ok", at);
         assert.notEqual(stepIcon("answered in terminal", ran, now, waiting), "ok", at);
       }
     }
   }
-  for (const how of ["you allowed", "auto-allowed by rule", "allowed in terminal", ""]) {
+  for (const how of ["you allowed", "you answered", "you approved the plan", "auto-allowed by rule", "allowed in terminal", ""]) {
     assert.equal(stepIcon(how, true, false, false), "ok", how);
     // Finished with neither PostToolUse nor PostToolUseFailure: neutral ring.
     assert.equal(stepIcon(how, false, false, false), "mid", how);
