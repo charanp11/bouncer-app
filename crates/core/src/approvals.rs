@@ -427,32 +427,40 @@ impl State {
     /// moved on (Stop, a new prompt, the session ended). The card is stale: it
     /// leaves, unanswered (Claude Code already has its answer). Matching the
     /// exact tool and input keeps a card up while a subagent runs another tool.
+    /// A question or plan matches by tool alone: its PostToolUse carries the
+    /// answers (a question) or the model's own empty input (a plan), never
+    /// the input the card was made from; Claude Code asks one at a time. It
+    /// matters because Claude Code doesn't stop the hook when its own prompt
+    /// (the desktop app's, VS Code's) answers first.
     fn drop_stale(&mut self, event: &Event) {
-        let stale: Vec<String> = self
+        let ran = matches!(event.kind.as_str(), "PostToolUse" | "PostToolUseFailure");
+        let stale: Vec<(String, &'static str)> = self
             .queue
             .iter()
             .filter(|p| {
                 p.event.session == event.session
                     && match event.kind.as_str() {
-                        "PostToolUse" | "PostToolUseFailure" => {
-                            p.event.tool == event.tool && p.event.input == event.input
-                        }
+                        _ if ran && p.kind != Kind::Permission => p.event.tool == event.tool,
+                        _ if ran => p.event.tool == event.tool && p.event.input == event.input,
                         "Stop" | "UserPromptSubmit" | "SessionEnd" => true,
                         _ => false,
                     }
             })
-            .map(|p| p.id.clone())
+            .map(|p| {
+                let how = match p.kind {
+                    _ if !ran => NOT_RUN,
+                    Kind::Permission => ALLOWED_IN_TERMINAL,
+                    Kind::Question | Kind::Plan => ANSWERED,
+                };
+                (p.id.clone(), how)
+            })
             .collect();
         let status = self
             .sessions
             .iter()
             .find(|s| s.id == event.session)
             .map_or("idle", |s| s.status);
-        let how = match event.kind.as_str() {
-            "PostToolUse" | "PostToolUseFailure" => ALLOWED_IN_TERMINAL,
-            _ => NOT_RUN,
-        };
-        for id in stale {
+        for (id, how) in stale {
             self.take(&id, status, how);
         }
     }
@@ -2340,6 +2348,48 @@ mod tests {
         let desk = desk(Duration::from_millis(200));
         assert_eq!(desk.handle(asking(ASK, color())), None);
         assert_eq!(desk.view()["queue"], json!([]));
+    }
+
+    /// Answered in the desktop app's or VS Code's own prompt first: Claude
+    /// Code doesn't stop the hook, so the card leaves on the tool's
+    /// PostToolUse, whose input differs from the card's (a question's has the
+    /// answers added, a plan's is the model's empty input, as recorded with
+    /// 2.1.295); a late click is refused. Another tool finishing doesn't
+    /// take it.
+    #[test]
+    fn a_question_or_plan_answered_in_the_app_leaves_when_its_tool_runs() {
+        let desk = desk(WAIT);
+        let plan = json!({ "plan": "# Plan", "planFilePath": "/p/a.md" });
+        for (tool, input, after) in [
+            (ASK, color(), {
+                let mut a = color();
+                a["answers"] = json!({ "Which color?\u{202E}": "Red", "Which sizes?": "S" });
+                a
+            }),
+            (PLAN, plan.clone(), json!({})),
+        ] {
+            let (d, e) = (desk.clone(), asking(tool, input));
+            let waiting = std::thread::spawn(move || d.handle(e));
+            let id = queued(&desk, 1).remove(0);
+            let mut other = event("q", "PostToolUse", "ls");
+            other.tool = Some("Read".into());
+            desk.handle(other);
+            assert_eq!(
+                queued(&desk, 1),
+                std::slice::from_ref(&id),
+                "{tool}: another tool"
+            );
+            let mut post = asking(tool, after);
+            post.kind = "PostToolUse".into();
+            desk.handle(post);
+            assert_eq!(queued(&desk, 0).len(), 0, "{tool}");
+            assert_eq!(waiting.join().unwrap(), None, "{tool}: nothing answered");
+            assert!(desk.answer(&id, vec![vec![0], vec![0]]).is_err());
+            assert!(desk.plan(&id, true).is_err());
+            let view = desk.view();
+            let history = view["sessions"][0]["history"].as_array().unwrap();
+            assert!(history.iter().any(|h| h["how"] == ANSWERED), "{tool}");
+        }
     }
 
     #[test]
