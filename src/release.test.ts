@@ -88,7 +88,7 @@ test("release notes: the first release lists features, later ones the changes si
   }
 });
 
-test("updater: only the build step gets the key; the draft carries latest.json", () => {
+test("updater: the key reaches only the step that signs the finished installer; the draft carries latest.json", () => {
   const wf = read(".github/workflows/release.yml");
   const live = wf.split("\n").filter((l) => !l.trimStart().startsWith("#")).join("\n");
   // Each secret appears exactly once, in the step that builds the installer.
@@ -97,14 +97,20 @@ test("updater: only the build step gets the key; the draft carries latest.json",
   }
   const steps = live.split(/\n {6}- /);
   const keyed = steps.filter((s) => s.includes("secrets."));
-  assert.deepEqual(keyed.map((s) => /name: (.+)/.exec(s)?.[1]), ["Build the installer"]);
-  assert.match(keyed[0], /node scripts\/bundle\.mjs --updater/);
-  assert.match(keyed[0], /test -s "target\/release\/bundle\/nsis\/Bouncer_\$\{VERSION\}_x64-setup\.exe\.sig"/);
+  assert.deepEqual(keyed.map((s) => /name: (.+)/.exec(s)?.[1]), ["Sign for the updater"]);
+  // That step runs one command: the pinned Tauri CLI's signer, on the built installer.
+  assert.match(keyed[0], /\n {8}run: node node_modules\/@tauri-apps\/cli\/tauri\.js signer sign "target\/release\/bundle\/nsis\/Bouncer_\$\{VERSION\}_x64-setup\.exe"$/);
+  // Signing comes after building, and the build step has no secrets and never signs.
+  const names = steps.map((s) => /name: (.+)/.exec(s)?.[1]);
+  assert.ok(names.indexOf("Sign for the updater") === names.indexOf("Build the installer") + 1);
+  const build = steps.find((s) => s.includes("name: Build the installer"))!;
+  assert.doesNotMatch(build, /secrets\.|TAURI_SIGNING|--updater|createUpdaterArtifacts/);
+  assert.match(live, /test -s "Bouncer_\$\{VERSION\}_x64-setup\.exe\.sig"/);
   assert.match(live, /node scripts\/latest-json\.mjs "\$VERSION" "\$GITHUB_REPOSITORY" "out\/Bouncer_\$\{VERSION\}_x64-setup\.exe\.sig" > out\/latest\.json/);
   assert.match(live, /gh release create "\$TAG" --draft --verify-tag[\s\S]*out\/SHA256SUMS\.txt out\/latest\.json/);
   // Only the release workflow signs: the installer test and CI build without the key.
   for (const f of ["installer.yml", "ci.yml"]) assert.doesNotMatch(read(`.github/workflows/${f}`), /TAURI_SIGNING|--updater/, f);
-  assert.match(read("scripts/bundle.mjs"), /if \(process\.argv\.includes\("--updater"\)\) config\.bundle\.createUpdaterArtifacts = true;/);
+  assert.doesNotMatch(read("scripts/bundle.mjs"), /createUpdaterArtifacts|TAURI_SIGNING|signer/);
 });
 
 test("updater: latest.json points at this release's installer with its signature", () => {
@@ -149,6 +155,7 @@ test("v0.8.0's notes say 0.7.0 users install it by hand once, and how updates wo
   assert.match(intro, /install 0\.8\.0 by hand once/);
   assert.match(intro, /Check for updates/);
   assert.match(intro, /Watch → Custom → Releases/);
+  assert.match(intro, /^\*\*Known limits:\*\* .*claude -p.*refuses risky requests.*accept edits/m);
   assert.match(read("scripts/release-notes.mjs"), /docs\/releases\/\$\{tag\}\.md/);
 });
 
