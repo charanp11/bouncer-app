@@ -218,7 +218,7 @@ command does and what could go wrong. It never decides.
 | G1 | The switch | `guard` in `rules.toml`, missing = off; only true / false (else the file is refused, guard off); Settings writes only that line (added above the tables if missing), shown as "Rules changed: guard on / off"; its hint says what it changes, as the prototype; the row only calls `set_guard`, a bool | unit, frontend | `rules::tests::guard_is_off_unless_set_and_must_be_true_or_false` `rules::tests::set_guard_changes_only_the_guard_line` `approvals::tests::set_guard_writes_the_file_and_the_island_shows_it` `ts: the guard switch says what it changes, word for word as the prototype` | CI |
 | G2 | When Bouncer asks | Only a PreToolUse, guard on, not paused, mode auto / acceptEdits / bypassPermissions, and a risk reason: `Ask`, at once, no card of its own; default, plan, dontAsk, unknown or missing mode, a safe request, guard off or paused: nothing | unit | `approvals::tests::the_guard_asks_only_for_risky_requests_in_modes_that_dont_ask` `approvals::tests::the_guard_is_off_unless_turned_on_and_steps_aside_when_paused` | CI |
 | G3 | The wire and the relay | The server sends `ask` only for a PreToolUse (allow / deny only for a PermissionRequest); the relay prints the documented PreToolUse ask (fixed reason) for exactly `ask`, nothing else ever; a late answer prints nothing within ~2 s | unit, integration | `ipc::tests::ask_goes_only_to_a_pre_tool_use` `tests::the_guard_prints_ask_for_exactly_ask_and_nothing_else` `the_guard_makes_claude_code_ask_only_for_a_pre_tool_use` `the_desk_guards_risky_requests_through_the_real_relay` `a_slow_guard_answer_prints_nothing` | CI |
-| G4 | A real Claude Code | With the switch on: a risky command in bypass, auto and accept-edits mode raises Claude Code's prompt and Bouncer's card; island Deny reaches it; switch off: it runs unasked; a `claude -p` run refuses it (documented) | real (test instance, playground hooks), hand (terminal check below) | — | real 2026-10-14 (PLAN, c3); hand: not run yet |
+| G4 | A real Claude Code | With the switch on: a risky command in bypass, auto and accept-edits mode raises Claude Code's prompt and Bouncer's card; island Deny reaches it; switch off: it runs unasked; a `claude -p` run refuses it (documented) | real (test instance, playground hooks), hand (terminal check below) | — | real 2026-10-14 (PLAN, c3); hand check 4 driven 2026-10-14 (PLAN, c2) |
 
 ## Questions in the island (roadmap c2)
 
@@ -232,7 +232,7 @@ command does and what could go wrong. It never decides.
 | Q6 | Answered elsewhere, paused, or not showable | Relay stopped (answered in the terminal): the card leaves within a second; answered in the desktop app's or VS Code's own prompt (Claude Code doesn't stop the hook): the card leaves on that tool's PostToolUse (its input differs: answers added, or the plan's empty input); a late answer is refused and nothing is printed. Paused, or a shape Bouncer can't show: no card, nothing printed at once, "question in the terminal" | integration, unit | `a_question_answered_elsewhere_leaves_and_a_late_click_sends_nothing` `approvals::tests::a_question_or_plan_answered_in_the_app_leaves_when_its_tool_runs` `questions_bouncer_cant_show_print_nothing_so_the_terminal_asks` `approvals::tests::questions_bouncer_cant_show_go_to_the_terminal_and_flag_the_session` | CI |
 | Q7 | The app's commands | `answer` (ID + numbers) and `plan` (ID + a bool) only, granted to the page and listed with our own commands | unit | `tests::strict_csp_and_only_our_commands` | CI |
 | Q8 | The page | Built to prototype v0.28: questions, options (one or several picks, a filled mark), Send answer armed and only when every question has a pick; plan as Markdown from text with Keep planning / Approve plan; the page sends only the ID and numbers or approve / keep; the keyboard arrives on the first option or Keep planning; agent text with red tags | frontend, real (test instance) | `ts: the page sends only the card's ID and option numbers, or approve / keep` `ts: Send answer and Approve plan arm like Allow (so Enter never reaches them); a pick never sends` `ts: one pick for a single-select question; a second press clears it` `ts: a multi-select question adds and removes picks, kept sorted` `ts: an answer is ready only when every question has a pick` `ts: questions: the keyboard arrives on the first option or on Keep planning, never on a button that answers` | CI; real 2026-10-14 (PLAN, c2) |
-| Q9 | A real Claude Code | Island answer reaches the terminal's question / plan in every mode; answering in the terminal first takes the card away; bypass mode in the terminal | hand (hand check 5) | — | Hand 5 (not run yet) |
+| Q9 | A real Claude Code | Island answer reaches the question / plan (desktop app's, VS Code's and the terminal's Claude Code); single and multi pick, two questions, approve, keep planning; answered in the app or the terminal first takes the card away and a late click sends nothing; bypass mode in the terminal | real (test instance, playground hooks, test config folder), hand (hand check 5) | — | real 2026-10-14 (PLAN, c2); hand check 5 driven 2026-10-14 |
 
 ## macOS
 
@@ -294,7 +294,9 @@ never the real `~/.claude/settings.json`.
       → Details again. Expected: the `claude.exe` count is back to what it
       was before step 1 (none of Bouncer's left).
    8. Check `bouncer-playground\chat` is still empty.
-4. **Guard every mode in a terminal (about 8 min).** Not run yet. Dev app
+4. **Guard every mode in a terminal (about 8 min).** Driven 2026-10-14 by
+   Claude through a pseudo console (Claude Code 2.1.299, the test instance;
+   PLAN, c2): all six steps passed. Dev app
    from the c3 branch and the playground (its `.claude/settings.local.json`
    runs `target\debug\bouncer-hook.exe`). First `cargo build -p
    bouncer-relay` (so the playground's relay has the guard), then `npm run
@@ -319,7 +321,9 @@ never the real `~/.claude/settings.json`.
       Expected: it runs, no prompt, no card (as v0.7.0).
    Log it in `docs/PLAN.md` ("Manual checks", date + Claude Code
    version) and here.
-5. **Questions in the island (about 10 min).** Not run yet. Dev app from
+5. **Questions in the island (about 10 min).** Driven 2026-10-14 by Claude
+   through a pseudo console (Claude Code 2.1.299, the test instance; PLAN,
+   c2): steps 1–4 passed; step 5 (tray) not driven. Dev app from
    the c2 branch and the playground: first `cargo build -p bouncer-relay`
    (so the playground's relay answers questions), then `npm run tauri dev`.
    Like any session, these runs write Claude Code's own files under your
@@ -337,7 +341,9 @@ never the real `~/.claude/settings.json`.
       show me the plan." Expected: the plan in the terminal and a Plan
       card. **Keep planning** in the island: Claude keeps planning. When
       it shows a plan again, **Approve plan** (arms first): Claude starts,
-      and the mode is "manual" (default), not changed by Bouncer.
+      and the session goes back to the mode it had before plan mode
+      (Bouncer sets none; the terminal's own first option would pick
+      auto).
    4. Quit Claude Code; start `claude --dangerously-skip-permissions`
       (bypass; accept its warning) and ask the color question. Expected:
       a card; answer it in the island: Claude gets the answer.

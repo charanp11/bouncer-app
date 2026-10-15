@@ -3532,6 +3532,60 @@ relay; the page driven over CDP):
 | Plan with no text | "No plan text was sent. Read it in the terminal."; Keep planning → deny "Not approved in Bouncer: keep planning." |
 | A question with no options | Relay done in 108 ms, nothing printed, no card; pill "Needs you · question in the terminal" |
 
+Real runs (2026-10-14, after Charan's go-ahead). Every run: the test
+config folder (`CLAUDE_CONFIG_DIR=%USERPROFILE%\bouncer-test-claude`,
+Charan's one-time login), `--strict-mcp-config`, the playground's own
+hooks (`--setting-sources project,local`; the branch's relay in
+`target\debug`, pointed at the test instance's pipe), Haiku, and an
+environment with none of the calling session's `CLAUDE*` / `ANTHROPIC*`
+variables. The real `~/.claude` was checked untouched by the runs
+(timestamps; the only changes since 22:20 are this Claude Code session's
+own, from before the first run). Stream-json as the desktop app and VS Code
+start Claude Code, the island answered over CDP:
+
+| Case | Claude Code | Result |
+| --- | --- | --- |
+| Single pick (Blue) | desktop's 2.1.295 | The app's own prompt cancelled; Claude got "Blue" |
+| Multi pick (Red, Blue) | desktop's 2.1.295 | Claude got "Red, Blue" |
+| Two questions | desktop's 2.1.295 | Claude got "Blue" and "Small" |
+| Plan, Approve plan | desktop's 2.1.295 | "User has approved your plan", the plan as written |
+| Plan, Keep planning | desktop's 2.1.295 | Tool error "Not approved in Bouncer: keep planning." |
+| Question answered in the app first (3 s) | desktop's 2.1.295 | Claude got the app's "Red"; the card left; a late `answer` refused |
+| Plan approved in the app first | desktop's 2.1.295 | Approved by the app; the card left; a late `plan` refused |
+| Single pick | VS Code's 2.1.288 | Claude got "Red" |
+
+Found by the real runs and fixed (`6ccc0aa`): when the desktop app's or
+VS Code's own prompt answers first, Claude Code doesn't stop the hook, and
+the tool's PostToolUse carries a different input (a question's with
+`answers` added; a plan's the model's own `{}`), so the card stayed up until
+the turn ended. A question or plan card now leaves on its session's
+PostToolUse / PostToolUseFailure of the same tool (Q6).
+
+Hand checks 4 and 5 (2026-10-14), driven by Claude, not by hand: the
+terminal's Claude Code 2.1.299 run interactively through a Windows pseudo
+console (ConPTY, a scratch Python driver typing keys), the same test setup
+as above, the test instance answered over CDP; what Claude Code did read
+from the playground's recorded hook events. Bypass's warning and the
+playground's folder trust were accepted in the test config folder.
+
+| Step | Result |
+| --- | --- |
+| 4.1 Guard every mode on (Settings) | `guard = true` in the test rules file; the hint in full |
+| 4.2 Bypass, `sh -c 'echo guard-test'` | Claude Code's prompt with the guard's reason and the Risky card ("Runs a command hidden inside a string."); island Deny: it didn't run |
+| 4.3 Bypass, `echo guard-safe` | Ran (stdout "guard-safe"); no PermissionRequest, no card |
+| 4.4 Auto mode, the risky command | Prompt and card; island Allow once: it ran ("guard-test") |
+| 4.5 Accept edits, the risky command | Prompt and card; Yes in the terminal: it ran; the card left |
+| 4.6 Guard off, bypass | `guard = false`; it ran unasked, no PermissionRequest, no card |
+| 5.1 Question, default mode | Question in the terminal and the card; island Blue → Claude "GOT=Blue" |
+| 5.2 Answered in the terminal first (Red) | The card was gone at the first check; a late `answer` refused; Claude "GOT=Red" |
+| 5.3a Plan, Keep planning in the island | Claude was told to keep planning |
+| 5.3b Plan, Approve plan in the island | Approved. The session went back to the mode it had before plan mode: accept edits (reached by Shift+Tab manual → accept edits → plan); started in plan mode, manual. Bouncer sets no mode; the terminal's own first option would have chosen auto |
+| 5.4 Bypass mode in the terminal | The card; island Blue → Claude "GOT=Blue" |
+| 5 step 5 (tray Pause) | Not driven (the tray menu); covered by Q6 / A10 tests |
+
+Manual checks: the hand checks above were driven by Claude (pseudo console),
+not by Charan; Claude Code 2.1.299 (terminal), 2026-10-14.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
