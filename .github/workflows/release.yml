@@ -63,18 +63,14 @@ jobs:
       # A clean build: no cache, so nothing from earlier runs ends up in a release.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: npm ci
-      # The updater key reaches this step only: it signs the installer for
-      # installed copies (Bouncer_X_x64-setup.exe.sig).
+      # No secrets here: nothing that builds (cargo, build scripts, npm) ever
+      # sees the updater key.
       - name: Build the installer
         shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node scripts/version.mjs set "$VERSION"
-          node scripts/bundle.mjs --updater
+          node scripts/bundle.mjs
           node scripts/version.mjs check "$VERSION" target/release/bundle/nsis
-          test -s "target/release/bundle/nsis/Bouncer_${VERSION}_x64-setup.exe.sig"
       # Signing slot (once SignPath Foundation accepts the project; PLAN, roadmap c):
       # submit the unsigned installer, wait for the approved signature, put the
       # signed file back in target/release/bundle/nsis before the checksums.
@@ -88,10 +84,21 @@ jobs:
       #     github-artifact-id: <id of an uploaded, unsigned installer artifact>
       #     wait-for-completion: true
       #     output-artifact-directory: target/release/bundle/nsis
+      # The updater key reaches this step only, and it runs only the pinned
+      # Tauri CLI (package-lock.json) on the finished installer: it writes
+      # Bouncer_X_x64-setup.exe.sig for installed copies to check. Last, after
+      # any code signing above, which changes the installer.
+      - name: Sign for the updater
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node node_modules/@tauri-apps/cli/tauri.js signer sign "target/release/bundle/nsis/Bouncer_${VERSION}_x64-setup.exe"
       - name: Checksums
         shell: bash
         working-directory: target/release/bundle/nsis
         run: |
+          test -s "Bouncer_${VERSION}_x64-setup.exe.sig"
           sha256sum "Bouncer_${VERSION}_x64-setup.exe" > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

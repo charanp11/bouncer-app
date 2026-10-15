@@ -3643,9 +3643,11 @@ Design:
   explanation ended, then the plugin runs the installer and exits.
 - Turning the switch off forgets a found update and stops checking: no
   network at all.
-- Release: the build step alone gets the two secrets and bundles with
-  `createUpdaterArtifacts` (a release-only config, so local and CI builds
-  need no key); the release job writes `latest.json` (version, notes, date,
+- Release: the installer is built with no secrets (no
+  `createUpdaterArtifacts`); then a step of its own runs only the pinned
+  Tauri CLI's `signer sign` on the finished installer, with the two secrets
+  in that step's env alone (Charan, 2026-10-15: no build script ever sees
+  the key). The release job writes `latest.json` (version, notes, date,
   `windows-x86_64` url + signature) from the `.sig` and uploads it with the
   installer to the draft.
 
@@ -3661,7 +3663,7 @@ Design:
 | A dev build updates itself or the installed app | Off in debug builds (checked first in both paths) |
 | The page reaching the updater | No plugin permission for the page; only our `update_install` and the prefs switch (strict-commands test) |
 | Losing hooks / rules / history on update | `/UPDATE` keeps them (installer hooks, installer CI test) |
-| The private key leaking from CI | Only the build step gets it; release workflow runs on tags only, never on PRs |
+| The private key leaking from CI | Only the signing step gets it, which runs only the pinned Tauri CLI on the built installer (no cargo, build scripts or npm install there); release workflow runs on tags only, never on PRs |
 
 Done when:
 
@@ -3677,8 +3679,8 @@ Implemented. Core: `update::newer`, `Prefs::updates`, `Desk::has_cards`.
 App: `update.rs` (`Updates`, `start`, `update_install`), `set_updates`,
 `Chats::running`; the plugin registered after the second-launch check. Page:
 `updateRow` / `updatesRow`, `src/update.ts` (`updateButton`). Release:
-`bundle.mjs --updater`, `scripts/latest-json.mjs`, the build step's two
-secrets, `latest.json` on the draft, `docs/releases/v0.8.0.md` (put first
+the "Sign for the updater" step (`tauri signer sign`, the two secrets only
+there), `scripts/latest-json.mjs`, `latest.json` on the draft, `docs/releases/v0.8.0.md` (put first
 in the notes by `release-notes.mjs`). Found while verifying (Claude): Tauri
 only *warns* when the signing key doesn't match the public key, so a wrong
 or rotated secret would ship updates installed copies refuse;
@@ -3690,7 +3692,7 @@ Verify (2026-10-15):
 
 | Case | Result |
 | --- | --- |
-| Signed bundle (`bundle.mjs --updater`, release profile, a throwaway key in the scratchpad) | `Bouncer_0.0.0_x64-setup.exe` + `.sig` (436 bytes); Tauri warned the key doesn't match the configured public key (expected) |
+| Signed bundle (release profile, a throwaway key in the scratchpad; first with the bundler, then, after Charan's change, `tauri signer sign` on the finished installer) | `Bouncer_0.0.0_x64-setup.exe`; the signer wrote its `.sig` (416 bytes) with the throwaway key's ID |
 | `latest-json.mjs` on that `.sig` | Refused: "not made with the updater key in tauri.conf.json"; the key-ID extraction gives the same ID for the throwaway `.sig` and its own `.pub` |
 | CI on the PR | All seven checks green (deny: the new crates' licenses; gitleaks: the public key allowed) |
 | Test instance (debug build): Settings | "Check for updates · On", last row, hint in full (word for word as the prototype); Off → `preferences.json` `"updates": false`; On → `true` |
