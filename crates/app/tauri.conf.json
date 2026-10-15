@@ -74,5 +74,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUyRDNEQzRGOEI1NzI0ODgKUldTSUpGZUxUOXpUVXVWT0NkRjk0Y2FtQlRGa3pDcUFzRXdVM3NWMlJPek0wQm1OSFU0TFlNUEYK",
+      "endpoints": [
+        "https://github.com/charanp11/bouncer-app/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

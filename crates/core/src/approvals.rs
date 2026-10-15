@@ -1029,6 +1029,11 @@ impl Desk {
         self.lock().paused
     }
 
+    /// A card or question is waiting for the user (an update waits for it).
+    pub fn has_cards(&self) -> bool {
+        !self.lock().queue.is_empty()
+    }
+
     /// What the island shows. Agent text is made visible-safe here.
     pub fn view(&self) -> Value {
         let state = self.lock();

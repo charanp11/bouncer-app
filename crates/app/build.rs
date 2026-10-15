@@ -30,6 +30,8 @@ fn main() {
         "set_autostart",
         "set_shortcut",
         "set_guard",
+        "set_updates",
+        "update_install",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .expect("failed to run tauri-build");

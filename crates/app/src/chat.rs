@@ -42,6 +42,17 @@ impl Chats {
         }
     }
 
+    /// A chat answering or an explanation running: an update waits for it.
+    pub fn running(&self) -> bool {
+        let answering = self
+            .run
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|r| r.busy.load(Ordering::SeqCst));
+        answering || self.explain.lock().unwrap().is_some()
+    }
+
     /// Quitting: the chat and the explanation, if any, are killed.
     pub fn end_all(&self) {
         self.end();

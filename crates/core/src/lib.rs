@@ -15,3 +15,4 @@ pub mod prefs;
 pub mod redact;
 pub mod rules;
 pub mod shell;
+pub mod update;
