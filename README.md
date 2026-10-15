@@ -131,8 +131,12 @@ see the first item under "What it can't do".
   something"), questions Bouncer can't show unambiguously (for example a
   multi-select option whose label contains ", "), and any question while
   Bouncer is paused are answered in Claude Code only; the island says the
-  session waits. Approving a plan in Bouncer never changes the session's
-  permission mode.
+  session waits.
+- **Approving a plan keeps the mode you had.** Approving a plan in the
+  island returns the session to the permission mode it had before plan
+  mode; Bouncer never sets it. If that was bypass, it's bypass again. To
+  approve and switch modes (for example to accept edits or auto), answer in
+  Claude Code's own prompt.
 - **It never blocks the agent.** If Bouncer is closed, paused, slow or
   confused, Claude Code asks in its own prompt as usual. A card waits 100
   seconds, then goes, and Claude Code asks.
