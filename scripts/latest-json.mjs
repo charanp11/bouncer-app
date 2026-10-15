@@ -14,9 +14,22 @@ if (!/^\d+\.\d+\.\d+$/.test(version ?? "") || !/^[\w.-]+\/[\w.-]+$/.test(repo ??
   process.exit(1);
 }
 const signature = readFileSync(sigFile, "utf8").trim();
-// A minisign signature file, base64: "untrusted comment: ..." first.
-if (!Buffer.from(signature, "base64").toString("utf8").startsWith("untrusted comment:")) {
-  console.error(`${sigFile} is not a minisign signature`);
+// Minisign files, base64: an "untrusted comment:" line, then base64 of the
+// algorithm (2 bytes) and the key ID (8 bytes) and the rest.
+const keyId = (b64, what) => {
+  const [comment, line] = Buffer.from(b64, "base64").toString("utf8").split("\n");
+  const id = comment.startsWith("untrusted comment:") && line ? Buffer.from(line, "base64").subarray(2, 10) : null;
+  if (id?.length !== 8) {
+    console.error(`${what} is not a minisign file`);
+    process.exit(1);
+  }
+  return id.toString("hex");
+};
+// Signed with the key installed copies trust (tauri.conf.json), or nothing:
+// a wrong or rotated secret must not ship an update they would refuse.
+const conf = JSON.parse(readFileSync(new URL("../crates/app/tauri.conf.json", import.meta.url), "utf8"));
+if (keyId(signature, sigFile) !== keyId(conf.plugins.updater.pubkey, "the public key")) {
+  console.error(`${sigFile} was not made with the updater key in tauri.conf.json`);
   process.exit(1);
 }
 const exe = `Bouncer_${version}_x64-setup.exe`;

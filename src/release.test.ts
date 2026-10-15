@@ -110,8 +110,18 @@ test("updater: only the build step gets the key; the draft carries latest.json",
 test("updater: latest.json points at this release's installer with its signature", () => {
   const dir = mkdtempSync(join(tmpdir(), "bouncer-latest-"));
   try {
-    const sig = Buffer.from("untrusted comment: signature from tauri secret key\nRUQ...\ntrusted comment: x\nabc\n").toString("base64");
+    // A signature file carrying the key ID of the public key in tauri.conf.json.
+    const conf = JSON.parse(read("crates/app/tauri.conf.json"));
+    const pubLine = Buffer.from(conf.plugins.updater.pubkey, "base64").toString("utf8").split("\n")[1];
+    const ourId = Buffer.from(pubLine, "base64").subarray(2, 10);
+    const sigFile = (id: Buffer) =>
+      Buffer.from(
+        `untrusted comment: signature from tauri secret key\n${Buffer.concat([Buffer.from("ED"), id, Buffer.alloc(64)]).toString("base64")}\ntrusted comment: x\nabc\n`,
+      ).toString("base64");
+    const sig = sigFile(ourId);
     writeFileSync(join(dir, "a.sig"), sig + "\n");
+    // Another key's signature (a wrong or rotated secret): refused.
+    writeFileSync(join(dir, "other.sig"), sigFile(Buffer.from("0123456789abcdef", "hex")));
     const run = (...args: string[]) =>
       spawnSync(process.execPath, [fileURLToPath(new URL("scripts/latest-json.mjs", root)), ...args], { cwd: dir, encoding: "utf8" });
     const r = run("0.8.0", "dev/bouncer", "a.sig");
@@ -124,6 +134,9 @@ test("updater: latest.json points at this release's installer with its signature
     });
     writeFileSync(join(dir, "bad.sig"), "not a signature");
     assert.notEqual(run("0.8.0", "dev/bouncer", "bad.sig").status, 0);
+    const other = run("0.8.0", "dev/bouncer", "other.sig");
+    assert.notEqual(other.status, 0);
+    assert.match(other.stderr, /not made with the updater key/);
     for (const v of ["v0.8.0", "0.8", "0.8.0-rc1", ""]) assert.notEqual(run(v, "dev/bouncer", "a.sig").status, 0, v);
     assert.notEqual(run("0.8.0", "dev/bouncer/x", "a.sig").status, 0);
   } finally {
