@@ -22,7 +22,7 @@ was copied.
 | Never blocking the agent | 300 ms connect, 2 s fire-and-forget, 110 s decision; no answer means the terminal asks | Same budgets (2 s, 100 / 110 / 120 s nested), tested against a hung app and a crash mid-card | Even |
 | Web page lockdown | CSP allows inline styles and `data:` / `blob:` images; window gets `core:default` and autostart | Only our script and style, no inline, no `data:`; only our own commands; both tested | **Bouncer** |
 | Agent text is never HTML | Built with text nodes, Markdown from text nodes (no `innerHTML` in the files read) | `textContent` only, enforced by a test over every frontend file | Even (we test it) |
-| Network | GitHub, Spotify, chat providers, an optional phone link (TLS server, mDNS, a relay); "no telemetry" | None at all from Bouncer; chat goes through your own Claude Code | **Bouncer** (less to trust) |
+| Network | GitHub, Spotify, chat providers, an optional phone link (TLS server, mDNS, a relay); "no telemetry" | One daily GET of the latest release's `latest.json` (opt-out; nothing about the user sent); installs only on a click, signature checked; chat goes through your own Claude Code | **Bouncer** (less to trust) |
 | Chat | API keys (Anthropic, OpenAI, Gemini, OpenRouter, local models), kept in Windows Credential Manager; Markdown answers | Your own Claude Code login (no key, counts against your plan), locked to read-only in an empty folder, nothing on disk; Markdown is roadmap a | Mixed: we're safer and need no key; they have more models and Markdown |
 | Activity history | Weekly recap | Local, redacted activity log (secrets removed before writing), 30-day retention, one wipe path; away summary | **Bouncer** (redaction, wipe) |
 | Settings file writes | Diff, dated backup, consent, only its entries | Same, plus byte-identical uninstall and atomic write (tested) | Even |
@@ -48,9 +48,10 @@ was copied.
    CSP is strict, and only our own commands are exposed. Coucou leaves the
    Windows pipe at default security, allows inline styles and `data:`
    images, and grants `core:default`.
-4. **Nothing on the network.** Coucou talks to GitHub, Spotify, chat
-   providers and, optionally, a phone or relay. Bouncer makes no network
-   calls of its own.
+4. **Almost nothing on the network.** Coucou talks to GitHub, Spotify, chat
+   providers and, optionally, a phone or relay. Bouncer's only request of
+   its own is the daily update check (one small file from GitHub, nothing
+   about you; off in Settings).
 5. **Chat without a key.** Ours runs your own Claude Code login: no API key
    to store and no second bill. It's locked down (Read / Grep / Glob, empty
    folder, no settings, hooks or MCP) and keeps nothing.

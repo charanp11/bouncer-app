@@ -3665,13 +3665,13 @@ Design:
 
 Done when:
 
-- [ ] `tauri-plugin-updater` (pinned, native-tls), pubkey and endpoint, passive mode; release builds only
-- [ ] Core: `update::newer` and the `updates` preference (default on) (U1, U2)
-- [ ] App: daily check, the found update in the view, `update_install` with the waiting rule; the switch (U3, U4)
-- [ ] Prototype v0.29: the update notice and the Settings row; the page built to it (U5)
-- [ ] Release workflow: signed bundle, `latest.json` on the draft (U6)
-- [ ] README (what the check does, how to turn it off, Watch → Releases), COMPARE, security rule 7, v0.8.0 notes (U7)
-- [ ] TESTS rows U1–U8
+- [x] `tauri-plugin-updater` (pinned, native-tls), pubkey and endpoint, passive mode; release builds only
+- [x] Core: `update::newer` and the `updates` preference (default on) (UP1, UP2)
+- [x] App: daily check, the found update in the view, `update_install` with the waiting rule; the switch (UP3, UP4, UP6)
+- [x] Prototype v0.29: the update notice and the Settings row; the page built to it (UP5)
+- [x] Release workflow: signed bundle, `latest.json` on the draft (UP7)
+- [x] README (what the check does, how to turn it off, Watch → Releases), COMPARE, security rule 7, v0.8.0 notes (UP7)
+- [x] TESTS rows UP1–UP8
 
 ## Phase 7 — File drop (~1 week)
 
