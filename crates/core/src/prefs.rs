@@ -85,6 +85,9 @@ pub struct Prefs {
     pub sounds: u32,
     /// Ctrl+Alt+B opens the island (on by default; never approves).
     pub shortcut: bool,
+    /// Check once a day for a newer release (on by default; release builds
+    /// only). Off: no network at all.
+    pub updates: bool,
 }
 
 impl Default for Prefs {
@@ -96,6 +99,7 @@ impl Default for Prefs {
             volume: 50,
             sounds: ON_BY_DEFAULT.iter().filter_map(|n| bit(n)).sum(),
             shortcut: true,
+            updates: true,
         }
     }
 }
@@ -113,6 +117,7 @@ impl Prefs {
             "volume": self.volume,
             "sounds": sounds,
             "shortcut": self.shortcut,
+            "updates": self.updates,
         })
     }
 
@@ -153,6 +158,7 @@ impl Prefs {
                 .unwrap_or(default.volume),
             sounds,
             shortcut: value["shortcut"].as_bool().unwrap_or(default.shortcut),
+            updates: value["updates"].as_bool().unwrap_or(default.updates),
         }
     }
 }
@@ -198,6 +204,7 @@ mod tests {
             volume: 80,
             sounds: Prefs::sounds_from(&["poke".into(), "wiped".into()]).unwrap(),
             shortcut: false,
+            updates: false,
         };
         save(&path, prefs).unwrap();
         assert_eq!(load(&path), prefs);
@@ -248,6 +255,11 @@ mod tests {
         assert!(default.shortcut);
         assert!(!v(r#"{"shortcut":false}"#).shortcut);
         assert_eq!(v(r#"{"shortcut":"no"}"#), default);
+        // Update checks: on by default; only true / false change it.
+        assert!(default.updates);
+        assert!(!v(r#"{"updates":false}"#).updates);
+        assert_eq!(v(r#"{"updates":"off"}"#), default);
+        assert_eq!(v(r#"{"updates":0}"#), default);
         let tmp = temp_dir("prefs-broken");
         let path = tmp.join("preferences.json");
         rules::replace(&path, "{ not json").unwrap();

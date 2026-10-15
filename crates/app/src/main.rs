@@ -3,6 +3,7 @@
 
 mod chat;
 mod region;
+mod update;
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -148,7 +149,9 @@ fn main() {
             hooks_write,
             set_autostart,
             set_shortcut,
-            set_guard
+            set_guard,
+            set_updates,
+            update::update_install
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Moved(_) => {
@@ -218,6 +221,11 @@ fn main() {
             )?;
             let on = app.state::<Island>().prefs.lock().unwrap().shortcut;
             use_shortcut(app.handle(), on);
+            // The updater: only the running Bouncer, release builds only.
+            app.manage(update::Updates::default());
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            update::start(app.handle().clone());
             tray(app, desk)?;
             Ok(())
         })
@@ -456,6 +464,9 @@ fn send(app: &AppHandle, mut view: Value) {
     view["keyboard"] = island.focused.load(Ordering::Relaxed).into();
     view["confirmWipe"] = island.confirm_wipe.swap(false, Ordering::Relaxed).into();
     view["prefs"] = island.prefs.lock().unwrap().to_json();
+    view["update"] = app
+        .try_state::<update::Updates>()
+        .map_or(Value::Null, |u| u.view());
     if let Some(feed) = island.feed.lock().unwrap().as_ref() {
         let _ = feed.send(view);
     }
@@ -808,6 +819,7 @@ fn set_prefs(
             .ok_or("volume is 0 to 100")?,
         sounds: Prefs::sounds_from(&sounds).ok_or("unknown sound")?,
         shortcut: island.prefs.lock().unwrap().shortcut,
+        updates: island.prefs.lock().unwrap().updates,
     };
     let path = island
         .prefs_path
@@ -833,6 +845,32 @@ fn set_shortcut(app: AppHandle, island: State<'_, Island>, on: bool) -> Result<(
     prefs::save(path, new)?;
     *island.prefs.lock().unwrap() = new;
     use_shortcut(&app, on);
+    show(&app, island.desk.view());
+    Ok(())
+}
+
+/// Settings' "Check for updates" switch: saved; off also forgets a release
+/// already found, so nothing is offered and nothing is fetched.
+#[tauri::command]
+fn set_updates(
+    app: AppHandle,
+    island: State<'_, Island>,
+    updates: State<'_, update::Updates>,
+    on: bool,
+) -> Result<(), String> {
+    let path = island
+        .prefs_path
+        .as_deref()
+        .ok_or("no place to save preferences")?;
+    let new = Prefs {
+        updates: on,
+        ..*island.prefs.lock().unwrap()
+    };
+    prefs::save(path, new)?;
+    *island.prefs.lock().unwrap() = new;
+    if !on {
+        updates.forget();
+    }
     show(&app, island.desk.view());
     Ok(())
 }
@@ -1103,6 +1141,8 @@ fn tray(",
             "set-autostart",
             "set-shortcut",
             "set-guard",
+            "set-updates",
+            "update-install",
         ];
         let granted: Vec<&str> = caps["permissions"]
             .as_array()
