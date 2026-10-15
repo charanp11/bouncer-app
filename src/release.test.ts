@@ -88,6 +88,57 @@ test("release notes: the first release lists features, later ones the changes si
   }
 });
 
+test("updater: only the build step gets the key; the draft carries latest.json", () => {
+  const wf = read(".github/workflows/release.yml");
+  const live = wf.split("\n").filter((l) => !l.trimStart().startsWith("#")).join("\n");
+  // Each secret appears exactly once, in the step that builds the installer.
+  for (const s of ["TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]) {
+    assert.equal(live.split(`secrets.${s} }}`).length - 1, 1, s);
+  }
+  const steps = live.split(/\n {6}- /);
+  const keyed = steps.filter((s) => s.includes("secrets."));
+  assert.deepEqual(keyed.map((s) => /name: (.+)/.exec(s)?.[1]), ["Build the installer"]);
+  assert.match(keyed[0], /node scripts\/bundle\.mjs --updater/);
+  assert.match(keyed[0], /test -s "target\/release\/bundle\/nsis\/Bouncer_\$\{VERSION\}_x64-setup\.exe\.sig"/);
+  assert.match(live, /node scripts\/latest-json\.mjs "\$VERSION" "\$GITHUB_REPOSITORY" "out\/Bouncer_\$\{VERSION\}_x64-setup\.exe\.sig" > out\/latest\.json/);
+  assert.match(live, /gh release create "\$TAG" --draft --verify-tag[\s\S]*out\/SHA256SUMS\.txt out\/latest\.json/);
+  // Only the release workflow signs: the installer test and CI build without the key.
+  for (const f of ["installer.yml", "ci.yml"]) assert.doesNotMatch(read(`.github/workflows/${f}`), /TAURI_SIGNING|--updater/, f);
+  assert.match(read("scripts/bundle.mjs"), /if \(process\.argv\.includes\("--updater"\)\) config\.bundle\.createUpdaterArtifacts = true;/);
+});
+
+test("updater: latest.json points at this release's installer with its signature", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bouncer-latest-"));
+  try {
+    const sig = Buffer.from("untrusted comment: signature from tauri secret key\nRUQ...\ntrusted comment: x\nabc\n").toString("base64");
+    writeFileSync(join(dir, "a.sig"), sig + "\n");
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [fileURLToPath(new URL("scripts/latest-json.mjs", root)), ...args], { cwd: dir, encoding: "utf8" });
+    const r = run("0.8.0", "dev/bouncer", "a.sig");
+    assert.equal(r.status, 0, r.stderr);
+    const json = JSON.parse(r.stdout);
+    assert.equal(json.version, "0.8.0");
+    assert.match(json.pub_date, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    assert.deepEqual(json.platforms, {
+      "windows-x86_64": { signature: sig, url: "https://github.com/dev/bouncer/releases/download/v0.8.0/Bouncer_0.8.0_x64-setup.exe" },
+    });
+    writeFileSync(join(dir, "bad.sig"), "not a signature");
+    assert.notEqual(run("0.8.0", "dev/bouncer", "bad.sig").status, 0);
+    for (const v of ["v0.8.0", "0.8", "0.8.0-rc1", ""]) assert.notEqual(run(v, "dev/bouncer", "a.sig").status, 0, v);
+    assert.notEqual(run("0.8.0", "dev/bouncer/x", "a.sig").status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v0.8.0's notes say 0.7.0 users install it by hand once, and how updates work", () => {
+  const intro = read("docs/releases/v0.8.0.md");
+  assert.match(intro, /install 0\.8\.0 by hand once/);
+  assert.match(intro, /Check for updates/);
+  assert.match(intro, /Watch → Custom → Releases/);
+  assert.match(read("scripts/release-notes.mjs"), /docs\/releases\/\$\{tag\}\.md/);
+});
+
 test("every action in the workflows is ours or pinned to a commit", () => {
   for (const f of ["release.yml", "installer.yml", "ci.yml", "macos-smoke.yml", "advisories.yml"]) {
     for (const line of read(`.github/workflows/${f}`).split("\n")) {

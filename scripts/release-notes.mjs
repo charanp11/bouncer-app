@@ -7,7 +7,7 @@
 // release" and what Bouncer does; every later one, the commits since the
 // previous release tag.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const [tag, sums, repo] = process.argv.slice(2);
 const version = /^v(\d+\.\d+\.\d+)$/.exec(tag ?? "")?.[1];
@@ -38,6 +38,9 @@ const notes = [
   "Install, update and uninstall steps, and what Bouncer can't do: see the README.",
   "",
 ];
+// What this release needs said first (docs/releases/vX.Y.Z.md), if anything.
+const intro = new URL(`../docs/releases/${tag}.md`, import.meta.url);
+if (existsSync(intro)) notes.push(readFileSync(intro, "utf8").trim(), "");
 if (previous) {
   notes.push(`## Changes since ${previous}`, "", git("log", "--no-merges", "--format=- %s", `${previous}..${tag}`));
 } else {
