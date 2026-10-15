@@ -63,12 +63,18 @@ jobs:
       # A clean build: no cache, so nothing from earlier runs ends up in a release.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: npm ci
+      # The updater key reaches this step only: it signs the installer for
+      # installed copies (Bouncer_X_x64-setup.exe.sig).
       - name: Build the installer
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node scripts/version.mjs set "$VERSION"
-          node scripts/bundle.mjs
+          node scripts/bundle.mjs --updater
           node scripts/version.mjs check "$VERSION" target/release/bundle/nsis
+          test -s "target/release/bundle/nsis/Bouncer_${VERSION}_x64-setup.exe.sig"
       # Signing slot (once SignPath Foundation accepts the project; PLAN, roadmap c):
       # submit the unsigned installer, wait for the approved signature, put the
       # signed file back in target/release/bundle/nsis before the checksums.
@@ -93,6 +99,7 @@ jobs:
           name: release
           path: |
             target/release/bundle/nsis/Bouncer_${{ env.VERSION }}_x64-setup.exe
+            target/release/bundle/nsis/Bouncer_${{ env.VERSION }}_x64-setup.exe.sig
             target/release/bundle/nsis/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -129,6 +136,11 @@ jobs:
         run: |
           node scripts/release-notes.mjs "$TAG" out/SHA256SUMS.txt "$GITHUB_REPOSITORY" > notes.md
           cat notes.md
+      # What installed copies read once it's published (never as a draft).
+      - name: Updater file
+        run: |
+          node scripts/latest-json.mjs "$VERSION" "$GITHUB_REPOSITORY" "out/Bouncer_${VERSION}_x64-setup.exe.sig" > out/latest.json
+          cat out/latest.json
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,4 +148,4 @@ jobs:
           gh release create "$TAG" --draft --verify-tag
           --title "Bouncer $VERSION"
           --notes-file notes.md
-          "out/Bouncer_${VERSION}_x64-setup.exe" out/SHA256SUMS.txt
+          "out/Bouncer_${VERSION}_x64-setup.exe" out/SHA256SUMS.txt out/latest.json
