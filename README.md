@@ -29,6 +29,9 @@ reason, and never blocks the agent.
   anything is written, and a summary when you come back.
 - **Fail-safe.** If Bouncer is closed, slow or confused, Claude Code asks in
   its own prompt as usual. Nothing is ever allowed by default.
+- **Updates on your click.** Once a day Bouncer looks for a newer release;
+  it installs only when you click **Update** (and never mid-decision). Turn
+  the check off in Settings.
 
 **Status:** Windows 10 and 11 (64-bit). v0.7.0 is the first release; no Mac
 build yet.
@@ -57,8 +60,8 @@ build yet.
    **More info**, then **Run anyway**. Edge may also say the file "isn't
    commonly downloaded": choose **Keep**. It installs for your user only
    (`%LOCALAPPDATA%\Bouncer`), with no admin prompt. If WebView2 is missing,
-   the installer downloads it from Microsoft; that's the only network use,
-   and the app itself makes none.
+   the installer downloads it from Microsoft. The app's only network use is
+   the daily update check (see [Privacy](#privacy)).
 4. In Bouncer, open Settings (the gear) → **Claude Code hooks** →
    **Install…**. It shows the exact change to `~/.claude/settings.json`;
    **Write changes** saves it, with a dated backup beside the file. Claude
@@ -78,9 +81,27 @@ still flags it, please
 
 ## Update
 
-Download the new installer and run it (check it the same way). It closes
-Bouncer and replaces it in place. Your hooks, rules,
-settings and history stay; it never asks about the hooks.
+From 0.8.0, Bouncer updates itself, but only when you say so. Once a day it
+checks for a newer release; when there is one, the island's session list
+shows **"Bouncer X.Y.Z is ready"** with an **Update** button. Click it:
+Bouncer downloads the installer, checks its signature (made by this repo's
+release workflow with the project's updater key), then runs it with a small
+progress bar and starts again. Your hooks, rules, settings and history stay;
+it never asks about the hooks. While a card or question is waiting, or a
+chat or explanation is running, the button says **Update after you answer**
+and waits, so Bouncer never quits in the middle of a decision. If anything
+goes wrong (offline, GitHub down, a bad signature), nothing is installed and
+nothing nags you; it tries again the next day.
+
+**Coming from 0.7.0?** It has no updater: install 0.8.0 by hand once
+(download it and run it as in [Install](#install); everything stays).
+
+**By hand.** You can always download the new installer and run it yourself
+(check it the same way). It closes Bouncer and replaces it in place.
+
+**An email when a release comes out:** on the
+[GitHub page](https://github.com/charanp11/bouncer-app), **Watch → Custom →
+Releases**.
 
 ## Uninstall
 
@@ -179,8 +200,18 @@ the session list opens it.
 
 ## Privacy
 
-No telemetry, and Bouncer itself makes no network calls. Everything stays
-on your machine. What you send in a chat or an explanation goes to Claude
+No telemetry. Bouncer makes exactly one kind of network request: the
+daily update check. Once a day (the first a minute after it starts) it
+fetches
+`https://github.com/charanp11/bouncer-app/releases/latest/download/latest.json`,
+a small file naming the latest published version and its installer's
+signature. The request carries a generic user agent
+(`tauri-plugin-updater/<version>`) and nothing else: not your Bouncer
+version, your machine, your sessions or anything you did. GitHub sees your IP
+address, as with any download. Only when you click **Update** is the
+installer downloaded. Turn it off in Settings → **Check for updates**: then
+Bouncer makes no network requests at all. (Development builds never check.)
+Everything else stays on your machine. What you send in a chat or an explanation goes to Claude
 through your own Claude Code, as any Claude Code message does. The activity
 log keeps no tool output or file contents, and secrets are removed before
 anything is written.
