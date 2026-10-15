@@ -3673,6 +3673,31 @@ Done when:
 - [x] README (what the check does, how to turn it off, Watch → Releases), COMPARE, security rule 7, v0.8.0 notes (UP7)
 - [x] TESTS rows UP1–UP8
 
+Implemented. Core: `update::newer`, `Prefs::updates`, `Desk::has_cards`.
+App: `update.rs` (`Updates`, `start`, `update_install`), `set_updates`,
+`Chats::running`; the plugin registered after the second-launch check. Page:
+`updateRow` / `updatesRow`, `src/update.ts` (`updateButton`). Release:
+`bundle.mjs --updater`, `scripts/latest-json.mjs`, the build step's two
+secrets, `latest.json` on the draft, `docs/releases/v0.8.0.md` (put first
+in the notes by `release-notes.mjs`). Found while verifying (Claude): Tauri
+only *warns* when the signing key doesn't match the public key, so a wrong
+or rotated secret would ship updates installed copies refuse;
+`latest-json.mjs` now compares the signature's key ID with the public key's
+and fails the release job instead (tested). `.gitleaks.toml` allows minisign
+public keys only.
+
+Verify (2026-10-15):
+
+| Case | Result |
+| --- | --- |
+| Signed bundle (`bundle.mjs --updater`, release profile, a throwaway key in the scratchpad) | `Bouncer_0.0.0_x64-setup.exe` + `.sig` (436 bytes); Tauri warned the key doesn't match the configured public key (expected) |
+| `latest-json.mjs` on that `.sig` | Refused: "not made with the updater key in tauri.conf.json"; the key-ID extraction gives the same ID for the throwaway `.sig` and its own `.pub` |
+| CI on the PR | All seven checks green (deny: the new crates' licenses; gitleaks: the public key allowed) |
+| Test instance (debug build): Settings | "Check for updates · On", last row, hint in full (word for word as the prototype); Off → `preferences.json` `"updates": false`; On → `true` |
+| Test instance: no checks in a dev build | No remote TCP connection from the app after 107 s (a release build checks at 60 s) |
+| Test instance: the update line (a sample update added to the page's views over CDP, test only; the app can't find one in a dev build) | "Bouncer 0.8.1 is ready" with Update above the sessions, as the prototype; Update in a dev build → refused ("dev"), the line back as it was; installing → "Updating…", disabled |
+| A real update (0.8.0 → 0.8.1) | Not possible before a published release with an updater: UP8, after the next release |
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
