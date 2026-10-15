@@ -3586,6 +3586,93 @@ playground's folder trust were accepted in the test config folder.
 Manual checks: the hand checks above were driven by Claude (pseudo console),
 not by Charan; Claude Code 2.1.299 (terminal), 2026-10-14.
 
+**Updater (2026-10-15, before v0.8.0).**
+
+Audit (report and Charan's decisions, 2026-10-15). Tauri's official
+updater plugin, `tauri-plugin-updater = "=2.13.3"` (2.14.0 was a day old),
+`default-features = false, features = ["native-tls"]`: Windows' own TLS
+(schannel) instead of rustls / ring, no `zip` (only for v1-style bundles).
+Cargo.lock gains 23 entries; 9 compile on Windows
+(`tauri-plugin-updater`, `minisign-verify`, `native-tls`, `schannel`,
+`hyper-tls`, `tokio-native-tls`, `tempfile`, `zeroize`, `rustls-pki-types`;
+`reqwest` was already there); the rest are macOS / Linux / Android only.
+No JS package; no plugin permission is granted to the page (only our own
+commands). From the plugin's source: the check is a GET of the endpoint
+with `Accept: application/json` and `User-Agent:
+tauri-plugin-updater/2.13.3`; a fixed URL carries nothing about the install
+(no version, target or arch variables). The installer's minisign signature
+is checked against the public key in `tauri.conf.json` before it runs
+(can't be turned off; TLS enforced). On Windows it runs the NSIS setup
+with `/P /UPDATE /R` (passive: a progress bar, no questions, then restart)
+and exits Bouncer; our installer hooks already treat `/UPDATE` as an
+update (no hooks prompt, app data kept).
+
+Decisions (Charan, 2026-10-15):
+
+1. Passive install.
+2. Security rule 7 becomes: no network calls except the opt-out daily
+   update check of `latest.json`.
+3. Off in debug / dev builds: Bouncer-dev never checks or installs.
+4. A card or question waiting, or a chat or explanation running: Update
+   waits ("Update after you answer"); Bouncer never quits mid-decision.
+5. Only a newer version is ever offered; never a downgrade.
+6. The updater key: Charan made it and set `TAURI_SIGNING_PRIVATE_KEY` and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the public key is in
+   `tauri.conf.json`. He keeps the private key and password backed up
+   offline (lost: no more updates for installed copies; leaked: rotate).
+7. 0.7.0 has no updater: its users install 0.8.0 by hand once (README,
+   v0.8.0 notes).
+
+Design:
+
+- Endpoint: `https://github.com/charanp11/bouncer-app/releases/latest/download/latest.json`.
+  GitHub's "latest" is the newest published, non-prerelease release, so a
+  draft is never offered.
+- Check: release builds only; a thread wakes hourly and checks when the
+  preference `updates` (`preferences.json`, on by default; Settings "Check
+  for updates") is on and the last check is a day old (the first a minute
+  after start). 30 s timeout. Anything failing (offline, GitHub down, bad
+  JSON, no newer version): nothing shown, try again tomorrow. Only a plain
+  `X.Y.Z` strictly newer than the running version is offered (core's
+  `update::newer`, also the plugin's version comparator).
+- Island: the session list shows "Bouncer X.Y.Z is ready" with Update
+  (armed 600 ms). Nothing installs before that click.
+- Install (`update_install`, no arguments): refused while a card waits or a
+  chat / explanation runs (the page shows "Update after you answer");
+  download (signature checked), the same check again, the chat and
+  explanation ended, then the plugin runs the installer and exits.
+- Turning the switch off forgets a found update and stops checking: no
+  network at all.
+- Release: the build step alone gets the two secrets and bundles with
+  `createUpdaterArtifacts` (a release-only config, so local and CI builds
+  need no key); the release job writes `latest.json` (version, notes, date,
+  `windows-x86_64` url + signature) from the `.sig` and uploads it with the
+  installer to the draft.
+
+| Threat | Fix |
+| --- | --- |
+| A tampered installer (mirror, MITM, a replaced asset) | Minisign signature checked against the shipped public key before anything runs; HTTPS only |
+| A draft or prerelease offered | Only GitHub's "latest" published release is read |
+| A downgrade or odd version string | Only a plain X.Y.Z strictly newer than ours (`update::newer`, tested) |
+| Bouncer quits mid-decision (a card, a question, a chat) | `update_install` refuses while any of them is up, before and after the download |
+| Installs without the user | Only `update_install`, from the Update button; never on a schedule |
+| Leaks about the user | One GET of a fixed URL with a generic user agent; nothing else sent; off = no network |
+| Error spam when offline / GitHub down | Failures are silent; next try tomorrow |
+| A dev build updates itself or the installed app | Off in debug builds (checked first in both paths) |
+| The page reaching the updater | No plugin permission for the page; only our `update_install` and the prefs switch (strict-commands test) |
+| Losing hooks / rules / history on update | `/UPDATE` keeps them (installer hooks, installer CI test) |
+| The private key leaking from CI | Only the build step gets it; release workflow runs on tags only, never on PRs |
+
+Done when:
+
+- [ ] `tauri-plugin-updater` (pinned, native-tls), pubkey and endpoint, passive mode; release builds only
+- [ ] Core: `update::newer` and the `updates` preference (default on) (U1, U2)
+- [ ] App: daily check, the found update in the view, `update_install` with the waiting rule; the switch (U3, U4)
+- [ ] Prototype v0.29: the update notice and the Settings row; the page built to it (U5)
+- [ ] Release workflow: signed bundle, `latest.json` on the draft (U6)
+- [ ] README (what the check does, how to turn it off, Watch → Releases), COMPARE, security rule 7, v0.8.0 notes (U7)
+- [ ] TESTS rows U1–U8
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
