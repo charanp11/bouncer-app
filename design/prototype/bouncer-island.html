@@ -246,6 +246,10 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .confirm pre.diff { max-height: 150px; overflow: auto; white-space: pre; word-break: normal; user-select: text; }
 .setrow > .actions { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 6px; }
 .btn.small { height: 30px; font-size: 12.5px; }
+/* The updater (v0.8): a newer release found; nothing installs before Update. */
+.update { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); background: var(--raised); border-radius: 10px; padding: 5px 5px 5px 12px; margin-bottom: 6px; }
+.update b { color: var(--text); font-weight: 500; }
+.update .btn { padding: 0 14px; }
 .iconbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
 
 /* later: drop, music, chat */
@@ -493,7 +497,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.28 · Oct 14 2026</div>
+    <div class="meta">design/prototype · v0.29 · Oct 15 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -545,6 +549,10 @@ a.chip { text-decoration: none; }
     <div class="group"><span class="label">Roadmap c2</span>
       <button class="chip" data-s="question">Question</button>
       <button class="chip" data-s="plan">Plan</button>
+    </div>
+    <div class="group"><span class="label">v0.8</span>
+      <button class="chip" data-s="update">Update ready</button>
+      <button class="chip" data-s="updatewait">Update · waits</button>
     </div>
     <div class="group"><span class="label">Phase 7–8</span>
       <button class="chip" data-s="drop">File drop</button>
@@ -671,6 +679,7 @@ a.chip { text-decoration: none; }
         <li><b>Chat is text, locked down and second:</b> answers stream in with <code>textContent</code>; no chat runs before the claude path is confirmed; a permission card always replaces the chat panel, which keeps streaming behind it; streaming never resizes the window and starts no endless animation.</li>
         <li><b>An explanation never decides:</b> "Explain this command" sits below Deny and Allow at a fixed height, never moves them, re-arms Allow when it opens or closes, never takes the keyboard to Allow, and its text is only text.</li>
         <li><b>Questions and plans are answered only by a click:</b> Claude Code's question (pick options) and plan (Approve plan / Keep planning) get a card; no rule, mode or timeout ever answers them, and the terminal asks meanwhile. "Send answer" and "Approve plan" arm after 600ms like Allow, Send only once every question has a pick; focus arrives on the first option or on Keep planning, never on a button that answers; Enter never answers. The page sends only option numbers. Question, option and plan text is agent text (plans are Markdown, built from text).</li>
+        <li><b>Updates install only on a click:</b> a newer release shows as one line above the sessions with Update (armed after 600ms like Allow, never focused first, Enter never presses it). While a card or question waits, or a chat or explanation runs, it says "Update after you answer" and can't be pressed: Bouncer never quits mid-decision. Off in Settings means no check at all.</li>
         <li><b>The ticker is numbers only:</b> <code>+N −M</code> lines for Edit / MultiEdit, <code>+N</code> for Write (the old file is never read). The label shortens first; the numbers are never cut.</li>
       </ol>
     </section>
@@ -1056,6 +1065,9 @@ function settings(confirming, hooksConfirm) {
     "Off by default. Opens Bouncer when you sign in."));
   list.append(setRow("Shortcut Ctrl+Alt+B", [el("span", "", "On"), toggle("Shortcut Ctrl+Alt+B", true, () => {})],
     "Opens Bouncer from anywhere. It never approves."));
+  list.append(setRow("Check for updates", [el("span", "", "On"), toggle("Check for updates", true, (e) => { const t = e.currentTarget; const on = t.getAttribute("aria-checked") !== "true"; t.setAttribute("aria-checked", String(on)); t.previousSibling.textContent = on ? "On" : "Off"; })],
+    "Once a day Bouncer reads the latest release file from GitHub; GitHub sees your IP address, nothing else about you is sent. Updates install only when you click Update. Off: no network at all."));
+  list.lastChild.querySelector(".hint").classList.add("wrap");
   b.append(list);
   island.append(b);
 }
@@ -1362,6 +1374,34 @@ Object.assign(STATES, {
       b.append(planCard(planMarkdown()));
       island.append(b);
     }, notes: ["Claude Code's ExitPlanMode: the plan, as Markdown built from text (roadmap a; links are text), scrolls in its box; the plan file's path is below it.", "Keep planning (outlined, where focus arrives) tells Claude Code no with fixed text. Approve plan arms after 600ms like Allow. Approving never changes the session's mode.", "The terminal shows the same plan meanwhile; whichever answers first wins.", "No plan text (no plan file): the box says so; read it in the terminal."] },
+});
+// ---- the updater (v0.8) ------------------------------------------------------
+function updateRow(waiting) {
+  const row = el("div", "update");
+  const t = el("span"); t.append(el("b", "", "Bouncer 0.8.1"), document.createTextNode(" is ready"));
+  const btn = el("button", "btn allow small");
+  btn.append(el("span", "arm"), el("span", "", waiting ? "Update after you answer" : "Update"));
+  btn.lastChild.style.position = "relative";
+  if (waiting) btn.disabled = true; else armOnVisible(btn);
+  btn.addEventListener("click", () => { btn.disabled = true; btn.lastChild.textContent = "Updating…"; });
+  row.append(t, btn);
+  return row;
+}
+Object.assign(STATES, {
+  update: { phase: "v0.8", title: "Update ready", render() {
+      island.className = "island open";
+      island.append(withGear(head("idle", "Bouncer", "· 2 sessions")));
+      const b = el("div", "body");
+      b.append(updateRow(false), sessions([S.a, S.d]));
+      island.append(b);
+    }, notes: ["Once a day (Settings, Check for updates: on by default) Bouncer reads the latest published release's latest.json on GitHub. Only a newer plain version is shown; never a draft, a prerelease or a downgrade.", "The line sits above the sessions. Update arms after 600ms like Allow; nothing installs before that click.", "Update downloads the installer, checks its signature, then runs it passively (a small progress bar, no questions): hooks, rules, settings and history stay, and Bouncer comes back by itself.", "Offline, GitHub down, a bad file or signature: nothing shows, no error; it tries again the next day.", "Bouncer-dev (a dev build) never checks or installs."] },
+  updatewait: { phase: "v0.8", title: "Update · waits", render() {
+      island.className = "island open";
+      island.append(withGear(head("working", "Bouncer", "· 2 sessions")));
+      const b = el("div", "body");
+      b.append(updateRow(true), sessions([S.b, S.a]));
+      island.append(b);
+    }, notes: ["A card or question waiting, or a chat or explanation running: Update says \"Update after you answer\" and can't be pressed, so Bouncer never quits in the middle of a decision.", "It's checked again after the download, just before the installer starts."] },
 });
 function answering() { const a = el("div", "answering"); a.append(el("span", "ic spin"), el("span", "", "Claude is answering…")); return a; }
 function errorBox(text) { return el("div", "reason", text); }
