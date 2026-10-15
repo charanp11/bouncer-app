@@ -1,0 +1,12 @@
+# gitleaks: the default rules, plus one narrow exception.
+[extend]
+useDefault = true
+
+# The updater's public key (crates/app/tauri.conf.json) is public by design:
+# installed copies check the installer's signature with it. Every minisign
+# public key starts with this base64 ("untrusted comment: minisign public
+# key:"). A private key file starts differently ("...rsign encrypted secret
+# key") and is still caught.
+[allowlist]
+description = "minisign public keys"
+regexes = ['''^dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6''']
