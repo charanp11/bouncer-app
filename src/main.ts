@@ -17,6 +17,7 @@ import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
 import { ready, toggle as togglePick, type Question } from "./questions.ts";
+import { updateButton, type Update } from "./update.ts";
 import "./styles.css";
 
 type Line = { n: number | null; mark: string; text: string };
@@ -72,7 +73,7 @@ type Away = {
   stuck: { minutes: number; project: string; what: string } | null;
 };
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
-type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>>; shortcut: boolean };
+type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>>; shortcut: boolean; updates: boolean };
 /** Read-only facts for the settings screen (asked for when it opens). */
 type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown";
 /** `autostart`: null where it isn't offered (macOS for now). */
@@ -102,6 +103,8 @@ type View = {
   prefs: Prefs;
   /** Once, from the tray's "Wipe history…": open Settings at its confirm step. */
   confirmWipe?: boolean;
+  /** A newer release found by the daily check (release builds only). */
+  update: Update | null;
 };
 
 /** Allow stays disabled this long after a card reaches the front. */
@@ -1157,6 +1160,7 @@ function renderSettings(view: View, state: BallState) {
   list.append(hooksRow(about?.hooks));
   if (typeof about?.autostart === "boolean") list.append(autostartRow(about.autostart));
   list.append(shortcutRow(prefs.shortcut, !!about?.shortcutTaken));
+  list.append(updatesRow(prefs.updates));
 
   const body = el("div", "body");
   body.dataset.screen = "settings";
@@ -1413,6 +1417,7 @@ function draw(view: View) {
     setShape("open");
     const body = el("div", "body");
     body.dataset.screen = "sessions";
+    if (view.update) body.append(updateRow(view, view.update));
     body.append(...rulesNotes(view), view.sessions.length ? sessionRows(view.sessions) : el("p", "none", "No sessions yet"));
     const close = () => {
       detail = null;
@@ -1880,6 +1885,56 @@ function shortcutRow(on: boolean, taken: boolean): HTMLElement {
   sw.dataset.key = "shortcut";
   const hint = on && taken ? "Another app has Ctrl+Alt+B, so it does nothing here." : "Opens Bouncer from anywhere. It never approves.";
   return setRow("Shortcut Ctrl+Alt+B", [el("span", "", on ? "On" : "Off"), sw], hint);
+}
+
+/** Settings' "Check for updates": on by default; off means no check at all
+ * (and a release already found is no longer offered). */
+function updatesRow(on: boolean): HTMLElement {
+  const sw = toggle("Check for updates", on, () => {
+    sw.disabled = true;
+    invoke("set_updates", { on: !on })
+      .catch(() => {})
+      .finally(() => {
+        refocus = "updates";
+        if (current) render(current);
+      });
+  });
+  sw.dataset.key = "updates";
+  const row = setRow("Check for updates", [el("span", "", on ? "On" : "Off"), sw], UPDATES_HINT);
+  // Read whole: it says exactly what goes over the network.
+  row.querySelector(".hint")?.classList.add("wrap");
+  return row;
+}
+
+const UPDATES_HINT = "Once a day Bouncer reads the latest release file from GitHub; GitHub sees your IP address, nothing else about you is sent. Updates install only when you click Update. Off: no network at all.";
+
+/** When the update line first showed (its button arms like Allow). */
+let updateSince = 0;
+let updateShown = "";
+
+/** The update line above the sessions (prototype v0.29): nothing installs
+ * before its button; it waits while a card is up or a chat is answering. */
+function updateRow(view: View, update: Update): HTMLElement {
+  if (updateShown !== update.version) {
+    updateShown = update.version;
+    updateSince = performance.now();
+  }
+  const busy = view.queue.length > 0 || chat.busy;
+  const state = updateButton(update, busy);
+  const row = el("div", "update");
+  const text = el("span");
+  text.append(el("b", "", `Bouncer ${update.version}`), " is ready");
+  const button = armed(state.label, updateSince);
+  button.classList.add("small");
+  button.dataset.key = "update";
+  if (!state.enabled) button.disabled = true;
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    // Refused (busy, offline, a bad signature): the line shows its state again.
+    invoke("update_install").catch(() => {}).finally(() => current && render(current));
+  });
+  row.append(text, button);
+  return row;
 }
 
 /** Settings' "Start with Windows": off by default; the switch writes only
