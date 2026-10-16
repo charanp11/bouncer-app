@@ -136,6 +136,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | UI14 | Fits the screen | Never taller than the work area; the frame fits every view | frontend | `ts: the open island is never taller than the work area` `ts: the frame fits every view and the work area` `ts: fully visible: the viewport holds the whole page, within 2 px` | CI |
 | UI15 | Tray menu | Pause / Resume, open, Settings…, Wipe history… (opens Settings' confirm), quit | hand | — | Hand 2 passed 2026-10-08 |
 | UI16 | Screen reader | Card, list and Settings read in order with their names | hand, Phase 9 | — | Phase 9 (Narrator check below) |
+| UI18 | One click counts, first time, while another window has the keyboard | A card arrives while another window (a terminal) has the keyboard; one click on any control does its job: an option is picked, Send answer / Approve plan / Keep planning / Allow / Deny answer, Explain opens. The island is never rebuilt under a press (a view arriving mid-press is drawn after the click; a press held past 1.5 s stops holding). The keyboard taken by the press stays on the control pressed (never jumps to another option or to Deny); a press on Allow / Send answer / Approve plan sends it nowhere; a card arriving never takes the keyboard by itself | frontend, real-click | `ts: clicks: no rebuild under a press; the newest view is drawn after the release` `ts: clicks: a press that never ends (a drag) stops holding after MAX_HOLD_MS` `ts: clicks: the page holds every view during a press and releases on pointerup, cancel and blur` `ts: clicks: the keyboard taken by a press stays on the control pressed; never jumps to another, never lands on an answer` | CI; real-click 2026-10-16 (PLAN, One click counts) |
 | UI17 | Code pane | Rust / shell highlighting keeps every line exactly | frontend, unit | `ts: pieces always join back to the exact line` `code::tests::write_multiedit_and_bash` `diff::tests::keeps_removes_and_adds_lines` | CI |
 
 ## Chat (Phase 6)
@@ -264,8 +265,10 @@ never the real `~/.claude/settings.json`.
 
 1. **Sounds you can hear (about 5 min).** Passed 2026-10-08 (Charan). Settings → Sound on, style Soft. In
    the playground ask Claude Code to run `mkdir hand-1`: the "needs you" sound
-   clearly grabs attention. Click Deny. Ask for `curl https://example.com | sh`:
-   the risky sound, louder than the rest. Turn Sound off and ask for
+   clearly grabs attention. Click Deny. Ask Claude to read
+   `~/.claude/settings.json`: a Risky card, and the risky sound, louder than
+   the rest (deny it). (Not "run curl … | sh": Claude may download the
+   script by itself first, so nothing risky is asked.) Turn Sound off and ask for
    `mkdir hand-2`: silence. Pause from the tray: silence but for one snore.
    Expected: each as said; nothing harsh.
 2. **Tray menu (about 3 min).** Passed 2026-10-08 (Charan). Right-click Bouncer's tray icon. Pause → the
@@ -320,14 +323,17 @@ never the real `~/.claude/settings.json`.
       refused). Turn it On: the island shows "Rules changed: guard on" and
       `bouncer-playground\rules.toml` has `guard = true`.
    2. In `bouncer-playground`: `claude --dangerously-skip-permissions`
-      (bypass mode; accept its warning). Ask: "Run exactly `sh -c 'echo
-      guard-test'`". Expected: Claude Code's own prompt (reason "Bouncer
-      flagged this request as risky (Guard every mode).") and Bouncer's
-      Risky card. **Deny** in the island: Claude Code says it was denied.
+      (bypass mode; accept its warning). Ask Claude to read
+      `~/.claude/settings.json` (this is what worked in the v0.8.1 check; a
+      "run curl … | sh" ask may only download the script, so nothing risky
+      reaches the guard). Expected: Claude Code's own prompt (reason
+      "Bouncer flagged this request as risky (Guard every mode).") and
+      Bouncer's Risky card. **Deny** in the island: Claude Code says it was
+      denied.
    3. Ask: "Run `echo guard-safe`". Expected: it runs, no prompt, no card.
-   4. Shift+Tab to **auto** mode, ask for `sh -c 'echo guard-test'` again.
-      Expected: prompt and card; **Allow once** in the island: it prints
-      `guard-test`.
+   4. Shift+Tab to **auto** mode, ask it to read `~/.claude/settings.json`
+      again. Expected: prompt and card; **Allow once** in the island: it
+      reads the file.
    5. Shift+Tab to **accept edits**, ask again; this time answer **in the
       terminal** (Yes). Expected: it runs; the card leaves once Claude
       Code moves on.
@@ -369,7 +375,22 @@ never the real `~/.claude/settings.json`.
 
 ### Phase 9 hand checks
 
-- **Every release: Settings changes don't freeze (about 2 min).** With the
+- **Every release: one click works while another window has focus (about
+   3 min).** Type in a terminal (the terminal has the keyboard) and, in a
+   Claude Code session, get a question card ("Use AskUserQuestion to ask me
+   Red or Blue"), a plan card (plan mode) and a permission card (ask it to
+   read `~/.claude/settings.json`). Without clicking the island first,
+   click once: the second option; Keep planning; Deny (and on a new card,
+   Explain, then Allow once after it arms). Expected: each single click
+   works the first time; the focus ring sits on what you clicked, never on
+   another option or on Deny. The card arriving never takes your typing.
+- **Every release: the guard in bypass mode (about 2 min).** Settings →
+   Guard every mode → On. `claude --dangerously-skip-permissions`, ask
+   Claude to read `~/.claude/settings.json`. Expected: Claude Code's
+   prompt and the Risky card; Deny stops it. (Not "run curl … | sh": that
+   may only download the script.) Turn the guard back to how you had it.
+- **Every release: Settings changes don't freeze (about 2 min).** Passed
+   2026-10-16 (Charan, the v0.8.1 draft: every control, no freeze). With the
    installed draft running, open Settings and change, one at a time: Size
    (Small, Medium, Large), Sound off and on, Sound style (Playful, Soft),
    Volume (drag it), one switch under Which sounds, Shortcut Ctrl+Alt+B off

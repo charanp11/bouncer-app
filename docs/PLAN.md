@@ -3750,6 +3750,54 @@ first release with c2, Guard every mode and the updater; its notes
 released. `release-notes.mjs` skips v0.8.0 (`NEVER_RELEASED`), so
 v0.8.1's changes are listed since v0.7.0.
 
+**v0.8.1 published (Charan, 2026-10-16).** Manual checks (Charan, the
+v0.8.1 draft's installer, his own desktop): the hash matched; every
+Settings control changed one at a time, no freeze; Guard every mode in
+bypass mode (asked Claude to read `~/.claude/settings.json`: it used Read,
+the Risky card came, Deny stopped it); a question answered from the
+island. Found: (1) the hand checks' "run curl … | sh" doesn't test the
+guard (Claude downloads the script by itself first, so nothing risky
+reaches it): the hand checks now ask Claude to read
+`~/.claude/settings.json`; (2) the bug below.
+
+**One click counts (2026-10-16, found in the v0.8.1 check).**
+
+Bug (Charan): while he typed in a terminal a question card came; his click
+on "Blue" didn't register and the focus ring jumped to "Red"; it took a
+second click. Reproduced on the test instance (real clicks behind
+`rc.ps1`'s guard, a black backdrop standing in for the terminal and
+holding the keyboard, every pointer / click / focus event logged in the
+page over CDP):
+
+- The ring: every time. The press asks for the keyboard (`pointerdown` →
+  `keyboard`); when it arrives, `placeFocus` put focus on the card's start
+  (`arrivalFocus`: the first option, Keep planning, Deny), not on what
+  was pressed.
+- The lost click: a view arriving between press and release rebuilds the
+  card (`replaceChildren`), and WebView2 then fires `pointerup` on the new
+  element but never `click`. Shown by forcing one view 100 ms into a
+  400 ms press: no click. In a real session views arrive all the time
+  (Claude Code working, the keyboard handover itself). Five plain clicks
+  (fast, held 400 ms, 60 views a second from another session, a fresh
+  instance) all counted, which is why it only shows sometimes.
+
+Fix (one PR with the hand check wording, for v0.8.2): `src/press.ts`, a
+`PressGate`: from `pointerdown` until the press ends (`pointerup`,
+`pointercancel`, the window's `blur`; at most 1.5 s, so a drag can't stall
+the island) a view waits and is drawn right after the click. The keyboard
+taken by a press stays on the control pressed (`arrivalFocus` with any of
+the card's own controls: options, Deny, Keep planning, the plan's box,
+Explain); a press on Allow, Send answer or Approve plan sends it nowhere
+(its click answers), so focus is still never put on an answer. The island
+still never takes the keyboard by appearing (unchanged).
+
+Verify (2026-10-16, test instance from this branch, real clicks, the
+backdrop holding the keyboard each time, a view forced into every press):
+question second option (picked; focus on it), Send answer, Keep planning,
+Approve plan, Deny, Allow once (each answered; focus nowhere), Explain
+(box open; focus on Explain): 7 of 7, the click ran every time and the
+rebuild came after it. The old build, the same forced view: no click.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
