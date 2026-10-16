@@ -81,6 +81,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | U6 | preferences.json corrupt or missing | Defaults, per field; unknown sound names refused | unit, frontend | `prefs::tests::missing_file_gives_defaults_and_save_reads_back` `prefs::tests::unknown_or_broken_values_fall_back_per_field` `prefs::tests::sounds_from_names_refuses_unknown_names` `ts: the pack is exactly the sounds preferences.json knows, in its order` | CI |
 | U7 | Wipe history | Settings → Wipe… → confirm: Cancel keeps everything; "Delete history" is armed; then every day file and the summary are deleted, only our files, the pill says so, logging carries on | unit, real-click (page-level) | `activity::tests::old_days_are_deleted_and_wipe_deletes_all` `approvals::tests::coming_back_shows_a_summary_until_closed_and_wipe_empties_it` | CI; real-click 2026-10-08 |
 | U9 | One wipe path | Only Settings' armed "Delete history" (after its confirm) wipes; the tray's "Wipe history…" opens that same confirm and never wipes by itself. The one documented exception: uninstall's data box (W7) | unit, frontend, hand | `tests::only_the_confirmed_wipe_command_wipes` `ts: the page wipes only from the armed Delete history after its confirm` `ts: the tray's Wipe history… opens that confirm, never wipes` | CI; Hand 2 passed 2026-10-08 |
+| U10 | Settings changes never freeze Bouncer | Size, Sound, Sound style, Volume, Which sounds, the shortcut and Check for updates all go through one `update_prefs`, which holds the preferences lock only to copy and to store (never while making or saving the change); a change that hangs fails the test after 10 s instead of hanging it; no statement in the app takes the same lock twice (the check also flags 0.8.0's `set_prefs`); real clicks on each control: still responding, backend answers, setting saved | unit, real-click | `tests::settings_changes_never_hold_the_preferences_lock` `tests::no_statement_takes_the_same_lock_twice` | CI; real-click 2026-10-16 (PLAN, Settings freeze) |
 | U8 | Rules added one at a time | Appended atomically, read back exactly | unit | `rules::tests::add_appends_one_rule_atomically` `rules::tests::scoped_rules_read_back_exactly` `rules::tests::rules_read_back_from_their_toml` `rules::tests::scoped_rule_keys_are_checked` | CI |
 
 ## Redaction and the activity log
@@ -244,7 +245,7 @@ command does and what could go wrong. It never decides.
 | UP4 | Dev builds and busy islands | Bouncer-dev never checks or installs; install refused while a card waits or a chat / explanation runs, checked before and after the download; only the Update button installs | unit | `update::tests::dev_builds_never_update_and_a_busy_island_waits` | CI |
 | UP5 | The update line | Built to prototype v0.29: "Bouncer X.Y.Z is ready" above the sessions, Update armed like Allow; "Update after you answer" while a card is up or a chat answers; "Updating…" while it installs; the page sends `update_install` with no arguments | frontend | `ts: update: Update waits while you're answering, and while it installs` `ts: update: the page only asks to install (no arguments) and flips the switch; the button arms like Allow` | CI; test instance 2026-10-15 (PLAN, Updater) |
 | UP6 | The commands | `set_updates` (a bool) and `update_install` (no arguments) granted; no updater plugin permission for the page | unit | `tests::strict_csp_and_only_our_commands` | CI |
-| UP7 | The release | The installer is built with no secrets; only the next step gets the updater key and runs only the pinned Tauri CLI's `signer sign` on it; latest.json (version, date, windows-x86_64 url + signature) is refused unless the signature's key ID is the configured public key's; the draft carries it; installer and CI builds never sign; v0.8.0's notes say 0.7.0 users install by hand once | frontend (workflow checks) | `ts: updater: the key reaches only the step that signs the finished installer; the draft carries latest.json` `ts: updater: latest.json points at this release's installer with its signature` `ts: v0.8.0's notes say 0.7.0 users install it by hand once, and how updates work` | CI |
+| UP7 | The release | The installer is built with no secrets; only the next step gets the updater key and runs only the pinned Tauri CLI's `signer sign` on it; latest.json (version, date, windows-x86_64 url + signature) is refused unless the signature's key ID is the configured public key's; the draft carries it; installer and CI builds never sign; v0.8.1's notes (the first release with these features; 0.8.0 never released) say 0.7.0 users install by hand once; a never-released tag (v0.8.0) is skipped by the notes | frontend (workflow checks) | `ts: updater: the key reaches only the step that signs the finished installer; the draft carries latest.json` `ts: updater: latest.json points at this release's installer with its signature` `ts: v0.8.1's notes: the first release with these features, 0.8.0 never released, 0.7.0 users install it by hand once` | CI |
 | UP8 | A real update | 0.8.0 installed, 0.8.1 published: the line shows within a day (or at start), Update installs passively and Bouncer comes back with hooks, rules, settings and history; offline: nothing shown | hand (after v0.8.1) | — | after the next release |
 
 ## macOS
@@ -367,6 +368,15 @@ never the real `~/.claude/settings.json`.
    version) and here.
 
 ### Phase 9 hand checks
+
+- **Every release: Settings changes don't freeze (about 2 min).** With the
+   installed draft running, open Settings and change, one at a time: Size
+   (Small, Medium, Large), Sound off and on, Sound style (Playful, Soft),
+   Volume (drag it), one switch under Which sounds, Shortcut Ctrl+Alt+B off
+   and on, Guard every mode on and off, Check for updates off and on.
+   Expected after each: the island answers at once (Settings scrolls, the
+   next click works); Windows never shows "Not responding". (0.8.0's draft
+   froze on Size; PLAN, "Settings freeze".)
 
 - **v0.7.0 on a real desktop (about 15 min).** Passed 2026-10-13 (Charan,
    Claude Code 2.1.295, the draft's installer): install, SmartScreen, hooks
