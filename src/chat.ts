@@ -191,15 +191,30 @@ export function heldCard(held: string, card: string | null, newCard: boolean, ha
 // The locked chat explains a waiting card's shell command. It only reads:
 // nothing here can answer the card, and the card's buttons never wait on it.
 
-/** Where the keyboard goes when it arrives with a card up: Deny, unless
- * the press that brought it was on that card's Explain control or its box
- * (`pressed`, as `explain:<id>`), where it stays. Never Allow. */
+/** `pressed` for a press on an answer that acts (Allow, Send answer,
+ * Approve plan): the keyboard arriving with it goes nowhere. */
+export const PRESSED_ANSWER = "answer";
+
+/** One of this card's own controls that may hold the keyboard: an option,
+ * Deny, Keep planning, the plan's box, Explain (or its box). Never Allow,
+ * Send answer or Approve plan. */
+function ownControl(card: string, key: string): boolean {
+  return [`explain:${card}`, `deny:${card}`, `keep:${card}`, `plan:${card}`].includes(key) || key.startsWith(`opt:${card}:`);
+}
+
+/** Where the keyboard goes when it arrives with a card up. Brought by a
+ * press on one of that card's own controls (`pressed`, its focus key): it
+ * stays there, so the ring follows the click (Charan, 2026-10-16). Brought
+ * by a press on an answer that acts (`PRESSED_ANSWER`): nowhere (""). Else
+ * the card's own start: a question's first option (a pick only selects), a
+ * plan's Keep planning (the "no"), a permission's Deny. Never Allow, Send
+ * answer or Approve plan. */
 export function arrivalFocus(card: string, pressed: string | null, kind = "permission"): string {
-  // A question: its first option (a pick only selects, it never sends).
-  // A plan: Keep planning (the "no"). Never Send answer or Approve plan.
+  if (pressed === PRESSED_ANSWER) return "";
+  if (pressed && ownControl(card, pressed)) return pressed;
   if (kind === "question") return `opt:${card}:0:0`;
   if (kind === "plan") return `keep:${card}`;
-  return pressed === `explain:${card}` ? pressed : `deny:${card}`;
+  return `deny:${card}`;
 }
 
 /** Cards whose command can be explained (the backend checks again). */

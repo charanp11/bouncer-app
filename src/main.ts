@@ -12,12 +12,13 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, arrivalFocus, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
+import { apply, arrivalFocus, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
 import { ready, toggle as togglePick, type Question } from "./questions.ts";
 import { updateButton, type Update } from "./update.ts";
+import { PressGate } from "./press.ts";
 import "./styles.css";
 
 type Line = { n: number | null; mark: string; text: string };
@@ -158,6 +159,13 @@ const stage = document.getElementById("stage")!;
 const island = document.getElementById("island")!;
 
 let current: View | null = null;
+/** No rebuild under a press: a view arriving mid-click waits for the release
+ * (press.ts), so one click always counts. */
+const gate = new PressGate<View>(
+  (view) => render(view),
+  (f) => setTimeout(f, 0),
+  () => performance.now(),
+);
 /** The request shown at the front, and since when it has been fully
  * visible (for the arm delay); 0 = not fully visible yet. */
 let front = { id: "", since: 0 };
@@ -1181,6 +1189,8 @@ function rulesBadge(view: View): Badge | undefined {
  * drawn again; anything else starts at the top.
  * The island morphs from the box it had to the one it gets (motion below). */
 function render(view: View) {
+  // A press in progress: this view is drawn after its click (press.ts).
+  if (gate.hold(view)) return;
   // The tray's "Wipe history…" lands on the same confirm as Settings' Wipe….
   if (view.confirmWipe && !wiping) {
     wiping = true;
@@ -1251,11 +1261,19 @@ function placeFocus(view: View, had: string | null, before: string, keyboardBefo
     refocus = null;
     return;
   }
-  // The keyboard arriving with this card up goes to Deny, unless the press
-  // that took it was on the card's Explain control: it stays there.
+  // The keyboard arriving with this card up goes to the card's start (Deny,
+  // the first option, Keep planning), unless a press on one of the card's
+  // own controls brought it: it stays on that control (arrivalFocus).
   const arrived = newCard && card.id === before && !keyboardBefore;
   const target = newCard ? arrivalFocus(card.id, arrived ? pressed : null, card.kind) : had;
   pressed = null;
+  if (target === "") {
+    // A press on Allow, Send answer or Approve plan: its click answers; focus goes nowhere.
+    const now = document.activeElement;
+    if (now instanceof HTMLElement && island.contains(now)) now.blur();
+    refocus = null;
+    return;
+  }
   let next = (target ? findKey(target) : undefined) ?? (refocus ? findKey(refocus) : undefined);
   // Nothing to go back to (the keyboard just arrived, or the focused control
   // went, e.g. a row that opened its detail): the first control (in the body
@@ -2123,15 +2141,26 @@ document.addEventListener("keydown", (e) => {
 island.addEventListener(
   "pointerdown",
   (e) => {
+    // Nothing is rebuilt under this press until it ends (press.ts).
+    gate.press();
     pressed = null;
     if (!current?.open || current.keyboard) return;
-    // This press takes the keyboard: remember if it was on Explain (or its box).
-    const x = e.target instanceof Element ? e.target.closest<HTMLElement>(".explainbtn, .explain") : null;
+    // This press takes the keyboard: remember the control it was on, so the
+    // keyboard stays there (arrivalFocus): Explain (or its box), or any other
+    // control; an answer that acts only as PRESSED_ANSWER (focus nowhere).
+    const target = e.target instanceof Element ? e.target : null;
+    const x = target?.closest<HTMLElement>(".explainbtn, .explain");
     if (x) pressed = x.dataset.key ?? `explain:${x.dataset.explain}`;
+    else if (target?.closest(".btn.allow")) pressed = PRESSED_ANSWER;
+    else pressed = focusKey(target?.closest("button, [tabindex], input, textarea, summary") ?? null);
     invoke("keyboard", { on: true });
   },
   true,
 );
+// The press ended (or the window lost focus mid-press): the view that waited is drawn.
+window.addEventListener("pointerup", () => gate.release(), true);
+window.addEventListener("pointercancel", () => gate.release(), true);
+window.addEventListener("blur", () => gate.release(), true);
 
 // Esc gives the keyboard back: settings and the session list close; a card
 // stays (it can only be answered), but the keyboard goes back anyway.
