@@ -3798,6 +3798,112 @@ Approve plan, Deny, Allow once (each answered; focus nowhere), Explain
 (box open; focus on Explain): 7 of 7, the click ran every time and the
 rebuild came after it. The old build, the same forced view: no click.
 
+**v0.8.2 published (Charan, 2026-10-16).** Manual checks (Charan, his own
+desktop): TESTS UP8 passed, the first real update: his installed 0.8.1
+showed "Bouncer 0.8.2 is ready" after he started it; Update installed it
+with no SmartScreen prompt; Windows' Installed apps shows Bouncer 0.8.2;
+the guard, settings and hooks unchanged (offline not checked). The option
+click fix confirmed (UI18): one click on Blue picked it the first time,
+ring on it. Found: (1) after picking Blue, his first click on Send didn't
+answer, the second did (below); (2) Installed apps shows Publisher
+"github"; (3) the chat's "Plan use: 5-hour — · 7-day —" before the first
+message after a restart looks broken.
+
+**Every click counts (2026-10-16, for v0.8.3).**
+
+Charan's rules: the arm delay protects against a card appearing under the
+pointer, so it counts from when the card became fully visible, never from
+the last pick; a deliberate Send after picking works the first time; no
+click is ever silently swallowed: a control that isn't ready looks it, and
+Allow keeps its arm. Audit with real clicks on the test instance, the
+keyboard elsewhere, quick clicks the moment a control is ready and while
+redraws land.
+
+Audit (test instance from this branch, real clicks behind `rc.ps1`'s
+guard, the black backdrop holding the keyboard, events logged in the
+page; Claude Code 2.1.295 for the real sessions):
+
+- Send after a pick, not reproduced: 9 runs (fixture card and real
+  Claude Code sessions in the test config folder; picks then Send 100 to
+  1000 ms later; a fresh hidden island; Size Small; 9 s on the card first)
+  all answered with the first Send. Send was already enabled at its
+  press each time: the pick never restarted the arm (the page's arm only
+  starts in `armIfVisible`, once per card).
+- What could swallow a Send silently, found in the code: (a) a refused
+  answer (`answer` / `decide` / `plan` rejected: too soon, picks that
+  don't fit, already answered) cleared the toast and redrew the card with
+  no word; (b) an incomplete Send (no pick yet) ran the arm's fill on
+  every redraw, so a disabled button looked like it was arming; (c) the
+  arm started a little before the card was on screen: `fit` is a sync
+  (main-thread) command but queued the window layout with
+  `run_on_main_thread`, which runs after the reply, and the page starts
+  the arm on the reply.
+- A real lost click, found by the audit: the gear. With the keyboard
+  elsewhere, 7 of 10 gear clicks opened Settings and the island snapped
+  back to the session list within 10 ms (the backend still thought
+  Settings was open). Cause: `PressGate.release()` (0.8.2, #44) took the
+  view that waited under the press and drew it on a timer; the click's own
+  newer view (Settings open) was drawn first, then the stale one over it.
+  The same can undo any click whose answer is a new view, which is the
+  most likely cause of Charan's Send.
+
+Fix:
+
+- `src/press.ts`: the waited view is taken when the timer runs, and a view
+  drawn in between clears it: a stale view is never drawn over a newer one.
+- `src/arm.ts` (`armState`): one place for an armed button's look:
+  waiting (not on screen yet, no fill), arming (the fill carries on from
+  the card's time), blocked (a question without a pick, an update that
+  waits: disabled, no fill), ready. `armed(label, since, enabled)` uses it
+  for Allow, Send answer, Approve plan, Add rule and allow, Turn on
+  auto-allow, Write changes, Delete history and Update.
+- A press on a disabled control shakes it (an outline under reduced
+  motion): visible, never silent. A refused answer shows "Not sent: <why>.
+  Try again." under the card's buttons for 4 s.
+- `fit` lays the window out before it replies (the window holds the card
+  when the arm starts). Measured with a spin watcher on the window's
+  region (one clock): card on screen at 0 ms, `fit` replies at +8 to
+  +13 ms, the arm starts at +16 ms, Allow ready at +624 to +630 ms (3 runs).
+- A next-frame visibility check after each render (a card already held by
+  the window arms without waiting for a resize or a reply).
+
+Extras (same PR): the installer's Publisher is "Charan"
+(`bundle.publisher`; the installer test checks the uninstall entry);
+"Bouncer 0.8.3" at the bottom of Settings (the build's version from
+`about`, text only); the chat's plan use says "Plan use shows after your
+first message" until a reply brings a reading. Cause confirmed: the
+reading only comes as Claude Code's `rate_limit_event` inside a chat
+reply, and chats are memory-only, so a restart has none. Nothing stored,
+no call of its own.
+
+Verify (2026-10-16, test instance from this branch, audit mode: a scratch
+Run key, a scratch Claude config folder, the repo's fake `claude` first on
+PATH; nothing reaches the real profile). Real clicks, one per row, the
+backdrop holding the keyboard first:
+
+| Area | Controls (scenario) | First click worked |
+| --- | --- | --- |
+| Question card | Blue (first click), Send answer right after the pick; Red while a redraw lands, Send the moment it's ready | 4 / 4 |
+| Question card, inside the arm | Pick at +60 ms, Send at +399 ms after the card is on screen: Send looked arming, the press shook it, nothing sent; Send at +632 ms answered | as designed |
+| Permission card | Allow once the moment it arms; Allow once while a redraw lands; Deny right as the card shows; Deny after Explain | 4 / 4 |
+| Plan card | Approve plan the moment it arms; Keep planning right as the card shows | 2 / 2 |
+| Always allow | Always allow…, Cancel, Always allow… again while a redraw lands, Add rule and allow the moment it arms | 4 / 4 |
+| Explain | Explain this command, Stop while it streams, Hide | 3 / 3 |
+| Session list | Pill, a session row, Close (detail), a row while a redraw lands | 4 / 4 |
+| Chat | Ask Claude (open), Send, Cancel while it streams, New chat, Close; the plan-use line before the first message | 5 / 5 |
+| Settings | Gear (10 / 10, was 3 / 10), Size Small / Large / Medium in quick succession, Sound off / on, Sound style Playful / Soft, Volume (a click on the track), Which sounds, a sound's switch off / on, Auto-allow → Cancel, → Turn on auto-allow the moment it arms, off; Guard every mode on / off; Wipe… → Cancel, → Delete history the moment it arms (scratch history); Confirm this path (the scratch fake); hooks Install… → Cancel, → Write changes the moment it arms, Remove… → Cancel (scratch settings.json); Start with Windows on / off (scratch Run key); Shortcut on / off; Check for updates off / on; Close | every one (two audit runs; Remove… → Cancel clicked singly) |
+
+Not driven by real clicks: the update line's Update button (it shows only
+in a release build with a newer release; Charan's UP8 click on 0.8.2
+worked first time; `armed(…, state.enabled)` covered by the frontend
+test) and the tray menu (the notification area is Explorer's window,
+outside what the guard lets a test click; Charan's release hand check
+covers it). The audit's own misses were all script errors, each checked
+by hand: a stale selector for the chat log, clicking the detail's × while
+its 320 ms open animation still moved it, a hooks button below the
+scrolled area (the guard refused the click, as it should), state left by
+an earlier run.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
