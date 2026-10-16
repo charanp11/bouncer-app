@@ -14,7 +14,7 @@ test("update: Update waits while you're answering, and while it installs", () =>
 test("update: the page only asks to install (no arguments) and flips the switch; the button arms like Allow", () => {
   const calls = [...main.matchAll(/invoke\("(update_install|set_updates)"([^)]*)\)/g)].map((m) => `${m[1]}${m[2]}`);
   assert.deepEqual(calls, ["set_updates, { on: !on }", "update_install"]);
-  assert.match(main, /const button = armed\(state\.label, updateSince\);/);
+  assert.match(main, /const button = armed\(state\.label, updateSince, state\.enabled\);/);
   assert.match(main, /const busy = view\.queue\.length > 0 \|\| chat\.busy;/);
   // The version is agent-free but still text only.
   assert.match(main, /el\("b", "", `Bouncer \$\{update\.version\}`\)/);
@@ -25,4 +25,12 @@ test("update: Settings says what the check does, word for word as the prototype"
   const hint = /setRow\("Check for updates", \[[^\n]*\],\n {4}"([^"]+)"/.exec(proto)?.[1];
   assert.ok(hint, "prototype hint");
   assert.ok(main.includes(JSON.stringify(hint)), "same hint in the page");
+});
+
+test("settings: the version shows at the bottom of Settings, as text, from the backend", () => {
+  assert.match(main, /if \(about\?\.version\) body\.append\(el\("div", "version", `Bouncer \$\{about\.version\}`\)\);/);
+  const rust = readFileSync(new URL("../crates/app/src/main.rs", import.meta.url), "utf8");
+  assert.match(rust, /"version": app\.package_info\(\)\.version\.to_string\(\),/);
+  const conf = JSON.parse(readFileSync(new URL("../crates/app/tauri.conf.json", import.meta.url), "utf8"));
+  assert.equal(conf.bundle.publisher, "Charan", "Installed apps' Publisher (not the identifier's \"github\")");
 });

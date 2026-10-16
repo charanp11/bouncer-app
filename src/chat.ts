@@ -147,6 +147,10 @@ export function sendError(code: string): string {
   }
 }
 
+/** Shown in place of the plan's use until a chat reply brings a reading
+ * (chats are memory-only: after a restart there is none). */
+export const NO_USAGE_YET = "Plan use shows after your first message";
+
 /** 0.23 → "23%"; unknown → "—". */
 export function percent(x: number | null | undefined): string {
   return typeof x === "number" && Number.isFinite(x) ? `${Math.round(Math.min(1, Math.max(0, x)) * 100)}%` : "—";

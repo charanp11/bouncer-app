@@ -420,9 +420,37 @@ pre.cmd {
   animation: arm var(--arm) linear forwards;
 }
 
-/* Not fully visible yet: the arm hasn't started. */
-.btn.allow.waiting .arm {
+/* Not fully visible yet (the arm hasn't started), or blocked: no fill. */
+.btn.allow.waiting .arm,
+.btn.allow.blocked .arm {
   animation: none;
+}
+
+/* A press on a control that isn't ready yet: it says so (never silent). */
+.notyet {
+  animation: notyet 260ms ease-out;
+}
+
+@keyframes notyet {
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notyet {
+    animation: none;
+    outline: 1px solid var(--muted);
+  }
+}
+
+.notsent {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .btn.allow .label {
@@ -752,9 +780,10 @@ pre.cmd {
   overflow-wrap: anywhere;
 }
 
-/* Not every question has a pick yet. */
-.btn.allow.incomplete,
-.btn.allow.incomplete:hover {
+/* Can't be pressed yet for another reason (a question without a pick, an
+   update that waits): disabled, and no arm fill. */
+.btn.allow.blocked,
+.btn.allow.blocked:hover {
   cursor: default;
   background: rgba(238, 240, 244, 0.18);
   color: var(--muted);
@@ -2013,6 +2042,14 @@ pre.cmd {
 .usage {
   font-size: 11.5px;
   line-height: 1.4;
+  color: var(--faint);
+  text-align: center;
+}
+
+/* Settings' last line: the version, text only. */
+.version {
+  margin-top: 10px;
+  font-size: 11.5px;
   color: var(--faint);
   text-align: center;
 }

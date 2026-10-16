@@ -17,9 +17,8 @@ test("the page sends only the card's ID and option numbers, or approve / keep", 
 });
 
 test("Send answer and Approve plan arm like Allow (so Enter never reaches them); a pick never sends", () => {
-  assert.match(main, /const send = armed\("Send answer", front\.since\);/);
+  assert.match(main, /const send = armed\("Send answer", front\.since, ready\(picked\.chosen, qs\.length\)\);/);
   assert.match(main, /const approve = armed\("Approve plan", front\.since\);/);
-  assert.match(main, /if \(!ready\(picked\.chosen, qs\.length\)\) \{\s+send\.disabled = true;/);
   const pick = main.slice(main.indexOf("// A pick only selects"), main.indexOf("opts.append(b);"));
   assert.doesNotMatch(pick, /invoke\(/);
   // Question, option and plan text go in as agent text (red tags for hidden characters).
