@@ -12,13 +12,14 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, arrivalFocus, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
+import { apply, arrivalFocus, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
 import { ready, toggle as togglePick, type Question } from "./questions.ts";
 import { updateButton, type Update } from "./update.ts";
 import { PressGate } from "./press.ts";
+import { ARM_MS, armState } from "./arm.ts";
 import "./styles.css";
 
 type Line = { n: number | null; mark: string; text: string };
@@ -78,7 +79,7 @@ type Prefs = { size: string; sound: boolean; style: Style; volume: number; sound
 /** Read-only facts for the settings screen (asked for when it opens). */
 type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown";
 /** `autostart`: null where it isn't offered (macOS for now). */
-type About = { rules: string | null; hooks: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
+type About = { version?: string; rules: string | null; hooks: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
 type HooksChange = { id: string; path: string; diff: string };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
@@ -108,8 +109,8 @@ type View = {
   update: Update | null;
 };
 
-/** Allow stays disabled this long after a card reaches the front. */
-const ARM_MS = 600;
+/** "Not sent: …" under a card's buttons after the backend refused a click. */
+const NOT_SENT_MS = 4000;
 const TOAST_MS = 1400;
 /** "Rule added." stays a little longer (as the prototype). */
 const RULE_TOAST_MS = 1600;
@@ -458,10 +459,25 @@ function answer(request: Request, ok: boolean, text: string | undefined, call: (
   toast = shown;
   call()
     .then(() => play(ok ? "allowed" : "denied"))
-    .catch(() => {
+    .catch((code) => {
       if (toast === shown) toast = null;
+      // Never silent: the card comes back with why it didn't go through.
+      notSent = { id: request.id, text: `Not sent: ${String(code)}. Try again.`, until: performance.now() + NOT_SENT_MS };
     })
     .finally(() => current && render(current));
+}
+
+/** Why the last click on a card didn't go through (the backend refused it). */
+let notSent = { id: "", text: "", until: 0 };
+
+/** The "Not sent: …" line for `request`, while it's fresh. */
+function notSentLine(request: Request): HTMLElement[] {
+  const left = notSent.id === request.id ? notSent.until - performance.now() : 0;
+  if (left <= 0) return [];
+  later(left);
+  const line = el("div", "notsent", notSent.text);
+  line.setAttribute("role", "status");
+  return [line];
 }
 
 /** The options picked on the question card at the front, per question
@@ -509,11 +525,8 @@ function questionParts(request: Request): HTMLElement[] {
     box.append(opts);
     list.append(box);
   });
-  const send = armed("Send answer", front.since);
-  if (!ready(picked.chosen, qs.length)) {
-    send.disabled = true;
-    send.classList.add("incomplete");
-  }
+  // The arm counts from the card being shown, never from a pick.
+  const send = armed("Send answer", front.since, ready(picked.chosen, qs.length));
   send.addEventListener("click", () => {
     const picks = picked.chosen.map((c) => [...c]);
     answer(request, true, "Answered. Back to work.", () => invoke("answer", { id: request.id, picks }), [send]);
@@ -555,20 +568,21 @@ function planParts(request: Request): HTMLElement[] {
 }
 
 /** An Allow-style button that stays disabled until ARM_MS after `since`
- * (0: not fully visible yet, so the arm hasn't started). */
-function armed(label: string, since: number): HTMLButtonElement {
+ * (0: not fully visible yet, so the arm hasn't started), and while
+ * `enabled` is false; it looks it the whole time (arm.ts). */
+function armed(label: string, since: number, enabled = true): HTMLButtonElement {
   const button = el("button", "btn allow");
   const fill = el("span", "arm");
   button.append(fill, el("span", "label", label));
-  const waited = performance.now() - since;
-  if (since === 0) {
+  const arm = armState(since, performance.now(), enabled);
+  if (arm.look !== "ready") {
     button.disabled = true;
-    button.classList.add("waiting");
-  } else if (waited < ARM_MS) {
-    button.disabled = true;
+    if (arm.look !== "arming") button.classList.add(arm.look);
+  }
+  if (arm.look === "arming") {
     // Keep the fill continuous across re-renders.
-    fill.style.animationDelay = `${-waited}ms`;
-    later(ARM_MS - waited);
+    fill.style.animationDelay = `${-arm.waited}ms`;
+    later(arm.left);
   }
   return button;
 }
@@ -664,7 +678,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   if (request.kind !== "permission") {
     const n = request.questions?.length ?? 0;
     const asks = request.kind === "plan" ? "Wants to start this plan" : n > 1 ? `Asks you ${n} questions` : "Asks you a question";
-    c.append(el("div", "what", asks), ...(request.kind === "plan" ? planParts(request) : questionParts(request)));
+    c.append(el("div", "what", asks), ...(request.kind === "plan" ? planParts(request) : questionParts(request)), ...notSentLine(request));
     const after = queue[1];
     if (after) c.append(el("div", "after", `Next: ${what(after.tool)} in ${folder(after.project)}`));
     return c;
@@ -689,6 +703,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
     if (offer) actions.append(alwaysButton(request));
     c.append(actions);
   }
+  c.append(...notSentLine(request));
   // Below the buttons, so it never moves them.
   if (EXPLAINED_TOOLS.has(request.tool ?? "")) c.append(explainPart(request));
   const next = queue[1];
@@ -799,7 +814,7 @@ function renderApproval(view: View, request: Request, done?: boolean) {
       const q = el("div", "q");
       const count = view.queue.length > 1 ? ` · 1 of ${view.queue.length}` : "";
       q.append("Wants to ", el("b", "", `edit ${request.code.file}`), ` (${plural(request.code.changes, "change")})${count}`);
-      ask.append(q, ...answerButtons(request, "Allow edit"));
+      ask.append(q, ...answerButtons(request, "Allow edit"), ...notSentLine(request));
     }
     pane.append(ask);
     d.append(rail(session, request.project, request.agent, "needs"), pane);
@@ -1173,6 +1188,8 @@ function renderSettings(view: View, state: BallState) {
   const body = el("div", "body");
   body.dataset.screen = "settings";
   body.append(list);
+  // Text only, from the backend (the version the tag put into the build).
+  if (about?.version) body.append(el("div", "version", `Bouncer ${about.version}`));
   island.replaceChildren(head(state, "Settings", "", closeSettings), body);
 }
 
@@ -1220,6 +1237,9 @@ function render(view: View) {
   if (body && scrolled && body.dataset.screen === scrolled.screen) body.scrollTop = scrolled.top;
   settle(box, first || cardBefore || cardUp || REDUCED.matches || !view.rounded);
   armIfVisible();
+  // And on the next frame, in case the window already held it with no
+  // resize or `fit` reply still to come.
+  if (cardUp && front.since === 0) requestAnimationFrame(armIfVisible);
   placeFocus(view, had, before, keyboardBefore);
 }
 
@@ -1872,8 +1892,11 @@ function renderChat(view: View, done: boolean) {
   compose.append(input, action);
 
   const usage = el("div", "usage");
+  // The plan's use only comes with a chat reply (never fetched on its own),
+  // and chats live in memory only: nothing to show until the first reply.
   const nums = el("div");
-  nums.append("Plan use: 5-hour ", el("b", "", percent(chat.usage?.five)), " · 7-day ", el("b", "", percent(chat.usage?.seven)));
+  if (chat.usage) nums.append("Plan use: 5-hour ", el("b", "", percent(chat.usage.five)), " · 7-day ", el("b", "", percent(chat.usage.seven)));
+  else nums.append(NO_USAGE_YET);
   usage.append(el("div", "", "Runs your Claude Code · counts against your plan"), nums);
 
   const body = el("div", "body chat");
@@ -1942,10 +1965,9 @@ function updateRow(view: View, update: Update): HTMLElement {
   const row = el("div", "update");
   const text = el("span");
   text.append(el("b", "", `Bouncer ${update.version}`), " is ready");
-  const button = armed(state.label, updateSince);
+  const button = armed(state.label, updateSince, state.enabled);
   button.classList.add("small");
   button.dataset.key = "update";
-  if (!state.enabled) button.disabled = true;
   button.addEventListener("click", () => {
     button.disabled = true;
     // Refused (busy, offline, a bad signature): the line shows its state again.
@@ -2141,6 +2163,13 @@ document.addEventListener("keydown", (e) => {
 island.addEventListener(
   "pointerdown",
   (e) => {
+    // A control that isn't ready yet looks it; a press on it says so too.
+    const off = e.target instanceof Element ? e.target.closest<HTMLElement>("button:disabled") : null;
+    if (off) {
+      off.classList.remove("notyet");
+      void off.offsetWidth;
+      off.classList.add("notyet");
+    }
     // Nothing is rebuilt under this press until it ends (press.ts).
     gate.press();
     pressed = null;

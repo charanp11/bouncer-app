@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { apply, arrivalFocus, PRESSED_ANSWER, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
+import { apply, arrivalFocus, PRESSED_ANSWER, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
 
 const run = (chat: Chat, events: Omit<ChatEvent, "chat">[]): Chat =>
   events.reduce((c, e) => apply(c, { ...e, chat: c.id } as ChatEvent), chat);
@@ -103,6 +103,14 @@ test("chat: the usage line shows the plan's 5-hour and 7-day use", () => {
   assert.equal(percent(1.4), "100%");
   assert.equal(percent(Number.NaN), "—");
   assert.equal(clear(c).usage, c.usage, "the plan's use carries over");
+});
+
+test("chat: no plan-use reading until a reply brings one (nothing stored, nothing fetched)", () => {
+  assert.equal(fresh().usage, null, "a new chat (and a restart) starts with no reading");
+  assert.equal(begin(fresh(), "hi").usage, null, "sending alone brings none");
+  assert.equal(NO_USAGE_YET, "Plan use shows after your first message");
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  assert.match(main, /if \(chat\.usage\) nums\.append\("Plan use: 5-hour "[^\n]*\n\s*else nums\.append\(NO_USAGE_YET\)/);
 });
 
 test("chat: Enter sends, Shift+Enter and an IME still composing make a new line", () => {

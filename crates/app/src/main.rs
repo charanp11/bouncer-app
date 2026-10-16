@@ -731,14 +731,14 @@ fn fit(
         frame.0.clamp(size.width, MAX_SIZE.0),
         frame.1.clamp(size.height, MAX_SIZE.1),
     );
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if let Some(window) = handle.get_webview_window("main")
-            && window.is_visible().unwrap_or(false)
-        {
-            lay_out(&window, &handle.state::<Island>());
-        }
-    });
+    // Laid out here, not queued for the main thread (that runs after this
+    // reply): the page counts a card's arm from the reply,
+    // so the window must already hold the card (Charan, 2026-10-16).
+    if let Some(window) = app.get_webview_window("main")
+        && window.is_visible().unwrap_or(false)
+    {
+        lay_out(&window, &island);
+    }
 }
 
 /// The island takes the keyboard only when the user opens it on purpose (the
@@ -922,10 +922,11 @@ fn wipe(island: State<'_, Island>) -> Result<(), String> {
 }
 
 /// Read-only facts for the settings screen: where the rules file is and
-/// whether our hooks are in the user's Claude Code settings.
+/// whether our hooks are in the user's Claude Code settings, and the version.
 #[tauri::command]
-fn about(island: State<'_, Island>) -> Value {
+fn about(app: AppHandle, island: State<'_, Island>) -> Value {
     json!({
+        "version": app.package_info().version.to_string(),
         "rules": rules::path().map(|p| p.display().to_string()),
         "hooks": hook_status(),
         "autostart": std::env::current_exe().ok().and_then(|exe| autostart::enabled(&exe)),
@@ -1282,6 +1283,24 @@ fn tray(",
                 locks.dedup();
                 locks.len() != all
             })
+    }
+
+    #[test]
+    fn fit_lays_the_window_out_before_it_replies() {
+        // The page starts a card's arm when `fit` replies: the window must
+        // hold the card by then. A sync command runs on the main thread; work
+        // queued there with `run_on_main_thread` would run after the reply.
+        let code = include_str!("main.rs");
+        let at = code.find("\nfn fit(").expect("fit");
+        let attr = &code[code[..at].rfind("#[tauri::command").unwrap()..at];
+        assert_eq!(
+            attr.trim(),
+            "#[tauri::command]",
+            "fit stays a sync (main-thread) command"
+        );
+        let body = &code[at..at + code[at..].find("\n}\n").unwrap()];
+        assert!(body.contains("lay_out(&window, &island);"));
+        assert!(!body.contains("run_on_main_thread"));
     }
 
     /// No statement in the app takes the same lock twice (the 0.8.0 freeze:
