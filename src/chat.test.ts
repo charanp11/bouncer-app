@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { apply, arrivalFocus, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
+import { apply, arrivalFocus, PRESSED_ANSWER, begin, cardFocus, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, percent, refused, sendError, stopText, switchModel, type Chat, type ChatEvent, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
 
 const run = (chat: Chat, events: Omit<ChatEvent, "chat">[]): Chat =>
   events.reduce((c, e) => apply(c, { ...e, chat: c.id } as ChatEvent), chat);
@@ -235,8 +235,27 @@ test("explain: the keyboard taken by a press on Explain stays there; any other a
 
 test("questions: the keyboard arrives on the first option or on Keep planning, never on a button that answers", () => {
   assert.equal(arrivalFocus("aa", null, "question"), "opt:aa:0:0");
-  assert.equal(arrivalFocus("aa", "explain:aa", "question"), "opt:aa:0:0");
   assert.equal(arrivalFocus("aa", null, "plan"), "keep:aa");
-  assert.equal(arrivalFocus("aa", "explain:aa", "plan"), "keep:aa");
   assert.equal(arrivalFocus("aa", null, "permission"), "deny:aa");
+});
+
+test("clicks: the keyboard taken by a press stays on the control pressed; never jumps to another, never lands on an answer", () => {
+  // A press on the second option, on Deny, on Keep planning, in the plan's box: focus stays there.
+  assert.equal(arrivalFocus("aa", "opt:aa:0:1", "question"), "opt:aa:0:1");
+  assert.equal(arrivalFocus("aa", "opt:aa:1:2", "question"), "opt:aa:1:2");
+  assert.equal(arrivalFocus("aa", "deny:aa", "permission"), "deny:aa");
+  assert.equal(arrivalFocus("aa", "keep:aa", "plan"), "keep:aa");
+  assert.equal(arrivalFocus("aa", "plan:aa", "plan"), "plan:aa");
+  // A press on Allow, Send answer or Approve plan: focus goes nowhere (the click answers).
+  for (const kind of ["permission", "question", "plan"]) assert.equal(arrivalFocus("aa", PRESSED_ANSWER, kind), "", kind);
+  // Another card's control, or something else: the card's own start.
+  assert.equal(arrivalFocus("aa", "opt:bb:0:1", "question"), "opt:aa:0:0");
+  assert.equal(arrivalFocus("aa", "opt:aa", "question"), "opt:aa:0:0");
+  assert.equal(arrivalFocus("aa", "keep:bb", "plan"), "keep:aa");
+  for (const other of ["allow:aa", "update", "chat-input", "gear"]) assert.equal(arrivalFocus("aa", other), "deny:aa", other);
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  const down = main.slice(main.indexOf('"pointerdown"'), main.indexOf('invoke("keyboard", { on: true });', main.indexOf('"pointerdown"')));
+  // Answer buttons are told apart before anything else is read from the press.
+  assert.match(down, /else if \(target\?\.closest\("\.btn\.allow"\)\) pressed = PRESSED_ANSWER;/);
+  assert.match(main, /if \(target === ""\) \{\n {4}\/\/[^\n]*\n {4}const now = document\.activeElement;\n {4}if \(now instanceof HTMLElement && island\.contains\(now\)\) now\.blur\(\);/);
 });
