@@ -34,9 +34,15 @@ export class PressGate<V> {
   release() {
     if (!this.down) return;
     this.down = false;
-    const view = this.held;
-    this.held = null;
-    if (view !== null) this.after(() => this.draw(view));
+    if (this.held === null) return;
+    // Taken when it runs, not now: a newer view drawn in between (the
+    // click's own answer, say Settings opening) clears it, and a stale one
+    // must never be drawn over it (the gear's lost click, 2026-10-16).
+    this.after(() => {
+      const view = this.held;
+      this.held = null;
+      if (view !== null) this.draw(view);
+    });
   }
 
   /** True if `view` must wait for the release (it's kept, the newest wins);

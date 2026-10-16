@@ -27,6 +27,26 @@ test("clicks: no rebuild under a press; the newest view is drawn after the relea
   assert.equal(queued.length, 0, "a second release draws nothing");
 });
 
+test("clicks: a view drawn after the release is never overwritten by the older one that waited", () => {
+  // The gear: the keyboard view waits under the press; the click opens
+  // Settings and that view is drawn first. The old one must not follow it.
+  const { g, drawn, flush } = gate();
+  g.press();
+  assert.equal(g.hold("keyboard, no settings"), true);
+  g.release();
+  assert.equal(g.hold("settings open"), false, "drawn by the caller at once");
+  flush();
+  assert.deepEqual(drawn, [], "the stale view is dropped");
+  g.press();
+  g.hold("x");
+  g.release();
+  g.press();
+  g.hold("y");
+  g.release();
+  flush();
+  assert.deepEqual(drawn, ["y"], "two quick presses: only the newest is drawn");
+});
+
 test("clicks: a press that never ends (a drag) stops holding after MAX_HOLD_MS", () => {
   const { g, tick } = gate();
   g.press();
