@@ -3700,6 +3700,56 @@ Verify (2026-10-15):
 | Test instance: the update line (a sample update added to the page's views over CDP, test only; the app can't find one in a dev build) | "Bouncer 0.8.1 is ready" with Update above the sessions, as the prototype; Update in a dev build → refused ("dev"), the line back as it was; installing → "Updating…", disabled |
 | A real update (0.8.0 → 0.8.1) | Not possible before a published release with an updater: UP8, after the next release |
 
+**Settings freeze (2026-10-16, found in v0.8.0's draft check).**
+
+Bug (Charan's draft check of v0.8.0): changing Size, Sound, Sound style or
+Volume in Settings froze Bouncer ("Not responding", never recovered).
+Cause: #42 added `updates: island.prefs.lock().unwrap().updates` to
+`set_prefs` right below `shortcut: island.prefs.lock().unwrap().shortcut`;
+both are in one `let new = Prefs { … };` statement, so the first guard
+lives to the end of the statement and the second `lock()` waits for it
+forever, on the main thread. Reproduced on the test instance built from
+#42 (one Size click: `Responding = False`).
+
+The miss: the updater's Verify clicked only the new "Check for updates"
+switch (`set_updates`, which locks once) and the tests checked the
+preference's parsing and saving (`prefs.rs`), never `set_prefs` itself: it
+needs a Tauri `State`, so nothing exercised it. Clippy doesn't see a
+`Mutex` locked twice. The Settings page wasn't clicked through.
+
+Fix (PR "fix-prefs-freeze"): every Settings command goes through
+`update_prefs`, which copies the current preferences under the lock,
+makes the change and saves with no lock held, then stores under the lock;
+`set_prefs`' mapping is `page_prefs`. Searched every crate for the same
+lock twice in one statement or a guard held across a relock: only this
+one (the other guards in `chat.rs`, `lay_out` and `hooks_preview` are
+taken once and dropped before anything relocks; `always` drops its guard
+before `publish`).
+
+Tests (TESTS U10): `settings_changes_never_hold_the_preferences_lock`
+runs every Settings change through `update_prefs` on a thread with a 10 s
+deadline (a change that itself locks the preferences too); made to hold
+the lock while changing, it fails at 10 s ("a Settings change hung")
+instead of hanging. `no_statement_takes_the_same_lock_twice` scans the
+app's sources (and flags 0.8.0's `set_prefs` text) and checks the three
+commands only use `update_prefs`. The release hand check now has a
+Settings click-through for every release.
+
+Real clicks (2026-10-16, test instance from the fix, black backdrop,
+`rc.ps1`'s guard: each point owned by the test instance): Size Large and
+Medium, Sound off and on, Sound style Playful and Soft, Volume, Shortcut
+off and on, Guard on and off, Check for updates off and on: 13 of 13
+passed; after each, Windows' `Responding` true, an IPC round trip
+answered, and the change was in `preferences.json` / `rules.toml`. Start
+with Windows not clicked (it writes the real Run key).
+
+Release (Charan): v0.8.0 was never published. Once this merges its
+draft is deleted (the tag kept for history) and v0.8.1 is tagged as the
+first release with c2, Guard every mode and the updater; its notes
+(`docs/releases/v0.8.1.md`) carry 0.8.0's over and say 0.8.0 was never
+released. `release-notes.mjs` skips v0.8.0 (`NEVER_RELEASED`), so
+v0.8.1's changes are listed since v0.7.0.
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
