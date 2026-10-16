@@ -81,7 +81,7 @@ still flags it, please
 
 ## Update
 
-From 0.8.0, Bouncer updates itself, but only when you say so. Once a day it
+From 0.8.1, Bouncer updates itself, but only when you say so. Once a day it
 checks for a newer release; when there is one, the island's session list
 shows **"Bouncer X.Y.Z is ready"** with an **Update** button. Click it:
 Bouncer downloads the installer, checks its signature (made by this repo's
@@ -93,7 +93,7 @@ and waits, so Bouncer never quits in the middle of a decision. If anything
 goes wrong (offline, GitHub down, a bad signature), nothing is installed and
 nothing nags you; it tries again the next day.
 
-**Coming from 0.7.0?** It has no updater: install 0.8.0 by hand once
+**Coming from 0.7.0?** It has no updater: install 0.8.1 by hand once
 (download it and run it as in [Install](#install); everything stays).
 
 **By hand.** You can always download the new installer and run it yourself

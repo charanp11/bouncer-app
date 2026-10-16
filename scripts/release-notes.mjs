@@ -16,9 +16,13 @@ if (!version || !sums || !repo) {
   process.exit(1);
 }
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+// Tags that were built but never published (their drafts deleted): not a
+// release, so the next one lists its changes since the one before.
+// v0.8.0: its draft froze in Settings (PLAN, "Settings freeze").
+const NEVER_RELEASED = new Set(["v0.8.0"]);
 const release = (t) => {
   const v = /^v(\d+)\.(\d+)\.(\d+)$/.exec(t)?.slice(1).map(Number);
-  return v && (v[0] > 0 || v[1] >= 7);
+  return v && (v[0] > 0 || v[1] >= 7) && !NEVER_RELEASED.has(t);
 };
 // The nearest earlier tag that is a release (0.7.0 or later).
 const previous = git("tag", "--merged", `${tag}^`, "--sort=-version:refname", "--list", "v*.*.*").split("\n").find(release);
