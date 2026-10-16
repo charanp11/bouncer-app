@@ -3904,6 +3904,18 @@ its 320 ms open animation still moved it, a hooks button below the
 scrolled area (the guard refused the click, as it should), state left by
 an earlier run.
 
+**v0.8.3 published (Charan, 2026-10-16).** Shipped with #48 and the
+Dependabot updates #45 (npm: `@tauri-apps/api` 2.12.3, `cli` 2.12.2), #46
+(actions) and #47 (cargo: `tauri` 2.12.2, `tauri-build` 2.7.2,
+`tauri-plugin-global-shortcut` 2.4.1, `serde_json` 1.0.154), each rebased
+and green, the installer test run on each. Manual checks (Charan, his own
+desktop): his 0.8.2 offered the update and installed 0.8.3 (the second
+real update, TESTS UP8); Installed apps shows 0.8.3, Publisher "Charan"
+(W10); Settings ends with "Bouncer 0.8.3" (U11); one click on the gear
+opens Settings and it stays; pick then Send at once answered on the first
+click (UI19); the chat shows "Plan use shows after your first message"
+(C21). v0.8.x is done; next is roadmap d (file drop, Phase 7).
+
 ## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
