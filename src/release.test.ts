@@ -83,6 +83,12 @@ test("release notes: the first release lists features, later ones the changes si
     const next = notes("v0.7.1");
     assert.match(next, /^## Changes since v0\.7\.0\n\n- docs: the README\n- fix: a card$/m);
     assert.doesNotMatch(next, /First public release|the installer/);
+    // A tag that was never released (v0.8.0) is skipped: v0.8.1 lists
+    // everything since the last real release.
+    commit("feat: the updater", "v0.8.0");
+    commit("fix: the freeze", "v0.8.1");
+    const after = notes("v0.8.1");
+    assert.match(after, /^## Changes since v0\.7\.1\n\n- fix: the freeze\n- feat: the updater$/m);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -150,9 +156,11 @@ test("updater: latest.json points at this release's installer with its signature
   }
 });
 
-test("v0.8.0's notes say 0.7.0 users install it by hand once, and how updates work", () => {
-  const intro = read("docs/releases/v0.8.0.md");
-  assert.match(intro, /install 0\.8\.0 by hand once/);
+test("v0.8.1's notes: the first release with these features, 0.8.0 never released, 0.7.0 users install it by hand once", () => {
+  const intro = read("docs/releases/v0.8.1.md");
+  assert.match(intro, /^\*\*0\.8\.1 is the first release with these features\.\*\* 0\.8\.0 was never released/);
+  assert.match(intro, /install 0\.8\.1 by hand once/);
+  assert.doesNotMatch(intro, /0\.8\.0 by hand/);
   assert.match(intro, /Check for updates/);
   assert.match(intro, /Watch → Custom → Releases/);
   assert.match(intro, /^\*\*Known limits:\*\* .*claude -p.*refuses risky requests.*accept edits/m);
