@@ -272,6 +272,8 @@ try {
     Check $sawReinstallPage "Upgrade: the reinstall page" "'Uninstall before installing' was offered and ticked"
     Check (-not (Test-Path $seen)) "Upgrade: no hooks console" "bouncer.exe never ran while the old uninstaller ran"
     Check ((Installed-Version) -eq $NewVersion -and (Get-FileHash $settings).Hash -eq $hooked -and (Test-Path $hook)) "Upgrade: hooks kept" "version $(Installed-Version); settings.json unchanged; $hook exists"
+    $publisher = (Get-ItemProperty $uninstallKey -ErrorAction SilentlyContinue).Publisher
+    Check ($publisher -eq "Charan") "Publisher" "Installed apps shows '$publisher'"
 
     # 6. Uninstall, data box unticked: hooks removed through the console.
     $app = Start-App; Start-Sleep 5; Stop-App $app   # so there is data to keep

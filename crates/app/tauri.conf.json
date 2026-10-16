@@ -60,6 +60,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Charan",
     "targets": ["nsis", "app", "dmg"],
     "windows": {
       "nsis": {
