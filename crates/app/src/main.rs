@@ -6,7 +6,7 @@ mod region;
 mod update;
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -799,6 +799,48 @@ fn chat_open(app: AppHandle, island: State<'_, Island>, open: bool) {
     show(&app, island.desk.view());
 }
 
+/// Saves new preferences made from the current ones by `change`. Every
+/// Settings command goes through here. The lock is held only to copy the
+/// current preferences and to store the new ones, never while `change` runs
+/// or the file is written: 0.8.0 locked it twice in one statement in
+/// `set_prefs` and froze on any Size or Sound change (PLAN, "Settings
+/// freeze").
+fn update_prefs(
+    prefs: &Mutex<Prefs>,
+    path: Option<&Path>,
+    change: impl FnOnce(Prefs) -> Result<Prefs, String>,
+) -> Result<Prefs, String> {
+    let path = path.ok_or("no place to save preferences")?;
+    let current = *prefs.lock().unwrap();
+    let new = change(current)?;
+    prefs::save(path, new)?;
+    *prefs.lock().unwrap() = new;
+    Ok(new)
+}
+
+/// What Settings' size and sound controls send, on top of `current`: the
+/// switches they don't send (shortcut, update checks) keep their values.
+/// Only known sizes, styles and sounds and a volume of 0 to 100.
+fn page_prefs(
+    current: Prefs,
+    size: &str,
+    sound: bool,
+    style: &str,
+    volume: u8,
+    sounds: &[String],
+) -> Result<Prefs, String> {
+    Ok(Prefs {
+        size: Size::parse(size).ok_or("unknown size")?,
+        sound,
+        style: Style::parse(style).ok_or("unknown style")?,
+        volume: Some(volume)
+            .filter(|v| *v <= 100)
+            .ok_or("volume is 0 to 100")?,
+        sounds: Prefs::sounds_from(sounds).ok_or("unknown sound")?,
+        ..current
+    })
+}
+
 /// Saves the island size and sound. Only known sizes are accepted.
 #[tauri::command]
 fn set_prefs(
@@ -810,23 +852,9 @@ fn set_prefs(
     volume: u8,
     sounds: Vec<String>,
 ) -> Result<(), String> {
-    let new = Prefs {
-        size: Size::parse(&size).ok_or("unknown size")?,
-        sound,
-        style: Style::parse(&style).ok_or("unknown style")?,
-        volume: Some(volume)
-            .filter(|v| *v <= 100)
-            .ok_or("volume is 0 to 100")?,
-        sounds: Prefs::sounds_from(&sounds).ok_or("unknown sound")?,
-        shortcut: island.prefs.lock().unwrap().shortcut,
-        updates: island.prefs.lock().unwrap().updates,
-    };
-    let path = island
-        .prefs_path
-        .as_deref()
-        .ok_or("no place to save preferences")?;
-    prefs::save(path, new)?;
-    *island.prefs.lock().unwrap() = new;
+    update_prefs(&island.prefs, island.prefs_path.as_deref(), |current| {
+        page_prefs(current, &size, sound, &style, volume, &sounds)
+    })?;
     show(&app, island.desk.view());
     Ok(())
 }
@@ -834,16 +862,12 @@ fn set_prefs(
 /// Settings' shortcut switch: saved, then registered or dropped.
 #[tauri::command]
 fn set_shortcut(app: AppHandle, island: State<'_, Island>, on: bool) -> Result<(), String> {
-    let path = island
-        .prefs_path
-        .as_deref()
-        .ok_or("no place to save preferences")?;
-    let new = Prefs {
-        shortcut: on,
-        ..*island.prefs.lock().unwrap()
-    };
-    prefs::save(path, new)?;
-    *island.prefs.lock().unwrap() = new;
+    update_prefs(&island.prefs, island.prefs_path.as_deref(), |current| {
+        Ok(Prefs {
+            shortcut: on,
+            ..current
+        })
+    })?;
     use_shortcut(&app, on);
     show(&app, island.desk.view());
     Ok(())
@@ -858,16 +882,12 @@ fn set_updates(
     updates: State<'_, update::Updates>,
     on: bool,
 ) -> Result<(), String> {
-    let path = island
-        .prefs_path
-        .as_deref()
-        .ok_or("no place to save preferences")?;
-    let new = Prefs {
-        updates: on,
-        ..*island.prefs.lock().unwrap()
-    };
-    prefs::save(path, new)?;
-    *island.prefs.lock().unwrap() = new;
+    update_prefs(&island.prefs, island.prefs_path.as_deref(), |current| {
+        Ok(Prefs {
+            updates: on,
+            ..current
+        })
+    })?;
     if !on {
         updates.forget();
     }
@@ -1152,6 +1172,147 @@ fn tray(",
             .collect();
         assert_eq!(granted, ours.map(|c| format!("allow-{c}")));
         assert_eq!(caps["windows"], serde_json::json!(["main"]));
+    }
+
+    /// The 0.8.0 freeze: every Settings change goes through `update_prefs`,
+    /// which never holds the preferences lock while making or saving the
+    /// change. Run on a thread with a deadline, so a lock taken twice fails
+    /// the test instead of hanging it; the change even takes the lock itself.
+    #[test]
+    fn settings_changes_never_hold_the_preferences_lock() {
+        let dir = std::env::temp_dir().join(format!("bouncer-prefs-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("preferences.json");
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = path.clone();
+        std::thread::spawn(move || {
+            let prefs = Mutex::new(Prefs {
+                shortcut: false,
+                updates: false,
+                ..Prefs::default()
+            });
+            let path = Some(worker.as_path());
+            // Size, Sound, Sound style, Volume, Which sounds (set_prefs).
+            let sounds = vec!["poke".to_owned()];
+            let new = update_prefs(&prefs, path, |c| {
+                page_prefs(c, "large", false, "playful", 80, &sounds)
+            })
+            .unwrap();
+            assert_eq!(
+                (new.size, new.sound, new.style, new.volume),
+                (Size::Large, false, Style::Playful, 80)
+            );
+            assert!(
+                !new.shortcut && !new.updates,
+                "switches it doesn't send keep their values"
+            );
+            // The shortcut and update switches (set_shortcut, set_updates).
+            update_prefs(&prefs, path, |c| {
+                Ok(Prefs {
+                    shortcut: true,
+                    ..c
+                })
+            })
+            .unwrap();
+            let new = update_prefs(&prefs, path, |c| Ok(Prefs { updates: true, ..c })).unwrap();
+            assert!(new.shortcut && new.updates && new.size == Size::Large);
+            // Even a change that reads the preferences itself can't hang.
+            update_prefs(&prefs, path, |c| {
+                Ok(Prefs {
+                    volume: prefs.lock().unwrap().volume,
+                    ..c
+                })
+            })
+            .unwrap();
+            assert_eq!(*prefs.lock().unwrap(), prefs::load(&worker));
+            // Bad values are refused and change nothing.
+            assert!(
+                update_prefs(&prefs, path, |c| page_prefs(
+                    c,
+                    "huge",
+                    true,
+                    "soft",
+                    50,
+                    &[]
+                ))
+                .is_err()
+            );
+            assert!(
+                update_prefs(&prefs, path, |c| page_prefs(
+                    c,
+                    "small",
+                    true,
+                    "soft",
+                    101,
+                    &[]
+                ))
+                .is_err()
+            );
+            assert_eq!(prefs.lock().unwrap().size, Size::Large);
+            done.send(()).unwrap();
+        });
+        let result = finished.recv_timeout(Duration::from_secs(10));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            result.is_ok(),
+            "a Settings change hung: the preferences lock is held twice"
+        );
+    }
+
+    /// The first statement (split at `;` and at the end of a function or
+    /// method) that takes a lock of the same name twice, if any.
+    fn same_lock_twice(code: &str) -> Option<&str> {
+        code.split(';')
+            .flat_map(|s| s.split("\n}\n"))
+            .flat_map(|s| s.split("\n    }\n"))
+            .find(|statement| {
+                let mut locks: Vec<&str> = statement
+                    .match_indices(".lock()")
+                    .map(|(i, _)| {
+                        let before = &statement[..i];
+                        let start = before
+                            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                            .map_or(0, |p| p + 1);
+                        &before[start..]
+                    })
+                    .collect();
+                let all = locks.len();
+                locks.sort_unstable();
+                locks.dedup();
+                locks.len() != all
+            })
+    }
+
+    /// No statement in the app takes the same lock twice (the 0.8.0 freeze:
+    /// the first guard lives to the end of the statement), and the Settings
+    /// commands touch the preferences only through `update_prefs`.
+    #[test]
+    fn no_statement_takes_the_same_lock_twice() {
+        // The check itself catches 0.8.0's `set_prefs`.
+        let frozen = "    let new = Prefs {\n        sounds,\n        shortcut: island.prefs.lock().unwrap().shortcut,\n        updates: island.prefs.lock().unwrap().updates,\n    };\n";
+        assert!(same_lock_twice(frozen).is_some());
+        for (name, src) in [
+            ("main.rs", include_str!("main.rs")),
+            ("chat.rs", include_str!("chat.rs")),
+            ("update.rs", include_str!("update.rs")),
+            ("region.rs", include_str!("region.rs")),
+        ] {
+            let code = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+            if let Some(statement) = same_lock_twice(code) {
+                panic!("{name}: the same lock twice in: {statement}");
+            }
+        }
+        let code = include_str!("main.rs");
+        for command in ["fn set_prefs(", "fn set_shortcut(", "fn set_updates("] {
+            let start = code.find(command).unwrap();
+            let body = &code[start..start + code[start..].find("\n}\n").unwrap()];
+            assert!(
+                !body.contains("prefs.lock()"),
+                "{command} locks the preferences itself"
+            );
+            assert!(body.contains("update_prefs(&island.prefs"), "{command}");
+        }
     }
 
     /// A dev build never shares anything with an installed Bouncer: its own
