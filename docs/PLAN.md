@@ -3921,7 +3921,7 @@ click (UI19); the chat shows "Plan use shows after your first message"
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
 run?" or "Ask about it"; read-only; nothing sent before he confirms.
 
-### Phase 7 audit (2026-10-16, waiting for Charan's OK)
+### Phase 7 audit (2026-10-16, decisions Charan 2026-10-16)
 
 Brief (Charan, 2026-10-16): drop a file (script, installer, archive,
 config) on the island; Bouncer says whether it looks safe and why, in plain
@@ -4070,44 +4070,110 @@ what it holds, and the preview the page shows is that exact text.
 | Many drops / a drop while a card is up | One drop at a time (a new one replaces it); a permission card still comes first and the report waits under it |
 | A false "safe" | Every report and answer ends "can be wrong · you decide"; no green tick, no "safe" word on our own report |
 
-Decisions for Charan:
+Decisions (Charan, 2026-10-16): all five as proposed. `windows-sys`
+features `Win32_Security_WinTrust` and `Win32_Security_Cryptography` (its
+`_Catalog` and `_Sip` sub-features turned out to be needed for the signer's
+name: same crate, no new one); SHA-256 shown; zip only, never decompressed;
+"Ask about it" in the chat panel, the file with the first message only; caps
+1 MB / 32 KB / 10 min. Additions: the zip and `.lnk` parsers bounds-check
+everything, with random-bytes and truncated / corrupt tests; never the full
+path anywhere (name only, in the prompt and the preview); "No signature in
+the file" (catalog-signed system files exist), not "Not signed"; a generous
+catch area while dragging. And first: check today's build for a drop that
+navigates the island.
 
-1. **Windows APIs:** `WinVerifyTrust` needs `windows-sys` features
-   `Win32_Security_WinTrust` (and `Win32_Security_Cryptography` for its
-   types). Not a new crate, a new feature of one we have. OK?
-2. **SHA-256 in the report**, so he can look the file up himself (BCrypt,
-   the same crate): yes or skip?
-3. **Archives:** zip only (std parser, ~150 lines); others "can't look
-   inside". OK?
-4. **"Ask about it" in the chat panel** (follow-ups possible, the file goes
-   with the first message only) or one-shot like "Is this safe"?
-5. **Caps:** 1 MB read, 32 KB excerpt sent, 10 min hold. OK?
+**Today's drop, checked first (2026-10-16, test instance of `main`):** a real
+shell file drag (`CF_HDROP`, from a scratch source window, real mouse input
+behind the guard) of an `.html` and a `.txt` onto the island. WebView2 took
+the drag (the page saw `dragenter` / `dragover`) and asked to navigate to
+`file:///…` (CDP `Page.frameRequestedNavigation`), but the island stayed on
+its page: the probe's script never ran (its image never reached a local
+listener), no new window or target opened. So no v0.8.4; WebView2 itself
+refused it, not us. Phase 7 adds the guard anyway (`on_navigation` allows
+only our page) and turns WebView2's own file drop off.
+
+**What building it changed from the audit:**
+
+- **The window must exist visible before any drag.** With `visible: false`
+  at creation (since Phase 2), wry's drop target never received a drop
+  (Windows refused it: `effect None`) because WebView2's child windows
+  weren't composited when wry hooked them. The window is now created
+  visible, parked off-screen (`x`/`y` -32000), and placed by the first
+  layout as before; that first layout no longer mistakes the parked spot
+  for a user drag (it moved the island to the left edge once). Launch
+  still takes no focus (checked: the foreground stayed on the app that had
+  it). Source: a write-up of the same WebView2 behaviour (dev.to, "Building
+  a Transparent Drag-and-Drop Shelf for Windows with Tauri").
+- **Paths in a script are never resolved.** `check.rs`'s readings resolve
+  paths (`canonicalize`); on a dropped file's text a `\\server\share` path
+  would make Bouncer touch the network. `check::script_risks` reads a line
+  with every word as written (no project, so no "outside" / "Bouncer's
+  rules"); a test reads the source to keep it so.
+- **SHA-256 in Rust** (std only, tested against the standard vectors)
+  instead of BCrypt: the same on macOS, no `unsafe`.
+- **The deadline became caps:** no fingerprint or signature check over
+  256 MB (said in the report); the report comes in well under a second.
+- **A real Claude Code is not run from the app in tests:** the chat removes
+  `CLAUDE_CONFIG_DIR` from its child (the lock), so a real `claude` started
+  by the test instance would use the real profile. The test instance used
+  the repo's fake `claude` (scratch folder, scratch config); the real run is
+  Charan's hand check 6.
+
+**Checks (2026-10-16), test instance** (scratch build, its own pipe, rules
+and chat folder, WebView2 folder and debug port; scratch Run key and Claude
+config folder; the fake `claude` first on PATH; black backdrop; real drags
+from a scratch source window and real clicks behind the guard):
+
+- Hover: the island opens a 448 × 237 "Drop to check it" target as the file
+  arrives; two files: "One file at a time"; leaving puts it back.
+- `setup.ps1` (download-and-run, encoded command, hidden window, Defender
+  off): "Looks risky", each with its line, "No signature in the file",
+  SHA-256. "Is this safe to run?" → the exact text (name only); Cancel → no
+  `claude` started; Send → the fake streamed its answer into the box, then
+  its `claude` was gone; the chat folder stayed empty.
+- `photos.zip`: setup.exe and run.bat inside, `../../Startup/run.bat`
+  escaping; "Ask about it" → the chat with the file chip and the exact text;
+  the question went with it.
+- `Invoice.pdf.lnk` (PowerShell, padded `-w hidden -enc …`): starts
+  powershell, padded arguments, encoded command, hidden window, the
+  `.pdf.lnk` name. `invoice.pdf.exe` (fake `MZ`): ".pdf, but .exe".
+  `report<U+202E>fdp.exe`: the tag shown, "real ending is .exe". A folder:
+  refused.
+- A permission card arriving over a report took the island; after Deny the
+  report was back.
+- CPU (60 s, app + WebView2, debug build, a working session animating):
+  report up 2.0% of a core; the plain pill 1.7%.
+- Nothing about the files anywhere afterwards: the instance's history,
+  chat folder and Claude config folder hold no trace.
 
 Done when:
 
-- [ ] Drag over → catch → drop → local report in under 1 s, no AI, nothing sent
-- [ ] Refusals tested, each with its reason: folder, several items, link /
+- [x] Drag over → catch → drop → local report in under 1 s, no AI, nothing sent
+- [x] Refusals tested, each with its reason: folder, several items, link /
       junction, online-only, network path, device path, unreadable, empty, huge (checked from parts, says so)
-- [ ] Every row of the checks table has a fixture (crafted in tests at run
+      (online-only by its attributes in code; no real OneDrive placeholder here)
+- [x] Every row of the checks table has a fixture (crafted in tests at run
       time; no real malware, fake secrets built at run time for gitleaks)
-- [ ] Zip bomb, zip slip, encrypted entries and `.lnk` with arguments found
+- [x] Zip bomb, zip slip, encrypted entries and `.lnk` with arguments found
       without decompressing or following anything
-- [ ] A file changed while held: the writer is refused; the held bytes are what the preview shows
-- [ ] "Is this safe to run?" sends only after Send, exactly the preview,
+- [x] A file changed while held: the writer is refused; the held bytes are what the preview shows
+- [x] "Is this safe to run?" sends only after Send, exactly the preview,
       through `LOCKED` on stdin; Cancel / Esc / timeout send nothing; the
       file never reaches the chat folder (C10-style test)
-- [ ] "Ask about it" puts the file in that one chat message only after Send
-- [ ] Hostile names and contents render inert (UI11-style); no HTML sink
+- [x] "Ask about it" puts the file in that one chat message only after Send
+- [x] Hostile names and contents render inert (UI11-style); no HTML sink
       (`no_html_sinks.rs`); CSP and capability unchanged but `drop_*` commands
-- [ ] A drop never navigates the island; a card arriving mid-report comes first
-- [ ] Nothing about the file on disk afterwards (history, prefs, chat folder, `CLAUDE_CONFIG_DIR`)
-- [ ] Prototype has the hover, report and preview states with build-spec
+- [x] A drop never navigates the island; a card arriving mid-report comes first
+- [x] Nothing about the file on disk afterwards (history, prefs, chat folder, `CLAUDE_CONFIG_DIR`)
+- [x] Prototype has the hover, report and preview states with build-spec
       rules; `docs/TESTS.md` rows; CPU while hovering and with a report
-      within the card budget
+      within the card budget (prototype v0.30, TESTS F1–F15, hand check 6)
 - [ ] Test instance checks with real drags (own instance, black backdrop,
       guard), `claude` runs only with `CLAUDE_CONFIG_DIR=%USERPROFILE%\bouncer-test-claude`,
       `--strict-mcp-config` (already in `LOCKED`) and the playground hooks
+      (real drags done with the fake `claude`; a real Claude Code run is hand check 6)
 - [ ] fmt, clippy, tests and `check-tests` green locally and in CI on both OSes
+      (green locally; CI on the PR)
 - [ ] Release v0.9.0 after Charan's OK and merge
 
 Old notes (Phase 7 as first planned, kept for history; the audit above
