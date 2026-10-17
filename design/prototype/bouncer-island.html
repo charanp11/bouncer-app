@@ -264,6 +264,7 @@ pre.cmd .hidden-char { color: var(--island); background: var(--risk); border-rad
 .findings li { position: relative; padding-left: 14px; color: var(--muted); overflow-wrap: anywhere; }
 .findings li::before { content: ""; position: absolute; left: 2px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
 .findings li.flag { color: var(--text); } .findings li.flag::before { background: var(--risk); }
+.findings li.caution { color: var(--text); } .findings li.caution::before { background: var(--sun-deep); }
 .hash { display: flex; gap: 8px; font-size: 11px; color: var(--faint); } .hash span { flex: none; } .hash code { min-width: 0; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; user-select: text; }
 .own { font-size: 11.5px; color: var(--faint); }
 .explain.preview .xbody.pv { height: 160px; margin: 0; font: 11.5px/1.45 var(--mono); color: var(--muted); }
@@ -537,7 +538,7 @@ a.chip { text-decoration: none; }
       <h1><span class="stamp">Bouncer</span> island</h1>
       <p class="lede">Design reference for every state of the island. Click a state to see it live on the desktop. Claude Code builds the app to the numbers in the spec below.</p>
     </div>
-    <div class="meta">design/prototype · v0.31 · Oct 16 2026</div>
+    <div class="meta">design/prototype · v0.32 · Oct 16 2026</div>
   </header>
 
   <div class="switch" role="group" aria-label="Island state">
@@ -728,7 +729,7 @@ a.chip { text-decoration: none; }
         <li><b>An explanation never decides:</b> "Explain this command" sits below Deny and Allow at a fixed height, never moves them, re-arms Allow when it opens or closes, never takes the keyboard to Allow, and its text is only text.</li>
         <li><b>Questions and plans are answered only by a click:</b> Claude Code's question (pick options) and plan (Approve plan / Keep planning) get a card; no rule, mode or timeout ever answers them, and the terminal asks meanwhile. "Send answer" and "Approve plan" arm after 600ms like Allow, Send only once every question has a pick; focus arrives on the first option or on Keep planning, never on a button that answers; Enter never answers. The page sends only option numbers. Question, option and plan text is agent text (plans are Markdown, built from text).</li>
         <li><b>Updates install only on a click:</b> a newer release shows as one line above the sessions with Update (armed after 600ms like Allow, never focused first, Enter never presses it). While a card or question waits, or a chat or explanation runs, it says "Update after you answer" and can't be pressed: Bouncer never quits mid-decision. Off in Settings means no check at all.</li>
-        <li><b>A dropped file is only read:</b> a big dashed "Drop to check it" target opens while a file is over the island (easy to hit); several items say "One file at a time". Bouncer's report comes at once with no AI: the name (hidden characters as tags), what it really is, its size, findings (risky first, red dots), SHA-256, and always "Bouncer's own checks · can be wrong · you decide". It never says "safe" and is never green. Bouncer reacts: while a file is over him he opens up like a mitt (220ms, mouth open, eyes toward where it came in); the drop is one gulp (450ms) as the report appears, never holding it back; then he looks curious (nothing found) or wary (risky), never happy; a refusal is a short "nope" shake (360ms). A card arriving cuts any of it at once; reduced motion shows only the faces. "Is this safe to run?" first shows exactly what would be sent (the file's name only, never its folder); nothing leaves before "Send to Claude". The answer box is the explanation's (fixed height, "Can be wrong · you decide"). A card still comes first; the report waits under it.</li>
+        <li><b>A dropped file is only read:</b> a big dashed "Drop to check it" target opens while a file is over the island (easy to hit); several items say "One file at a time". Bouncer's report comes at once with no AI: the name (hidden characters as tags), what it really is, its size, findings (risky first, red dots; then cautions, amber dots, which leave the heading as it is: an unsigned program or installer from the internet gets "Not signed and downloaded from the internet. Only run it if you trust where it came from."), SHA-256, and always "Bouncer's own checks · can be wrong · you decide". It never says "safe" and is never green. Bouncer reacts: while a file is over him he opens up like a mitt (220ms, mouth open, eyes toward where it came in); the drop is one gulp (450ms) as the report appears, never holding it back; then he looks curious (nothing found) or wary (risky), never happy; a refusal is a short "nope" shake (360ms). A card arriving cuts any of it at once; reduced motion shows only the faces. "Is this safe to run?" first shows exactly what would be sent (the file's name only, never its folder); nothing leaves before "Send to Claude". The answer box is the explanation's (fixed height, "Can be wrong · you decide"). A card still comes first; the report waits under it.</li>
         <li><b>The ticker is numbers only:</b> <code>+N −M</code> lines for Edit / MultiEdit, <code>+N</code> for Write (the old file is never read). The label shortens first; the numbers are never cut.</li>
       </ol>
     </section>
@@ -1049,6 +1050,8 @@ const STATES = {
       file.append(el("b", "dropname", "notes.txt"), el("span", "meta", "A text file · 2.1 KB"));
       const list = el("ul", "findings");
       list.append(el("li", "", "No signature in the file."));
+      // (An unsigned program from the internet would add, amber, above the facts:
+      // "Not signed and downloaded from the internet. Only run it if you trust where it came from.")
       const hash = el("div", "hash");
       hash.append(el("span", "", "SHA-256"), el("code", "", "9f2c41d0a7b3e85c6d1f0e2a4b7c9d8e1f3a5b6c7d8e9f0a1b2c3d4e5f6a7b8c"));
       const a = el("div", "actions");

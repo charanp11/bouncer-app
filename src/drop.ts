@@ -5,7 +5,8 @@
 // textContent.
 import { explainApply, explainRefused, type Explain, type ExplainEvent, type Stop } from "./chat.ts";
 
-export type Finding = { risky: boolean; text: string };
+/** A line of the report: risky (red), caution (amber, the heading stays), or a fact. */
+export type Finding = { risky: boolean; caution?: boolean; text: string };
 
 export type DropReport = {
   state: "report";

@@ -939,3 +939,76 @@ fn windows_reads_the_signature() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn an_unsigned_program_from_the_internet_gets_a_caution_not_a_risk() {
+    let line = unsigned_download(true, true, Some(3)).unwrap();
+    assert_eq!(line.text, UNSIGNED_DOWNLOAD);
+    assert!(
+        line.caution && !line.risky,
+        "amber: the heading stays as it is"
+    );
+    assert!(
+        unsigned_download(true, true, Some(4)).is_some(),
+        "untrusted site"
+    );
+    for (program, unsigned, zone) in [
+        (false, true, Some(3)),
+        (true, false, Some(3)),
+        (true, true, None),
+        (true, true, Some(1)),
+        (true, true, Some(2)),
+    ] {
+        assert!(
+            unsigned_download(program, unsigned, zone).is_none(),
+            "{program} {unsigned} {zone:?}"
+        );
+    }
+    // Programs and MSI installers; not old Office files, not scripts.
+    assert!(installs(Kind::WinProgram, Some("exe")));
+    assert!(installs(Kind::Compound, Some("msi")));
+    assert!(!installs(Kind::Compound, Some("doc")));
+    assert!(!installs(Kind::Text, Some("ps1")));
+    // Risky first, then cautions, then facts; only risky lines make it risky.
+    let mut r = whole("x.txt", b"hi");
+    r.add([note("a fact"), line.clone(), risky("a risk")]);
+    let order: Vec<_> = r.findings.iter().map(|f| f.text.as_str()).collect();
+    assert_eq!(order[..3], ["a risk", UNSIGNED_DOWNLOAD, "a fact"]);
+    r.findings.retain(|f| !f.risky);
+    assert!(!r.risky());
+    assert_eq!(r.to_json()["findings"][0]["caution"], true);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_cautions_about_an_unsigned_download() {
+    let dir = temp("caution");
+    let file = dir.join("setup.exe");
+    // This test binary: a real program with no signature.
+    std::fs::copy(std::env::current_exe().unwrap(), &file).unwrap();
+    assert!(
+        !has(&check(&file).unwrap(), UNSIGNED_DOWNLOAD),
+        "not downloaded: no caution"
+    );
+    let mut stream = file.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    if std::fs::write(
+        &stream,
+        "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.org/setup.exe\r\n",
+    )
+    .is_ok()
+    {
+        let r = check(&file).unwrap();
+        assert!(
+            r.findings
+                .iter()
+                .any(|f| f.caution && f.text == UNSIGNED_DOWNLOAD),
+            "{:?}",
+            texts(&r)
+        );
+        assert!(has(&r, NO_SIGNATURE));
+        assert!(has(&r, "Downloaded from the internet (example.org)."));
+        assert!(!r.risky(), "the heading stays as it is");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

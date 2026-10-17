@@ -2043,7 +2043,7 @@ function renderDrop(d: Exclude<DropView, null>) {
   if (d.findings.length) {
     const list = el("ul", "findings");
     for (const f of d.findings) {
-      const li = el("li", f.risky ? "flag" : "");
+      const li = el("li", f.risky ? "flag" : f.caution ? "caution" : "");
       agentText(li, f.text);
       list.append(li);
     }

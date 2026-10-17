@@ -51,16 +51,27 @@ pub const UNREADABLE: &str = "Bouncer can't read that file.";
 pub const EMPTY: &str = "That file is empty.";
 
 /// One line of the report. `risky` lines come first and make the report
-/// say "Looks risky"; the rest are facts.
+/// say "Looks risky"; `caution` lines (amber) come next and leave the
+/// heading as it is; the rest are facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     pub risky: bool,
+    pub caution: bool,
     pub text: String,
 }
 
 fn risky(text: impl Into<String>) -> Finding {
     Finding {
         risky: true,
+        caution: false,
+        text: text.into(),
+    }
+}
+
+fn caution(text: impl Into<String>) -> Finding {
+    Finding {
+        risky: false,
+        caution: true,
         text: text.into(),
     }
 }
@@ -68,8 +79,22 @@ fn risky(text: impl Into<String>) -> Finding {
 fn note(text: impl Into<String>) -> Finding {
     Finding {
         risky: false,
+        caution: false,
         text: text.into(),
     }
+}
+
+/// Windows found no signature it could check (`win::signature`).
+pub const NO_SIGNATURE: &str = "No signature in the file.";
+const NO_SIGNATURE_READABLE: &str = "No signature Windows can read in the file.";
+pub const UNSIGNED_DOWNLOAD: &str =
+    "Not signed and downloaded from the internet. Only run it if you trust where it came from.";
+
+/// The caution for a program or installer with no signature that Windows
+/// marks as downloaded from the internet (zone 3, or 4: untrusted). A
+/// caution, not a risk: plenty of honest open-source programs are unsigned.
+pub fn unsigned_download(program: bool, unsigned: bool, zone: Option<u32>) -> Option<Finding> {
+    (program && unsigned && matches!(zone, Some(3 | 4))).then(|| caution(UNSIGNED_DOWNLOAD))
 }
 
 /// Bouncer's own report on a dropped file. Never says "safe".
@@ -106,15 +131,15 @@ impl Report {
             "size": self.size,
             "partial": self.partial,
             "risky": self.risky(),
-            "findings": self.findings.iter().map(|f| json!({"risky": f.risky, "text": f.text})).collect::<Vec<_>>(),
+            "findings": self.findings.iter().map(|f| json!({"risky": f.risky, "caution": f.caution, "text": f.text})).collect::<Vec<_>>(),
             "sha256": self.sha256,
         })
     }
 
     fn add(&mut self, more: impl IntoIterator<Item = Finding>) {
         self.findings.extend(more);
-        // Risky first, each group in the order found.
-        self.findings.sort_by_key(|f| !f.risky);
+        // Risky first, then cautions, then facts; each group in the order found.
+        self.findings.sort_by_key(|f| (!f.risky, !f.caution));
         self.findings.truncate(MAX_FINDINGS);
     }
 }
@@ -161,12 +186,21 @@ pub fn check(path: &Path) -> Result<Report, &'static str> {
     };
     let (mut report, kind) = examine_kind(&name, size, &head, tail);
     let mut more = Vec::new();
-    more.extend(zone(path));
+    let zone = zone(path);
+    let zone_id = zone.as_deref().and_then(zone_of);
+    more.extend(zone.as_deref().and_then(origin));
     if size <= WHOLE_MAX {
         report.sha256 = fingerprint(&mut file);
         #[cfg(windows)]
         if signable(kind, extension(&name).as_deref()) {
-            more.push(win::signature(&file, path));
+            let signature = win::signature(&file, path);
+            let unsigned = [NO_SIGNATURE, NO_SIGNATURE_READABLE].contains(&signature.text.as_str());
+            more.push(signature);
+            more.extend(unsigned_download(
+                installs(kind, extension(&name).as_deref()),
+                unsigned,
+                zone_id,
+            ));
         }
     } else {
         more.push(note(
@@ -174,7 +208,7 @@ pub fn check(path: &Path) -> Result<Report, &'static str> {
         ));
     }
     #[cfg(not(windows))]
-    let _ = kind;
+    let _ = (kind, zone_id);
     report.add(more);
     Ok(report)
 }
@@ -272,8 +306,8 @@ fn fingerprint(file: &mut File) -> Option<String> {
     Some(hex(&hash.finish()))
 }
 
-/// Where Windows says the file came from (its Mark of the Web).
-fn zone(path: &Path) -> Option<Finding> {
+/// The text of the file's Mark of the Web (where Windows says it came from).
+fn zone(path: &Path) -> Option<String> {
     #[cfg(windows)]
     {
         let mut stream = path.as_os_str().to_owned();
@@ -284,7 +318,7 @@ fn zone(path: &Path) -> Option<Finding> {
             .take(4096)
             .read_to_string(&mut text)
             .ok()?;
-        origin(&text)
+        Some(text)
     }
     #[cfg(not(windows))]
     {
@@ -296,16 +330,12 @@ fn zone(path: &Path) -> Option<Finding> {
 /// The finding for a `Zone.Identifier` stream's text: the zone, and the
 /// download site's host only (the rest of its address can hold tokens).
 pub fn origin(zone: &str) -> Option<Finding> {
-    let mut id = None;
-    let mut host = None;
-    for line in zone.lines().map(str::trim) {
-        if let Some(v) = line.strip_prefix("ZoneId=") {
-            id = v.trim().parse::<u32>().ok();
-        } else if let Some(v) = line.strip_prefix("HostUrl=") {
-            host = url_host(v.trim());
-        }
-    }
-    match id? {
+    let host = zone
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("HostUrl="))
+        .and_then(|v| url_host(v.trim()));
+    match zone_of(zone)? {
         3 => Some(note(match host {
             Some(host) => format!("Downloaded from the internet ({host})."),
             None => "Downloaded from the internet.".into(),
@@ -314,6 +344,14 @@ pub fn origin(zone: &str) -> Option<Finding> {
         1 | 2 => Some(note("Came from your local network or a trusted site.")),
         _ => None,
     }
+}
+
+/// The zone number of a `Zone.Identifier` stream's text (3: internet).
+fn zone_of(zone: &str) -> Option<u32> {
+    zone.lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("ZoneId="))
+        .and_then(|v| v.trim().parse().ok())
 }
 
 fn url_host(url: &str) -> Option<String> {
@@ -326,6 +364,13 @@ fn url_host(url: &str) -> Option<String> {
         host.split(':').next()?
     };
     (!host.is_empty()).then(|| cut(&visible(host), 100))
+}
+
+/// A program or an installer (MSI), not an older Office file.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn installs(kind: Kind, ext: Option<&str>) -> bool {
+    kind == Kind::WinProgram
+        || (kind == Kind::Compound && !matches!(ext, Some("doc" | "xls" | "ppt")))
 }
 
 /// Kinds of file whose signature Windows can check.
@@ -755,12 +800,14 @@ fn text_findings(name: &str, ext: Option<&str>, text: &str, found: &mut Vec<Find
         };
         found.push(Finding {
             risky: runnable,
+            caution: false,
             text: format!("Line {line} {reason}{more}."),
         });
     }
     if let Some(line) = encoded_block {
         found.push(Finding {
             risky: runnable,
+            caution: false,
             text: format!("Line {line} has a long block of encoded data."),
         });
     }
@@ -1547,9 +1594,9 @@ mod win {
                 ),
                 None => "Signed, and the signature checks out.".into(),
             }),
-            TRUST_E_NOSIGNATURE => note("No signature in the file."),
+            TRUST_E_NOSIGNATURE => note(super::NO_SIGNATURE),
             // Not a well-formed program or script for Windows' signature check.
-            TRUST_E_SUBJECT_FORM_UNKNOWN => note("No signature Windows can read in the file."),
+            TRUST_E_SUBJECT_FORM_UNKNOWN => note(super::NO_SIGNATURE_READABLE),
             TRUST_E_BAD_DIGEST => risky("Signed, but the file was changed after signing."),
             CERT_E_UNTRUSTEDROOT => risky("Signed with a certificate Windows doesn't trust."),
             TRUST_E_EXPLICIT_DISTRUST => risky("Signed with a certificate that's been blocked."),
