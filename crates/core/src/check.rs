@@ -121,7 +121,7 @@ fn bash(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
         .collect();
     let ok = understood && inside && root.usable;
     let mut verdict = Verdict::default();
-    bash_risks(&parsed, root, &mut verdict.reasons);
+    bash_risks(&parsed, Some(root), &mut verdict.reasons);
     if ok && let Some(labels) = matched {
         let mut unique: Vec<String> = Vec::new();
         for label in labels {
@@ -175,7 +175,7 @@ fn plain_powershell(command: &str) -> bool {
 /// rough reading of any command.
 fn powershell(rules: &Rules, command: &str, root: &Resolved) -> Verdict {
     let mut verdict = Verdict::default();
-    bash_risks(&rough_powershell(command), root, &mut verdict.reasons);
+    bash_risks(&rough_powershell(command), Some(root), &mut verdict.reasons);
     if !plain_powershell(command) {
         return verdict;
     }
@@ -291,7 +291,7 @@ fn path_tool(rules: &Rules, tool: &str, input: &Value, root: &Resolved) -> Verdi
     };
     let mut verdict = Verdict::default();
     for (raw, path) in &paths {
-        path_risks(raw, path, root, &mut verdict.reasons);
+        path_risks(raw, path, Some(root), &mut verdict.reasons);
         if lookalike(raw) {
             add(&mut verdict.reasons, LOOKALIKE);
         }
@@ -407,7 +407,25 @@ fn program(c: &Command) -> (Vec<String>, Option<String>) {
     (wrappers, None)
 }
 
-fn bash_risks(parsed: &Parsed, root: &Resolved, reasons: &mut Vec<&'static str>) {
+/// Risks in one line of a dropped script (file drop): the command readings
+/// above, with every word taken as written. Nothing is resolved, so a
+/// file's text never makes Bouncer touch the disk or the network (a
+/// `\\server\share` path would). No project, so no "outside" or
+/// "Bouncer's rules".
+pub fn script_risks(line: &str, powershell: bool) -> Vec<&'static str> {
+    let parsed = if powershell {
+        rough_powershell(line)
+    } else {
+        shell::parse(line)
+    };
+    let mut reasons = Vec::new();
+    bash_risks(&parsed, None, &mut reasons);
+    reasons.retain(|r| *r != RUNTIME);
+    reasons
+}
+
+/// `root` is `None` for a dropped script: paths as written, nothing resolved.
+fn bash_risks(parsed: &Parsed, root: Option<&Resolved>, reasons: &mut Vec<&'static str>) {
     let commands = &parsed.commands;
     let programs: Vec<_> = commands.iter().map(program).collect();
     let runs = |list: &[&str]| {
@@ -449,7 +467,10 @@ fn bash_risks(parsed: &Parsed, root: &Resolved, reasons: &mut Vec<&'static str>)
         {
             add(reasons, ADMIN);
         }
-        if DELETERS.contains(&program) && arg_paths(c).any(|w| !root.inside(&root.resolve(w))) {
+        if let Some(root) = root
+            && DELETERS.contains(&program)
+            && arg_paths(c).any(|w| !root.inside(&root.resolve(w)))
+        {
             add(reasons, DELETES_OUTSIDE);
         }
         if program == "git"
@@ -463,7 +484,10 @@ fn bash_risks(parsed: &Parsed, root: &Resolved, reasons: &mut Vec<&'static str>)
             add(reasons, FORCE_PUSH);
         }
         for word in path_words(c) {
-            path_risks(word, &root.resolve(word), root, reasons);
+            match root {
+                Some(root) => path_risks(word, &root.resolve(word), Some(root), reasons),
+                None => path_risks(word, Path::new(word), None, reasons),
+            }
         }
         if c.words.iter().any(|w| lookalike(w)) {
             add(reasons, LOOKALIKE);
@@ -488,7 +512,12 @@ const PROFILES: &[&str] = &[
 /// Risks from what a path names: secrets, shell startup files, Claude Code's
 /// and Bouncer's own settings, git's config and hooks. Checked on the path as
 /// written and as resolved.
-fn path_risks(raw: &str, resolved: &Path, root: &Resolved, reasons: &mut Vec<&'static str>) {
+fn path_risks(
+    raw: &str,
+    resolved: &Path,
+    root: Option<&Resolved>,
+    reasons: &mut Vec<&'static str>,
+) {
     let names: Vec<String> = raw
         .split(['/', '\\'])
         .map(str::to_lowercase)
@@ -529,8 +558,7 @@ fn path_risks(raw: &str, resolved: &Path, root: &Resolved, reasons: &mut Vec<&'s
     // The rules file itself, or its whole folder (delete, replace, re-permission).
     // Other files next to it aren't: a project may sit in the same folder.
     if root
-        .rules_file
-        .as_ref()
+        .and_then(|r| r.rules_file.as_ref())
         .is_some_and(|(file, dir)| resolved == file || resolved == dir)
     {
         add(reasons, BOUNCER);
@@ -539,7 +567,7 @@ fn path_risks(raw: &str, resolved: &Path, root: &Resolved, reasons: &mut Vec<&'s
 
 /// Letters that look like Latin ones: fullwidth forms anywhere, Cyrillic or
 /// Greek mixed with Latin letters in one word.
-fn lookalike(word: &str) -> bool {
+pub(crate) fn lookalike(word: &str) -> bool {
     let latin = word.chars().any(|c| c.is_ascii_alphabetic());
     word.chars().any(|c| {
         matches!(c, '\u{FF01}'..='\u{FF5E}')
