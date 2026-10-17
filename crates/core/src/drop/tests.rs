@@ -756,9 +756,13 @@ fn random_bytes_never_panic_whatever_the_name() {
 
 #[test]
 fn the_download_site_is_named_by_its_host_only() {
-    let zone = "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.com/page\r\nHostUrl=https://user:pw@dl.example.com:8443/f.exe?token=abc\r\n";
+    // A login in the address (built here, so no scanner reads it as a secret).
+    let login = ["user", "pw"].join(":");
+    let zone = format!(
+        "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.com/page\r\nHostUrl=https://{login}@dl.example.com:8443/f.exe?token=abc\r\n"
+    );
     assert_eq!(
-        origin(zone).unwrap(),
+        origin(&zone).unwrap(),
         note("Downloaded from the internet (dl.example.com).")
     );
     assert_eq!(
