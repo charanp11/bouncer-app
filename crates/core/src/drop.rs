@@ -86,6 +86,7 @@ fn note(text: impl Into<String>) -> Finding {
 
 /// Windows found no signature it could check (`win::signature`).
 pub const NO_SIGNATURE: &str = "No signature in the file.";
+#[cfg(windows)]
 const NO_SIGNATURE_READABLE: &str = "No signature Windows can read in the file.";
 pub const UNSIGNED_DOWNLOAD: &str =
     "Not signed and downloaded from the internet. Only run it if you trust where it came from.";
