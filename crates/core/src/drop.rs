@@ -1293,6 +1293,13 @@ fn facts(r: &Report) -> String {
 
 // ---- small helpers -------------------------------------------------------------
 
+/// A dropped path's name as shown (never its folder).
+pub fn name_of(path: &Path) -> String {
+    path.file_name()
+        .map(|n| shown(&n.to_string_lossy()))
+        .unwrap_or_default()
+}
+
 /// Text from the file as shown: hidden characters as `\u{…}`, cut at `SHOWN`.
 fn shown(text: &str) -> String {
     cut(&visible(text), SHOWN)
@@ -1463,7 +1470,9 @@ mod win {
     use std::os::windows::io::AsRawHandle;
     use std::path::Path;
 
-    use windows_sys::Win32::Foundation::{TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE};
+    use windows_sys::Win32::Foundation::{
+        TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE, TRUST_E_SUBJECT_FORM_UNKNOWN,
+    };
     use windows_sys::Win32::Security::Cryptography::{
         CERT_NAME_SIMPLE_DISPLAY_TYPE, CertGetNameStringW,
     };
@@ -1539,6 +1548,8 @@ mod win {
                 None => "Signed, and the signature checks out.".into(),
             }),
             TRUST_E_NOSIGNATURE => note("No signature in the file."),
+            // Not a well-formed program or script for Windows' signature check.
+            TRUST_E_SUBJECT_FORM_UNKNOWN => note("No signature Windows can read in the file."),
             TRUST_E_BAD_DIGEST => risky("Signed, but the file was changed after signing."),
             CERT_E_UNTRUSTEDROOT => risky("Signed with a certificate Windows doesn't trust."),
             TRUST_E_EXPLICIT_DISTRUST => risky("Signed with a certificate that's been blocked."),

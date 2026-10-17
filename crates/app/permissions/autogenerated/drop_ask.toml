@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-drop-ask"
+description = "Enables the drop_ask command without any pre-configured scope."
+commands.allow = ["drop_ask"]
+
+[[permission]]
+identifier = "deny-drop-ask"
+description = "Denies the drop_ask command without any pre-configured scope."
+commands.deny = ["drop_ask"]

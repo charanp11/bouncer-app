@@ -15,7 +15,9 @@
         "title": "Bouncer",
         "width": 320,
         "height": 44,
-        "visible": false,
+        "x": -32000,
+        "y": -32000,
+        "visible": true,
         "focus": false,
         "focusable": false,
         "acceptFirstMouse": true,
@@ -27,7 +29,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visibleOnAllWorkspaces": true,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "transparent": true,
         "shadow": false
       }
