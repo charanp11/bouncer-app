@@ -106,3 +106,12 @@ test("drop: Bouncer is never happy over a file, and the motion is CSS only, shor
   const card = main.slice(main.indexOf("const first = view.queue[0];"), main.indexOf("renderApproval(view, first);"));
   assert.match(card, /reaction = cut\(reaction\);/);
 });
+
+test("drop: a caution line is amber and leaves the heading as it is", () => {
+  const r = report({ risky: false, findings: [{ risky: false, caution: true, text: "Not signed and downloaded from the internet. Only run it if you trust where it came from." }] });
+  assert.equal(verdict(r), "Nothing risky found.");
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  assert.match(main, /f\.risky \? "flag" : f\.caution \? "caution" : ""/);
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.findings li\.caution::before \{\s*background: var\(--sun-deep\);/);
+});

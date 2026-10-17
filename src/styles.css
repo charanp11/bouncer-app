@@ -2218,6 +2218,16 @@ pre.cmd {
   background: var(--risk);
 }
 
+/* A caution (an unsigned program from the internet): amber, and the
+   heading stays as it is. */
+.findings li.caution {
+  color: var(--text);
+}
+
+.findings li.caution::before {
+  background: var(--sun-deep);
+}
+
 .hash {
   display: flex;
   gap: 8px;
