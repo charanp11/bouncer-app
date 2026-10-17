@@ -19,6 +19,7 @@ import { markdown, type Piece } from "./markdown.ts";
 import { ready, toggle as togglePick, type Question } from "./questions.ts";
 import { updateButton, type Update } from "./update.ts";
 import { PressGate } from "./press.ts";
+import { answerApply, answerRefused, CAN_BE_WRONG, hoverText, OWN_CHECKS, sizeText, stillAttached, verdict, type Answer, type Attached, type DropEvent, type DropHover, type DropReport, type DropView } from "./drop.ts";
 import { ARM_MS, armState } from "./arm.ts";
 import "./styles.css";
 
@@ -107,6 +108,10 @@ type View = {
   confirmWipe?: boolean;
   /** A newer release found by the daily check (release builds only). */
   update: Update | null;
+  /** A dropped file: being checked, refused, or Bouncer's report on it. */
+  drop: DropView;
+  /** Something is being dragged over the island. */
+  dropHover: DropHover;
 };
 
 /** "Not sent: …" under a card's buttons after the backend refused a click. */
@@ -1385,11 +1390,19 @@ function draw(view: View) {
   // The backend stops an explanation whose card went; forget it here too.
   if (explaining && !view.queue.some((r) => r.id === explaining?.id)) explaining = null;
 
+  // A dropped file's state follows the backend's; its report waits under a card.
+  syncDrop(view.drop);
+
   const first = view.queue[0];
   if (first) {
     if (first.id !== front.id) front = { id: first.id, since: 0 };
     greetUntil = 0;
     renderApproval(view, first);
+    return;
+  }
+
+  if (view.dropHover) {
+    renderCatch(view.dropHover);
     return;
   }
 
@@ -1407,6 +1420,11 @@ function draw(view: View) {
   }
   chatAsked = false;
   liveBubble = null;
+
+  if (view.drop) {
+    renderDrop(view, view.drop, done);
+    return;
+  }
 
   if (greeting(view, now, greetUntil, REDUCED.matches)) {
     // Just Bouncer dropping in: no words (Charan).
@@ -1570,13 +1588,18 @@ function explainPart(request: Request): HTMLElement {
 }
 
 /** Shows the explanation in its box, in place (nothing else is rebuilt). */
-function fillExplain(box = island.querySelector<HTMLElement>(".explain")) {
+function fillExplain(box = island.querySelector<HTMLElement>(".explain[data-explain]")) {
   const x = explaining;
   if (!box || !x || box.dataset.explain !== x.id) return;
+  fillBox(box, x, explainSince, { busy: "Claude is explaining…", done: "Read it, then decide.", none: "No explanation." });
+}
+
+/** An explanation's or a file answer's box, filled in place. */
+function fillBox(box: HTMLElement, x: Explain, since: number, words: { busy: string; done: string; none: string }) {
   const body = box.querySelector<HTMLElement>(".xbody")!;
   const end = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
   if (x.text) answerInto(body, x.text);
-  else body.replaceChildren(el("p", "chatnone", x.busy || x.error ? "" : "No explanation."));
+  else body.replaceChildren(el("p", "chatnone", x.busy || x.error ? "" : words.none));
   if (end) body.scrollTop = body.scrollHeight;
   // The status only when it changes: a spinner made again would turn again.
   const state = x.busy ? "busy" : x.error ? `error:${x.error}` : "done";
@@ -1586,14 +1609,14 @@ function fillExplain(box = island.querySelector<HTMLElement>(".explain")) {
     if (x.busy) {
       // Three turns from the start, then still, however often the card is drawn.
       const spin = el("span", "ic spin");
-      const t = performance.now() - explainSince;
+      const t = performance.now() - since;
       spin.style.animationDelay = `${-t}ms, ${SPIN_MS - t}ms`;
-      status.replaceChildren(spin, el("span", "", "Claude is explaining…"));
+      status.replaceChildren(spin, el("span", "", words.busy));
     }
     else if (x.error) {
       status.replaceChildren();
       agentText(status, x.error);
-    } else status.replaceChildren("Read it, then decide.");
+    } else status.replaceChildren(words.done);
     status.className = x.error ? "xstate err" : "xstate";
     box.querySelector<HTMLElement>(".xfoot button")!.textContent = x.busy ? "Stop" : "Hide";
   }
@@ -1667,12 +1690,16 @@ function newChat() {
 function sendChat() {
   const text = draft;
   if (!text.trim() || chat.busy || chatStatus?.state !== "confirmed") return;
+  // "Ask about it": the file goes with this message only, as previewed.
+  const file = attached;
+  attached = null;
+  if (file) chat = { ...chat, items: [...chat.items, { kind: "tool", name: "File", target: `${file.name} · ${sizeText(file.size)}`, denied: false }] };
   chat = begin(chat, text);
   const id = chat.id;
   draft = "";
   pinned = true;
-  invoke("chat_send", { chat: id, prompt: text, model: chat.model }).catch((code) => {
-    if (chat.id === id) chat = refused(chat, String(code));
+  invoke("chat_send", { chat: id, prompt: text, model: chat.model, file: file?.id ?? null }).catch((code) => {
+    if (chat.id === id) chat = refused(chat, file && code === "gone" ? "file-gone" : String(code));
     if (code === "missing" || code === "unconfirmed") {
       chatAsked = false;
       askChatStatus();
@@ -1684,9 +1711,13 @@ function sendChat() {
 
 /** A chat event: kept even while a card or Settings has the screen, drawn
  * now if the panel is showing. */
-function onChat(e: ChatEvent | ExplainEvent) {
+function onChat(e: ChatEvent | ExplainEvent | DropEvent) {
   if ("explain" in e) {
     onExplain(e);
+    return;
+  }
+  if ("drop" in e) {
+    onDropAnswer(e);
     return;
   }
   const before = chat;
@@ -1890,6 +1921,8 @@ function renderChat(view: View, done: boolean) {
     action.addEventListener("click", sendChat);
   }
   compose.append(input, action);
+  attached = stillAttached(attached, view.drop);
+  const attach = attached ? attachPart(attached) : null;
 
   const usage = el("div", "usage");
   // The plan's use only comes with a chat reply (never fetched on its own),
@@ -1899,15 +1932,262 @@ function renderChat(view: View, done: boolean) {
   else nums.append(NO_USAGE_YET);
   usage.append(el("div", "", "Runs your Claude Code · counts against your plan"), nums);
 
-  const body = el("div", "body chat");
+  const body = el("div", attach ? "body chat attached" : "body chat");
   body.dataset.screen = "chat";
-  body.append(models, log, compose, usage);
+  body.append(models, log, ...(attach ? [attach] : []), compose, usage);
   const fresh = iconButton("New chat", PLUS_ICON);
   fresh.addEventListener("click", newChat);
   const state: BallState = chat.busy ? "working" : mood(view, done);
   island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
   // A conversation stays at its end; the first-run note starts at its top.
   log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+}
+
+// ---- file drop (roadmap d) ---------------------------------------------------
+// Bouncer checks a dropped file on its own (crates/core/src/drop.rs) and shows
+// its report. Nothing leaves the machine until Send on the exact text Claude
+// would get (the preview, from the backend). The page holds no path: only
+// the name, the report and the drop's ID, the one thing it sends back.
+
+/** Claude's answer to "Is this safe to run?" for the shown drop. */
+let fileAnswer: Answer | null = null;
+let answerSince = 0;
+/** The exact text "Send to Claude" would send, while it's shown. */
+let previewing: { id: string; text: string } | null = null;
+/** "Ask about it": the file going with the next chat message. */
+let attached: Attached | null = null;
+/** The drop the claude status was last asked for. */
+let statusFor = "";
+/** The preview or answer box just opened: scroll it into view once. */
+let reveal = false;
+
+/** Anything about a drop that isn't the one shown is forgotten. */
+function syncDrop(d: DropView) {
+  const id = d?.state === "report" ? d.id : "";
+  if (fileAnswer && fileAnswer.id !== id) fileAnswer = null;
+  if (previewing && previewing.id !== id) previewing = null;
+  attached = stillAttached(attached, d);
+}
+
+/** A file dragged over the island: one big target, easy to hit. */
+function renderCatch(h: Exclude<DropHover, null>) {
+  setShape("open");
+  const body = el("div", "body");
+  body.dataset.screen = "catch";
+  const zone = el("div", h === "one" ? "catch" : "catch many");
+  zone.append(el("b", "", hoverText(h)), el("span", "", h === "one" ? "Bouncer only reads it. Nothing runs, nothing is sent." : "Drop a single file."));
+  body.append(zone);
+  island.replaceChildren(head(h === "one" ? "needs" : "risky", "Check a file"), body);
+}
+
+function nameLine(name: string): HTMLElement {
+  const line = el("b", "dropname");
+  agentText(line, name);
+  return line;
+}
+
+function renderDrop(view: View, d: Exclude<DropView, null>, done: boolean) {
+  setShape("open");
+  const body = el("div", "body");
+  const close = () => invoke("drop_close");
+  if (d.state === "checking") {
+    body.dataset.screen = "drop-checking";
+    const wait = el("div", "answering");
+    wait.append(el("span", "ic spin"), el("span", "", "Reading it. Nothing runs."));
+    body.append(nameLine(d.name), wait);
+    island.replaceChildren(head("working", "Checking a file", "", close), body);
+    return;
+  }
+  if (d.state === "refused") {
+    body.dataset.screen = "drop-refused";
+    if (d.name) body.append(nameLine(d.name));
+    body.append(el("div", "reason", d.text));
+    island.replaceChildren(head(mood(view, done), "Can't check that", "", close), body);
+    return;
+  }
+  body.dataset.screen = `drop:${d.id}`;
+  const file = el("div", "dropfile");
+  file.append(nameLine(d.name), el("span", "meta", `${d.kind} · ${sizeText(d.size)}${d.partial ? " · read in part" : ""}`));
+  body.append(file, el("div", d.risky ? "reason" : "clean", verdict(d)));
+  if (d.findings.length) {
+    const list = el("ul", "findings");
+    for (const f of d.findings) {
+      const li = el("li", f.risky ? "flag" : "");
+      agentText(li, f.text);
+      list.append(li);
+    }
+    body.append(list);
+  }
+  if (d.sha256) {
+    const hash = el("div", "hash");
+    hash.append(el("span", "", "SHA-256"), el("code", "", d.sha256));
+    body.append(hash);
+  }
+  body.append(el("div", "own", OWN_CHECKS));
+  // Which claude would answer: asked again once per drop (it may have been
+  // confirmed in Settings since).
+  if (statusFor !== d.id) {
+    statusFor = d.id;
+    chatAsked = false;
+    askChatStatus();
+  }
+  const ready = chatStatus?.state === "confirmed";
+  let box: HTMLElement | null = null;
+  if (fileAnswer?.id === d.id) box = answerBox(d);
+  else if (previewing?.id === d.id) box = previewBox(d, previewing.text, ready);
+  if (box) {
+    body.append(box);
+    // Just opened: its buttons in view (the report above can be long).
+    if (reveal) requestAnimationFrame(() => box.scrollIntoView({ block: "nearest" }));
+    reveal = false;
+  } else {
+    const actions = el("div", "actions");
+    const safe = el("button", "btn", "Is this safe to run?");
+    safe.dataset.key = `drop-safe:${d.id}`;
+    safe.disabled = !ready;
+    safe.addEventListener("click", () => {
+      invoke<string>("drop_preview", { id: d.id, ask: false })
+        .then((text) => {
+          previewing = { id: d.id, text };
+          reveal = true;
+          if (current) render(current);
+        })
+        .catch(() => {});
+    });
+    const ask = el("button", "btn", "Ask about it");
+    ask.dataset.key = `drop-ask:${d.id}`;
+    ask.disabled = !ready;
+    ask.addEventListener("click", () => {
+      attached = { id: d.id, name: d.name, size: d.size, preview: null };
+      invoke<string>("drop_preview", { id: d.id, ask: true })
+        .then((text) => {
+          if (attached?.id === d.id) attached = { ...attached, preview: text };
+          if (current) render(current);
+        })
+        .catch(() => {});
+      refocus = CHAT_INPUT;
+      invoke("chat_open", { open: true });
+      invoke("keyboard", { on: true });
+    });
+    actions.append(safe, ask);
+    body.append(actions);
+    if (chatStatus && !ready) {
+      body.append(el("div", "after", chatStatus.state === "missing" ? "Claude Code wasn't found: only Bouncer's own checks." : "To ask Claude, confirm the claude path in Settings first."));
+    }
+  }
+  island.replaceChildren(head(d.risky ? "risky" : mood(view, done), "File check", d.risky ? "· looks risky" : "", close), body);
+  fillAnswer();
+}
+
+/** Text with its lines kept, every piece through agentText. */
+function linesInto(parent: HTMLElement, text: string) {
+  text.split("\n").forEach((line, i) => {
+    if (i) parent.append("\n");
+    agentText(parent, line);
+  });
+}
+
+/** The exact text that would go to Claude, with Cancel and Send. */
+function previewBox(d: DropReport, text: string, ready: boolean): HTMLElement {
+  const box = el("div", "explain preview");
+  const top = el("div", "xhead");
+  top.append(el("b", "", "Exactly what goes to Claude"), el("span", "", "Nothing is sent before Send"));
+  const pre = el("pre", "xbody pv");
+  pre.tabIndex = 0;
+  pre.setAttribute("role", "region");
+  pre.setAttribute("aria-label", "What would be sent");
+  linesInto(pre, text);
+  const foot = el("div", "actions");
+  const cancel = el("button", "btn", "Cancel");
+  cancel.dataset.key = `drop-cancel:${d.id}`;
+  cancel.addEventListener("click", () => {
+    previewing = null;
+    refocus = `drop-safe:${d.id}`;
+    if (current) render(current);
+  });
+  const send = el("button", "btn send", "Send to Claude");
+  send.dataset.key = `drop-send:${d.id}`;
+  send.disabled = !ready;
+  send.addEventListener("click", () => {
+    previewing = null;
+    fileAnswer = explainStart(d.id);
+    answerSince = performance.now();
+    reveal = true;
+    refocus = `drop-answer:${d.id}`;
+    invoke("drop_ask", { id: d.id, model: chat.model }).catch((code) => {
+      fileAnswer = answerRefused(fileAnswer, d.id, String(code));
+      fillAnswer();
+    });
+    if (current) render(current);
+  });
+  foot.append(cancel, send);
+  box.append(top, pre, foot);
+  return box;
+}
+
+/** Claude's answer for the shown drop: a fixed-height box, filled in place. */
+function answerBox(d: DropReport): HTMLElement {
+  const box = el("div", "explain");
+  box.dataset.drop = d.id;
+  const top = el("div", "xhead");
+  top.append(el("b", "", "Claude's answer"), el("span", "", CAN_BE_WRONG));
+  const body = el("div", "xbody");
+  body.tabIndex = 0;
+  body.setAttribute("role", "region");
+  body.setAttribute("aria-label", "Claude's answer");
+  const foot = el("div", "xfoot");
+  const button = el("button", "btn small");
+  button.dataset.key = `drop-answer:${d.id}`;
+  button.addEventListener("click", () => {
+    if (fileAnswer?.busy) {
+      invoke("drop_stop");
+      return;
+    }
+    fileAnswer = null;
+    refocus = `drop-safe:${d.id}`;
+    if (current) render(current);
+  });
+  foot.append(el("span", "xstate"), button);
+  box.append(top, body, foot);
+  return box;
+}
+
+function fillAnswer(box = island.querySelector<HTMLElement>(".explain[data-drop]")) {
+  const x = fileAnswer;
+  if (!box || !x || box.dataset.drop !== x.id) return;
+  fillBox(box, x, answerSince, { busy: "Claude is reading the facts…", done: "Read it, then decide.", none: "No answer." });
+}
+
+function onDropAnswer(e: DropEvent) {
+  const before = fileAnswer;
+  fileAnswer = answerApply(fileAnswer, e);
+  if (fileAnswer === before) return;
+  if (fileAnswer && !fileAnswer.busy && !fileAnswer.error && fileAnswer.text) announcer.textContent = `Claude: ${fileAnswer.text}`;
+  fillAnswer();
+}
+
+/** In the chat panel: the attached file, and exactly what goes with the message. */
+function attachPart(a: Attached): HTMLElement {
+  const box = el("div", "attach");
+  const row = el("div", "attachrow");
+  const chip = el("div", "tool");
+  const what = el("span");
+  agentText(what, `${a.name} · ${sizeText(a.size)}`);
+  chip.append(el("b", "", "File"), what);
+  const remove = closeButton(() => {
+    attached = null;
+    if (current) render(current);
+  });
+  remove.setAttribute("aria-label", "Don't send the file");
+  row.append(chip, el("span", "lbl", "Goes with your next message"), remove);
+  const pre = el("pre", "pv");
+  pre.tabIndex = 0;
+  pre.setAttribute("role", "region");
+  pre.setAttribute("aria-label", "Sent with your message");
+  if (a.preview === null) pre.append("…");
+  else linesInto(pre, a.preview);
+  box.append(row, pre);
+  return box;
 }
 
 /** Settings' shortcut switch. Ctrl+Alt+B only opens the island (the
@@ -2178,7 +2458,7 @@ island.addEventListener(
     // keyboard stays there (arrivalFocus): Explain (or its box), or any other
     // control; an answer that acts only as PRESSED_ANSWER (focus nowhere).
     const target = e.target instanceof Element ? e.target : null;
-    const x = target?.closest<HTMLElement>(".explainbtn, .explain");
+    const x = target?.closest<HTMLElement>(".explainbtn, .explain[data-explain]");
     if (x) pressed = x.dataset.key ?? `explain:${x.dataset.explain}`;
     else if (target?.closest(".btn.allow")) pressed = PRESSED_ANSWER;
     else pressed = focusKey(target?.closest("button, [tabindex], input, textarea, summary") ?? null);
@@ -2201,6 +2481,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (current?.settings) closeSettings();
+  // A file's report closes on its own screen (not under the chat or Settings).
+  if (current?.drop && !current.queue.length && !current.chat && !current.settings) invoke("drop_close");
   if (current?.chat) closeChat();
   if (current?.open && !current.queue.length) {
     detail = null;
@@ -2358,7 +2640,7 @@ function report() {
 }
 new ResizeObserver(report).observe(stage);
 
-const chatFeed = new Channel<ChatEvent | ExplainEvent>();
+const chatFeed = new Channel<ChatEvent | ExplainEvent | DropEvent>();
 chatFeed.onmessage = onChat;
 invoke("chat_subscribe", { feed: chatFeed });
 

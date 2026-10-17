@@ -140,6 +140,8 @@ export function sendError(code: string): string {
       return "That chat ended. Send again to start a new one.";
     case "gone":
       return "That request isn't waiting any more.";
+    case "file-gone":
+      return "Bouncer no longer holds that file. Drop it again.";
     case "tool":
       return "Only commands can be explained.";
     default:
