@@ -237,7 +237,7 @@ test("explain: the keyboard taken by a press on Explain stays there; any other a
   // Only a press that is itself taking the keyboard counts, and it's used once.
   const down = main.slice(main.indexOf('"pointerdown"'), main.indexOf('invoke("keyboard", { on: true });', main.indexOf('"pointerdown"')));
   assert.match(down, /pressed = null;\s+if \(!current\?\.open \|\| current\.keyboard\) return;/);
-  assert.match(down, /closest<HTMLElement>\("\.explainbtn, \.explain"\)/);
+  assert.match(down, /closest<HTMLElement>\("\.explainbtn, \.explain\[data-explain\]"\)/);
   assert.match(main, /const target = newCard \? arrivalFocus\(card\.id, arrived \? pressed : null, card\.kind\) : had;\s+pressed = null;/);
 });
 

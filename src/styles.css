@@ -2121,3 +2121,177 @@ pre.cmd {
     opacity: 1;
   }
 }
+
+/* File drop (roadmap d, prototype v0.27): the catch target while a file is
+   dragged over the island (big, so the drop is easy to hit), the report,
+   the preview of exactly what would be sent, and the chat's attachment.
+   Never green, never "safe": Bouncer's report is advice. */
+.catch {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  min-height: 160px;
+  padding: 16px;
+  border: 2px dashed rgba(255, 206, 58, 0.55);
+  border-radius: var(--r-card);
+  background: rgba(255, 206, 58, 0.05);
+  text-align: center;
+}
+
+.catch b {
+  color: var(--sun);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.catch span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.catch.many {
+  border-color: rgba(239, 90, 82, 0.6);
+  background: rgba(239, 90, 82, 0.06);
+}
+
+.catch.many b {
+  color: #ffb4ae;
+}
+
+.dropfile {
+  display: grid;
+  gap: 2px;
+}
+
+.dropname {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dropfile .meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clean {
+  font-size: 12.5px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.findings {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.findings li {
+  position: relative;
+  padding-left: 14px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.findings li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.findings li.flag {
+  color: var(--text);
+}
+
+.findings li.flag::before {
+  background: var(--risk);
+}
+
+.hash {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.hash span {
+  flex: none;
+}
+
+.hash code {
+  min-width: 0;
+  font: 11px var(--mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.own {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.explain.preview .xbody.pv {
+  height: 160px;
+  margin: 0;
+  font: 11.5px/1.45 var(--mono);
+  color: var(--muted);
+}
+
+.body.chat.attached {
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+}
+
+.attach {
+  display: grid;
+  gap: 6px;
+}
+
+.attachrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attachrow .tool {
+  flex: none;
+  max-width: 55%;
+}
+
+.attachrow .lbl {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.attach pre.pv {
+  max-height: 72px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--raised);
+  font: 11px/1.4 var(--mono);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.attach pre.pv:focus-visible {
+  outline: 2px solid var(--sun);
+  outline-offset: 2px;
+}
