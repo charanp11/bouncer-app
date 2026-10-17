@@ -8,6 +8,7 @@ pub mod chat;
 pub mod check;
 pub mod code;
 pub mod diff;
+pub mod drop;
 pub mod event;
 pub mod hooks;
 pub mod ipc;
