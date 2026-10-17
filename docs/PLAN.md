@@ -3916,7 +3916,7 @@ opens Settings and it stays; pick then Send at once answered on the first
 click (UI19); the chat shows "Plan use shows after your first message"
 (C21). v0.8.x is done; next is roadmap d (file drop, Phase 7).
 
-## Phase 7 — File drop (~1 week) (current)
+## Phase 7 — File drop (~1 week)
 
 Roadmap d. Charan's twist (2026-10-12): after a drop, choose "Is this safe to
 run?" or "Ask about it"; read-only; nothing sent before he confirms.
@@ -4168,13 +4168,47 @@ Done when:
 - [x] Prototype has the hover, report and preview states with build-spec
       rules; `docs/TESTS.md` rows; CPU while hovering and with a report
       within the card budget (prototype v0.30, TESTS F1–F15, hand check 6)
-- [ ] Test instance checks with real drags (own instance, black backdrop,
+- [x] Test instance checks with real drags (own instance, black backdrop,
       guard), `claude` runs only with `CLAUDE_CONFIG_DIR=%USERPROFILE%\bouncer-test-claude`,
       `--strict-mcp-config` (already in `LOCKED`) and the playground hooks
-      (real drags done with the fake `claude`; a real Claude Code run is hand check 6)
-- [ ] fmt, clippy, tests and `check-tests` green locally and in CI on both OSes
-      (green locally; CI on the PR)
+      (real drags done with the fake `claude`; the real Claude Code run was hand check 6, passed)
+- [x] fmt, clippy, tests and `check-tests` green locally and in CI on both OSes
 - [ ] Release v0.9.0 after Charan's OK and merge
+
+**Catch polish (Charan, 2026-10-16, before merge; prototype v0.31).**
+While a file is over the island Bouncer opens up like a mitt (220 ms, mouth
+open) and looks where it came in; while it's checked he holds that pose. The
+drop is one 450 ms gulp as the report appears (it never holds the report
+back); then he looks wary (risky) or curious (nothing found), never happy. A
+refusal is a 360 ms "nope" shake. A card cuts any of it for good; reduced
+motion shows only the faces. CSS on the body's own SVG, no new dependency.
+Found on the way: growing the island under the cursor made Windows report a
+leave and an enter at once, so the catch flicked back to the pill; a leave
+now counts only if no enter follows within 150 ms. Checks, real drags on the
+test instance: one catch, no flicker; gulp then wary (`setup.ps1`), gulp then
+curious (`notes.txt`, drop to settled about 500 ms); a refusal shook; a card
+sent 190 ms into the gulp took the island at once and the gulp never came
+back; reduced motion: still poses, no open mouth left, no shake. CPU over a
+10 s window holding one drag: 16.6% / 19.7% of a core, the page before the
+polish 15.0% / 22.3% (the drag itself: the island's grow / shrink and
+Tauri's per-move drag events), reduced motion 2.5–3.7%; report up, idle,
+1.0%. TESTS F16.
+
+**Manual checks (Charan, 2026-10-16, Claude Code 2.1.301, Windows, dev
+app): hand check 6 passed.** The catch animation and the wary face on
+`run.ps1`, "Looks risky" with line 1; the preview showed only the file name;
+Cancel sent nothing, Send streamed an answer; `Bouncer_0.8.1_x64-setup.exe`:
+"No signature in the file" and the right SHA-256 (no `Zone.Identifier`
+stream, so rightly no origin line); the zip listed without unpacking; a
+folder and two files refused with a shake; "Ask about it" on `notepad.exe`
+showed the chip and an honest answer (its bytes not sent).
+
+**Unsigned downloads (Charan, 2026-10-16, before merge; prototype v0.32).**
+A program (MZ) or MSI with no signature Windows can check and a Mark of the
+Web (internet or untrusted zone) gets an amber caution line: "Not signed and
+downloaded from the internet. Only run it if you trust where it came from."
+A caution is a third tone between risky and facts: it leaves the heading as
+it is. TESTS F17.
 
 Old notes (Phase 7 as first planned, kept for history; the audit above
 replaces them):
@@ -4345,6 +4379,27 @@ public repos. No paid APIs.
   before Phase 4 is merged.
 
 ## Phase summaries
+
+### Phase 7 summary (2026-10-16)
+
+- Roadmap d, file drop (#50): drop a file on the island and Bouncer says
+  what it is and what looks risky, from its own checks, with no AI and
+  nothing sent: what it really is from its bytes, name tricks, script lines
+  (paths never resolved), a zip's list (never unpacked), a shortcut's target,
+  Windows' signature check, where it was downloaded from, SHA-256. Never
+  "safe"; always "can be wrong · you decide"; unsigned downloads get an
+  amber caution.
+- "Is this safe to run?" shows exactly what would go to the locked chat
+  (the name only, never the folder) and sends only on Send; "Ask about it"
+  attaches it to one chat message.
+- Bouncer catches the file, gulps, then looks wary or curious; refusals get
+  a shake.
+- Found on the way: a window created hidden never takes drops (now created
+  visible, off-screen); today's build was already safe from a drop
+  navigating the island (WebView2 refused it), and the island now refuses
+  any page but its own.
+- Tests: 270+ Rust, 119 frontend; TESTS F1–F17 (180 scenarios); hand check
+  6 passed. Release: v0.9.0.
 
 (Added as each phase passes Verify.)
 
