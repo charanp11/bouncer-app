@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod chat;
+mod drop;
 mod region;
 mod update;
 
@@ -145,6 +146,10 @@ fn main() {
             chat::chat_new,
             explain,
             explain_stop,
+            drop::drop_close,
+            drop::drop_preview,
+            drop::drop_ask,
+            drop::drop_stop,
             hooks_preview,
             hooks_write,
             set_autostart,
@@ -153,7 +158,17 @@ fn main() {
             set_updates,
             update::update_install
         ])
+        // Defence in depth: the island never leaves its own page. (A file
+        // dropped on it today is refused by WebView2 itself; PLAN, "Phase 7".)
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("navigation")
+                .on_navigation(|_, url| our_page(url))
+                .build(),
+        )
         .on_window_event(|window, event| match event {
+            // Files dragged onto the island: wry's drop handler
+            // (`dragDropEnabled`), passed on as window events.
+            WindowEvent::DragDrop(event) => drop::on_drag(window.app_handle(), event),
             WindowEvent::Moved(_) => {
                 if let Some(island) = window.try_state::<Island>() {
                     let _ = island.moved.lock().unwrap().send(());
@@ -178,6 +193,7 @@ fn main() {
             }));
             tick(app.handle().clone(), desk.clone());
             let prefs_path = prefs::path();
+            app.manage(drop::Drops::default());
             app.manage(Island {
                 desk: desk.clone(),
                 feed: Mutex::new(None),
@@ -297,6 +313,9 @@ fn tick(app: AppHandle, desk: Arc<Desk>) {
             std::thread::sleep(TICK);
             desk.reload_rules();
             desk.expire_sessions();
+            if app.state::<drop::Drops>().expire() {
+                show(&app, desk.view());
+            }
             let now = activity::ms(std::time::SystemTime::now());
             if let Some(idle) = away::user_idle()
                 && let Some(since) = away.update(now, idle, limit)
@@ -427,6 +446,22 @@ fn show(app: &AppHandle, view: Value) {
     });
 }
 
+/// Sends the current view again (and lays the window out): for state that
+/// lives outside the desk, such as a dropped file.
+fn refresh(app: &AppHandle) {
+    show(app, app.state::<Island>().desk.view());
+}
+
+/// The island's own page: the bundled app (`tauri://localhost` or
+/// `http://tauri.localhost`), or the dev server in a debug build.
+fn our_page(url: &tauri::Url) -> bool {
+    let place = (url.scheme(), url.host_str(), url.port());
+    matches!(
+        place,
+        ("tauri", Some("localhost"), None) | ("http" | "https", Some("tauri.localhost"), None)
+    ) || (cfg!(debug_assertions) && place == ("http", Some("127.0.0.1"), Some(1420)))
+}
+
 /// The request IDs of the cards waiting in `view`.
 fn waiting(view: &Value) -> Vec<&str> {
     view["queue"]
@@ -447,13 +482,19 @@ fn send(app: &AppHandle, mut view: Value) {
     // Opened on purpose (the pill) it stays open with no sessions too, so
     // Settings is always reachable.
     let expanded = island.expanded.load(Ordering::Relaxed);
-    let open = has("queue") || settings || chat || expanded;
+    // A file over the island, being checked, refused or reported.
+    let (dropped, hover) = app
+        .try_state::<drop::Drops>()
+        .map_or((Value::Null, Value::Null), |d| d.view());
+    let file = !dropped.is_null() || !hover.is_null();
+    let open = has("queue") || settings || chat || expanded || file;
     let hidden = !has("queue")
         && !has("sessions")
         && !away
         && !settings
         && !chat
         && !expanded
+        && !file
         && view["paused"] != true;
     island.hidden.store(hidden, Ordering::Relaxed);
     view["open"] = open.into();
@@ -461,6 +502,8 @@ fn send(app: &AppHandle, mut view: Value) {
     view["rounded"] = ROUNDED.into();
     view["settings"] = settings.into();
     view["chat"] = chat.into();
+    view["drop"] = dropped;
+    view["dropHover"] = hover;
     view["keyboard"] = island.focused.load(Ordering::Relaxed).into();
     view["confirmWipe"] = island.confirm_wipe.swap(false, Ordering::Relaxed).into();
     view["prefs"] = island.prefs.lock().unwrap().to_json();
@@ -487,9 +530,11 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     // A visible window that isn't where we put it was dragged: that's the new
     // spot. Checked even when this layout hides the island (closed with ×
     // right after a drag), or the strip would go back to the old spot.
+    // Before Bouncer first places it, the window is parked off-screen
+    // (visible, so WebView2 takes drops: PLAN, "Phase 7"): not a drag.
     if window.is_visible().unwrap_or(false)
         && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
-        && *placed != Some(pos)
+        && placed.is_some_and(|p| p != pos)
     {
         *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
     }
@@ -1157,6 +1202,10 @@ fn tray(",
             "chat-new",
             "explain",
             "explain-stop",
+            "drop-close",
+            "drop-preview",
+            "drop-ask",
+            "drop-stop",
             "hooks-preview",
             "hooks-write",
             "set-autostart",
@@ -1500,6 +1549,37 @@ fn show(",
             .unwrap()];
         let keep = body.find("keep_explaining(&waiting(&view))").unwrap();
         assert!(keep < body.find("send(app, view)").unwrap());
+    }
+
+    /// The island stays on its own page: a dropped file, a link or anything
+    /// else is refused. (Tauri allows every navigation unless told.)
+    #[test]
+    fn the_island_never_leaves_its_page() {
+        let url = |s: &str| tauri::Url::parse(s).unwrap();
+        assert!(our_page(&url("http://tauri.localhost/")));
+        assert!(our_page(&url("tauri://localhost/index.html")));
+        assert!(
+            our_page(&url("http://127.0.0.1:1420/")),
+            "the dev server (debug)"
+        );
+        for other in [
+            "file:///C:/Users/dev/Downloads/evil.html",
+            "https://example.com/",
+            "http://tauri.localhost.example.com/",
+            "http://tauri.localhost:8080/",
+            "http://127.0.0.1:1421/",
+            "about:blank",
+            "data:text/html,hi",
+            "javascript:alert(1)",
+        ] {
+            assert!(!our_page(&url(other)), "{other}");
+        }
+        let src = include_str!("main.rs");
+        assert!(src.contains(".on_navigation(|_, url| our_page(url))"));
+        // Our drop handler is on, so WebView2's own file drop is off.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["app"]["windows"][0]["dragDropEnabled"], true);
     }
 
     #[test]

@@ -9,9 +9,12 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use bouncer_core::chat::{self, Binary, Cancel, Chat, Claude, Limits, Model, Out, Stop};
+use bouncer_core::drop;
 use serde_json::{Value, json};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+
+use crate::drop::Drops;
 
 #[derive(Default)]
 pub struct Chats {
@@ -22,7 +25,37 @@ pub struct Chats {
     /// The explanation running: its card's request ID, its run number (a
     /// card can be explained again) and how to stop it.
     explain: Mutex<Option<(String, u64, Cancel)>>,
+    /// Numbers every explanation and file answer.
     explain_runs: AtomicU64,
+    /// "Is this safe to run?" on a dropped file: its drop ID, run number
+    /// and how to stop it. Apart from `explain`: cards come and go under it.
+    drop_run: Mutex<Option<(String, u64, Cancel)>>,
+}
+
+/// The two one-message runs beside the chat panel.
+#[derive(Clone, Copy)]
+enum Side {
+    /// "Explain this command" on a card.
+    Explain,
+    /// "Is this safe to run?" on a dropped file.
+    Drop,
+}
+
+impl Side {
+    fn slot(self, chats: &Chats) -> &Mutex<Option<(String, u64, Cancel)>> {
+        match self {
+            Side::Explain => &chats.explain,
+            Side::Drop => &chats.drop_run,
+        }
+    }
+
+    /// The key the page's events carry instead of a chat number.
+    fn key(self) -> &'static str {
+        match self {
+            Side::Explain => "explain",
+            Side::Drop => "drop",
+        }
+    }
 }
 
 struct Run {
@@ -50,13 +83,16 @@ impl Chats {
             .unwrap()
             .as_ref()
             .is_some_and(|r| r.busy.load(Ordering::SeqCst));
-        answering || self.explain.lock().unwrap().is_some()
+        let explaining = self.explain.lock().unwrap().is_some();
+        answering || explaining || self.drop_run.lock().unwrap().is_some()
     }
 
-    /// Quitting: the chat and the explanation, if any, are killed.
+    /// Quitting: the chat, the explanation and the file answer, if any,
+    /// are killed.
     pub fn end_all(&self) {
         self.end();
         self.stop_explaining();
+        self.stop_drop();
     }
 }
 
@@ -103,20 +139,28 @@ pub fn chat_confirm(path: String) -> Result<Value, String> {
 
 /// Sends one message in chat number `chat` (the page's), starting that chat
 /// if it isn't the one running. Refused unless the `claude` found now is the
-/// confirmed one. Errors are short codes the page words: `missing`,
-/// `unconfirmed`, `busy`, `model`, `empty`, or Claude Code's own text.
+/// confirmed one. `file`: a dropped file's ID ("Ask about it"): the message
+/// becomes the held report's facts followed by it, exactly as previewed.
+/// Errors are short codes the page words: `missing`, `unconfirmed`, `busy`,
+/// `model`, `empty`, `gone` (the file isn't held), or Claude Code's own text.
 #[tauri::command(async)]
 pub fn chat_send(
     app: AppHandle,
     chats: State<'_, Chats>,
+    drops: State<'_, Drops>,
     chat: u32,
     prompt: String,
     model: String,
+    file: Option<String>,
 ) -> Result<(), String> {
     let model = Model::parse(&model).ok_or("model")?;
     if prompt.trim().is_empty() {
         return Err("empty".into());
     }
+    let prompt = match file {
+        Some(id) => drop::ask_prompt(&drops.report(&id).ok_or("gone")?, &prompt),
+        None => prompt,
+    };
     if prompt.len() > chat::MAX_PROMPT {
         return Err("too-long".into());
     }
@@ -265,6 +309,30 @@ pub fn explain(
     prompt: String,
     model: &str,
 ) -> Result<(), String> {
+    side(app, chats, Side::Explain, id, prompt, model)
+}
+
+/// "Is this safe to run?" on a dropped file (`id`: the drop's ID): the same
+/// kind of run as `explain`, in its own slot, so cards coming and going
+/// never stop it. Ends when answered, on Stop, Close, a new drop, or quit.
+pub fn ask_drop(
+    app: &AppHandle,
+    chats: &Chats,
+    id: String,
+    prompt: String,
+    model: &str,
+) -> Result<(), String> {
+    side(app, chats, Side::Drop, id, prompt, model)
+}
+
+fn side(
+    app: &AppHandle,
+    chats: &Chats,
+    which: Side,
+    id: String,
+    prompt: String,
+    model: &str,
+) -> Result<(), String> {
     let model = Model::parse(model).ok_or("model")?;
     if prompt.len() > chat::MAX_PROMPT {
         return Err("too-long".into());
@@ -275,7 +343,7 @@ pub fn explain(
         Claude::Unconfirmed(_) | Claude::Changed(_) => return Err("unconfirmed".into()),
     };
     let dir = chat::folder().ok_or("no chat folder")?;
-    let mut slot = chats.explain.lock().unwrap();
+    let mut slot = which.slot(chats).lock().unwrap();
     if let Some((_, _, old)) = slot.take() {
         old.cancel();
     }
@@ -286,13 +354,13 @@ pub fn explain(
     let app = app.clone();
     std::thread::spawn(move || {
         let chats = app.state::<Chats>();
-        let feed = |out: &Out| chats.send(explained(&id, out));
+        let feed = |out: &Out| chats.send(tagged(which.key(), &id, out));
         let last = match run.send(&prompt) {
             Ok(()) => answer(&mut run, &feed),
             Err(e) => Out::Done { error: Some(e) },
         };
         {
-            let mut slot = chats.explain.lock().unwrap();
+            let mut slot = which.slot(&chats).lock().unwrap();
             if slot.as_ref().is_some_and(|(_, m, _)| *m == n) {
                 *slot = None;
             }
@@ -317,6 +385,13 @@ impl Chats {
         }
     }
 
+    /// Stops the file answer, if any (Stop, Close, a new drop).
+    pub fn stop_drop(&self) {
+        if let Some((_, _, run)) = self.drop_run.lock().unwrap().take() {
+            run.cancel();
+        }
+    }
+
     /// Stops the explanation unless its card is still waiting (`waiting`:
     /// the queue's request IDs). Called with every view, so it ends as soon
     /// as the card is answered, times out or goes.
@@ -332,13 +407,13 @@ impl Chats {
     }
 }
 
-/// An explanation's event as the page reads it (`src/chat.ts`,
-/// `ExplainEvent`): a chat event tagged with the card's request ID instead
-/// of a chat number.
-fn explained(id: &str, out: &Out) -> Value {
+/// An explanation's or a file answer's event as the page reads it
+/// (`src/chat.ts`, `ExplainEvent` / `DropEvent`): a chat event tagged with
+/// the card's request ID or the drop's ID (`key`) instead of a chat number.
+fn tagged(key: &str, id: &str, out: &Out) -> Value {
     let mut v = event(0, out);
     v.as_object_mut().unwrap().remove("chat");
-    v["explain"] = id.into();
+    v[key] = id.into();
     v
 }
 
@@ -453,16 +528,20 @@ mod tests {
     #[test]
     fn explanation_events_carry_the_card_not_a_chat() {
         assert_eq!(
-            explained("ab12", &Out::Text("<b>rm</b>".into())),
+            tagged("explain", "ab12", &Out::Text("<b>rm</b>".into())),
             json!({"explain": "ab12", "kind": "text", "text": "<b>rm</b>"})
         );
         assert_eq!(
-            explained("ab12", &Out::Done { error: None }),
+            tagged("explain", "ab12", &Out::Done { error: None }),
             json!({"explain": "ab12", "kind": "done", "error": null})
         );
         assert_eq!(
-            explained("ab12", &Out::Stopped(Stop::Cancelled)),
+            tagged("explain", "ab12", &Out::Stopped(Stop::Cancelled)),
             json!({"explain": "ab12", "kind": "stopped", "stop": {"why": "cancelled"}})
+        );
+        assert_eq!(
+            tagged("drop", "cd34", &Out::Text("x".into())),
+            json!({"drop": "cd34", "kind": "text", "text": "x"})
         );
     }
 
