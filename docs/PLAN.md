@@ -4238,6 +4238,15 @@ Phase 7 is done when:
 - [ ] Every refusal case tested; cancel sends nothing
 - [ ] fmt, clippy, tests green locally and in CI
 
+**v0.9.0 published (Charan, 2026-10-17).** Roadmap d (#50). Manual checks
+(Charan, his own desktop, the installed build): his 0.8.3 offered the update
+and installed 0.9.0 (the third real update, TESTS UP8); Settings shows
+"Bouncer 0.9.0" (U11); the hooks status normal; `run.ps1` dropped →
+"Looks risky" with the catch animation (F2, F16); the 0.8.1 installer → "No
+signature in the file" and its SHA-256 (F11); a question card answered with
+one click (Q9). v0.9.0 is done; the next roadmap item (h, other agents, one
+per release) starts in a new session when Charan says.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
