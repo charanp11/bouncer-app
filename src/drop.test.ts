@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { explainStart } from "./chat.ts";
-import { answerApply, answerRefused, CAN_BE_WRONG, hoverText, OWN_CHECKS, sizeText, stillAttached, verdict, type DropReport } from "./drop.ts";
+import { answerApply, answerRefused, CAN_BE_WRONG, cut, face, GULP_MS, hoverText, NOPE_MS, OWN_CHECKS, shot, sizeText, stillAttached, verdict, type DropReport } from "./drop.ts";
 
 const report = (over: Partial<DropReport> = {}): DropReport => ({
   state: "report",
+  n: 1,
   id: "a".repeat(32),
   name: "run.ps1",
   kind: "A PowerShell script",
@@ -70,4 +71,38 @@ test("drop: the page never reads or sends a path, and sends only the drop's ID",
     for (const arg of args) assert.ok(["id", "ask", "model"].includes(arg), `drop_${call[1]} sends ${arg}`);
   }
   assert.doesNotMatch(main, /tauri:\/\/drag|onDragDropEvent|dataTransfer/);
+});
+
+test("drop: the gulp and the nope play once per drop, carry on through redraws, and a card cuts them for good", () => {
+  let s = shot(null, 7, 1000, GULP_MS);
+  assert.equal(s.into, 0, "starts when the report is first drawn");
+  s = shot(s.last, 7, 1200, GULP_MS);
+  assert.equal(s.into, 200, "a redraw carries on");
+  assert.equal(shot(s.last, 7, 1000 + GULP_MS, GULP_MS).into, null, "over");
+  assert.equal(shot(s.last, 8, 5000, GULP_MS).into, 0, "a new drop plays its own");
+  const after = cut(s.last);
+  assert.equal(shot(after, 7, 1250, GULP_MS).into, null, "cut by a card: not resumed after it");
+  assert.equal(cut(null), null);
+  assert.ok(GULP_MS < 600 && NOPE_MS < 600, "each under 600 ms");
+});
+
+test("drop: Bouncer is never happy over a file, and the motion is CSS only, short, and off with reduced motion", () => {
+  assert.equal(face(report({ risky: true })), "wary");
+  assert.equal(face(report({ risky: false })), "curious");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const ms = (name: string) => Number(css.match(new RegExp(`animation: ${name} (\\d+)ms`))?.[1]);
+  assert.equal(ms("gulp"), GULP_MS);
+  assert.equal(ms("nope"), NOPE_MS);
+  assert.ok(ms("mitt") <= 250);
+  // Curious and wary hide the smile; nothing in the drop screens cheers.
+  assert.match(css, /\.ball\.curious \.smile \{\s*display: none;/);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{\s*\*,\s*\*::before,\s*\*::after \{\s*animation: none !important;/);
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  const drop = main.slice(main.indexOf("function renderDrop("), main.indexOf("/** Text with its lines kept"));
+  assert.doesNotMatch(drop, /mood\(|"done"|"dance"/);
+  // Reduced motion: no reaction classes at all (they'd never end).
+  assert.match(main, /if \(s\.into !== null && !REDUCED\.matches\) \{/);
+  // A card comes first and cuts the reaction before it's drawn.
+  const card = main.slice(main.indexOf("const first = view.queue[0];"), main.indexOf("renderApproval(view, first);"));
+  assert.match(card, /reaction = cut\(reaction\);/);
 });

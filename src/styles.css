@@ -2122,7 +2122,7 @@ pre.cmd {
   }
 }
 
-/* File drop (roadmap d, prototype v0.27): the catch target while a file is
+/* File drop (roadmap d, prototype v0.30): the catch target while a file is
    dragged over the island (big, so the drop is easy to hit), the report,
    the preview of exactly what would be sent, and the chat's attachment.
    Never green, never "safe": Bouncer's report is advice. */
@@ -2294,4 +2294,147 @@ pre.cmd {
 .attach pre.pv:focus-visible {
   outline: 2px solid var(--sun);
   outline-offset: 2px;
+}
+
+/* File drop (roadmap d, prototype v0.31): how Bouncer reacts. CSS on the
+   body's own SVG (ball.ts moves the box around it), so these never fight
+   his motion. Reduced motion: no animation, the faces only. */
+.ball .mouth {
+  display: none;
+}
+
+.ball .lift svg {
+  transform-origin: 50% 90.625%;
+}
+
+.ball .shades {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+/* A file over him: opens up like a mitt, mouth open (ball.ts turns his eyes
+   toward where it came in). */
+.ball.mitt .alert,
+.ball.mitt .smile {
+  display: none;
+}
+
+.ball.mitt .mouth {
+  display: inline;
+}
+
+.ball.mitt .lift svg {
+  animation: mitt 220ms ease-out forwards;
+}
+
+@keyframes mitt {
+  to {
+    transform: translateY(-1px) scale(1.14, 0.9);
+  }
+}
+
+/* Reduced motion: the mitt as a still pose. */
+@media (prefers-reduced-motion: reduce) {
+  .ball.mitt .lift svg {
+    transform: translateY(-1px) scale(1.14, 0.9);
+  }
+}
+
+/* Dropped, being checked: the mitt held (a redraw doesn't replay it). */
+.ball.caught .alert,
+.ball.caught .smile {
+  display: none;
+}
+
+.ball.caught .mouth {
+  display: inline;
+}
+
+.ball.caught .lift svg {
+  transform: translateY(-1px) scale(1.14, 0.9);
+}
+
+/* Caught: one gulp as the report appears (never before it). main.ts sets
+   --since so a redrawn report carries on instead of starting over. */
+.ball.gulp .lift svg {
+  animation: gulp 450ms ease-in-out var(--since, 0ms) 1;
+}
+
+.ball.gulp .mouth {
+  display: inline;
+  animation: gulpmouth 450ms steps(1, end) var(--since, 0ms) 1 forwards;
+}
+
+@keyframes gulp {
+  0% {
+    transform: translateY(-1px) scale(1.14, 0.9);
+  }
+  30% {
+    transform: translateY(-1.5px) scale(0.84, 1.14);
+  }
+  60% {
+    transform: scale(1.08, 0.94);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes gulpmouth {
+  0% {
+    opacity: 1;
+  }
+  35%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* After the report: never happy. Nothing risky found: curious (a small
+   "o", head tilted). Risky findings: wary (red, flat mouth, narrowed). */
+.ball.curious .smile {
+  display: none;
+}
+
+.ball.curious .mouth {
+  display: inline;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transform: scale(0.6);
+}
+
+.ball.curious .lift svg {
+  rotate: -8deg;
+}
+
+.ball.wary .shades {
+  transform: scaleY(0.72);
+}
+
+/* Refused: a short "nope" shake, flat mouth. */
+.ball.nope .smile {
+  display: none;
+}
+
+.ball.nope .flat {
+  display: inline;
+}
+
+.ball.nope .lift svg {
+  animation: nope 360ms ease-in-out var(--since, 0ms) 1;
+}
+
+@keyframes nope {
+  20% {
+    transform: translateX(-2.5px);
+  }
+  45% {
+    transform: translateX(2.5px);
+  }
+  70% {
+    transform: translateX(-1.5px);
+  }
+  100% {
+    transform: none;
+  }
 }
