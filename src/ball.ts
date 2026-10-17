@@ -161,20 +161,24 @@ function poke(b: Live) {
   kick();
 }
 
-/** The cursor, from this page's own events only (it is over the island). */
-document.addEventListener("mousemove", (e) => {
+/** He looks toward a point of the page: the cursor near him, or (`far`)
+ * a file being dragged in, wherever it is. */
+export function lookToward(x: number, y: number, far = false) {
   if (reduce.matches) return;
   for (const b of live) {
     const r = b.wrap.getBoundingClientRect();
     if (!r.width) continue;
-    const dx = e.clientX - (r.left + r.width / 2);
-    const dy = e.clientY - (r.top + r.height / 2);
+    const dx = x - (r.left + r.width / 2);
+    const dy = y - (r.top + r.height / 2);
     const d = Math.hypot(dx, dy) || 1;
-    const k = d > LOOK_NEAR_PX ? 0 : Math.min(1, d / LOOK_REACH_PX) / d;
+    const k = d > LOOK_NEAR_PX && !far ? 0 : Math.min(1, d / LOOK_REACH_PX) / d;
     lookAt(b.m, dx * k * LOOK_MAX, dy * k * LOOK_MAX);
   }
   kick();
-});
+}
+
+/** The cursor, from this page's own events only (it is over the island). */
+document.addEventListener("mousemove", (e) => lookToward(e.clientX, e.clientY));
 document.documentElement.addEventListener("mouseleave", () => {
   for (const b of live) lookAt(b.m, 0, 0);
   kick();
@@ -204,6 +208,8 @@ export function ball(state: BallState, size: "" | "big" | "sheet" = "", m: Motio
     ["path", { class: "ink smile", d: "M12.6 22.2q3.4 2.6 6.8 0" }],
     ["path", { class: "ink flat", d: "M12.8 23h6.4" }],
     ["path", { class: "ink sleep", d: "M9.5 16.2q2.4 1.6 4.8 0M17.7 16.2q2.4 1.6 4.8 0" }],
+    // Open for a file (the catch, the gulp), small when curious.
+    ["ellipse", { class: "ink mouth", cx: "16", cy: "22.8", rx: "1.9", ry: "1.5" }],
   ]);
   const jumper = group("jumper", [
     ["circle", { class: "body-c", cx: "16", cy: "17", r: "12" }],

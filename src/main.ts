@@ -5,7 +5,7 @@
 // `\u{XXXX}` markers, shown here as red tags. Allow arms after 600 ms, is never
 // focused (the window can't take focus at all), and Enter can't reach it.
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { ball, type BallState } from "./ball.ts";
+import { ball, lookToward, type BallState } from "./ball.ts";
 import { flashLeft, type Seen } from "./flash.ts";
 import { finished, greeting, mood } from "./mood.ts";
 import { holds, plan, type Size } from "./morph.ts";
@@ -19,7 +19,7 @@ import { markdown, type Piece } from "./markdown.ts";
 import { ready, toggle as togglePick, type Question } from "./questions.ts";
 import { updateButton, type Update } from "./update.ts";
 import { PressGate } from "./press.ts";
-import { answerApply, answerRefused, CAN_BE_WRONG, hoverText, OWN_CHECKS, sizeText, stillAttached, verdict, type Answer, type Attached, type DropEvent, type DropHover, type DropReport, type DropView } from "./drop.ts";
+import { answerApply, answerRefused, CAN_BE_WRONG, cut, face, GULP_MS, hoverText, NOPE_MS, OWN_CHECKS, shot, sizeText, stillAttached, verdict, type Answer, type Attached, type DropEvent, type DropHover, type DropReport, type DropView, type Shot } from "./drop.ts";
 import { ARM_MS, armState } from "./arm.ts";
 import "./styles.css";
 
@@ -1395,6 +1395,8 @@ function draw(view: View) {
 
   const first = view.queue[0];
   if (first) {
+    // A card wins at once: a drop's reaction under way is cut, not resumed.
+    reaction = cut(reaction);
     if (first.id !== front.id) front = { id: first.id, since: 0 };
     greetUntil = 0;
     renderApproval(view, first);
@@ -1422,7 +1424,7 @@ function draw(view: View) {
   liveBubble = null;
 
   if (view.drop) {
-    renderDrop(view, view.drop, done);
+    renderDrop(view.drop);
     return;
   }
 
@@ -1969,15 +1971,40 @@ function syncDrop(d: DropView) {
   attached = stillAttached(attached, d);
 }
 
-/** A file dragged over the island: one big target, easy to hit. */
+/** A drop's reaction (the gulp, the "nope"), once per drop. */
+let reaction: Shot | null = null;
+
+/** Bouncer's look on a drop screen: extra classes on the head's ball, and
+ * how far into a one-time reaction this redraw is (it carries on). */
+function dropFace(top: HTMLElement, looks: string[], n: number, react: string, ms: number) {
+  const b = top.querySelector<HTMLElement>(".ball");
+  if (!b) return;
+  b.classList.add(...looks);
+  const s = shot(reaction, n, performance.now(), ms);
+  reaction = s.last;
+  // Reduced motion: the faces only, no gulp or shake.
+  if (s.into !== null && !REDUCED.matches) {
+    b.classList.add(react);
+    b.style.setProperty("--since", `${-s.into}ms`);
+    // Over: back to the face underneath (the gulp's shut mouth doesn't stay).
+    b.querySelector(".lift svg")?.addEventListener("animationend", () => b.classList.remove(react), { once: true });
+  }
+}
+
+/** A file dragged over the island: one big target, easy to hit; Bouncer
+ * opens up like a mitt and looks where the file came in. */
 function renderCatch(h: Exclude<DropHover, null>) {
   setShape("open");
   const body = el("div", "body");
   body.dataset.screen = "catch";
-  const zone = el("div", h === "one" ? "catch" : "catch many");
-  zone.append(el("b", "", hoverText(h)), el("span", "", h === "one" ? "Bouncer only reads it. Nothing runs, nothing is sent." : "Drop a single file."));
+  const one = h.kind === "one";
+  const zone = el("div", one ? "catch" : "catch many");
+  zone.append(el("b", "", hoverText(h.kind)), el("span", "", one ? "Bouncer only reads it. Nothing runs, nothing is sent." : "Drop a single file."));
   body.append(zone);
-  island.replaceChildren(head(h === "one" ? "needs" : "risky", "Check a file"), body);
+  const top = head(one ? "needs" : "risky", "Check a file");
+  top.querySelector(".ball")?.classList.add(one ? "mitt" : "wary");
+  island.replaceChildren(top, body);
+  requestAnimationFrame(() => lookToward(h.x / devicePixelRatio, h.y / devicePixelRatio, true));
 }
 
 function nameLine(name: string): HTMLElement {
@@ -1986,7 +2013,7 @@ function nameLine(name: string): HTMLElement {
   return line;
 }
 
-function renderDrop(view: View, d: Exclude<DropView, null>, done: boolean) {
+function renderDrop(d: Exclude<DropView, null>) {
   setShape("open");
   const body = el("div", "body");
   const close = () => invoke("drop_close");
@@ -1995,14 +2022,18 @@ function renderDrop(view: View, d: Exclude<DropView, null>, done: boolean) {
     const wait = el("div", "answering");
     wait.append(el("span", "ic spin"), el("span", "", "Reading it. Nothing runs."));
     body.append(nameLine(d.name), wait);
-    island.replaceChildren(head("working", "Checking a file", "", close), body);
+    const top = head("needs", "Checking a file", "", close);
+    top.querySelector(".ball")?.classList.add("caught");
+    island.replaceChildren(top, body);
     return;
   }
   if (d.state === "refused") {
     body.dataset.screen = "drop-refused";
     if (d.name) body.append(nameLine(d.name));
     body.append(el("div", "reason", d.text));
-    island.replaceChildren(head(mood(view, done), "Can't check that", "", close), body);
+    const top = head("idle", "Can't check that", "", close);
+    dropFace(top, [], d.n, "nope", NOPE_MS);
+    island.replaceChildren(top, body);
     return;
   }
   body.dataset.screen = `drop:${d.id}`;
@@ -2075,7 +2106,10 @@ function renderDrop(view: View, d: Exclude<DropView, null>, done: boolean) {
       body.append(el("div", "after", chatStatus.state === "missing" ? "Claude Code wasn't found: only Bouncer's own checks." : "To ask Claude, confirm the claude path in Settings first."));
     }
   }
-  island.replaceChildren(head(d.risky ? "risky" : mood(view, done), "File check", d.risky ? "· looks risky" : "", close), body);
+  // Never happy over a file: wary or curious, after one gulp as it appears.
+  const top = head(d.risky ? "risky" : "idle", "File check", d.risky ? "· looks risky" : "", close);
+  dropFace(top, [face(d)], d.n, "gulp", GULP_MS);
+  island.replaceChildren(top, body);
   fillAnswer();
 }
 

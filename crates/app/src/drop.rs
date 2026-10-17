@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bouncer_core::approvals;
 use bouncer_core::drop::{self, HOLD, Report};
@@ -21,13 +21,24 @@ use crate::chat::{self, Chats};
 pub struct Drops {
     /// What the island shows: null, checking, refused or a report.
     view: Mutex<Value>,
-    /// While something is dragged over the island: "one" or "many".
+    /// While something is dragged over the island: `kind` "one" or
+    /// "many", and where it came in (`x`, `y`: the page's physical pixels),
+    /// so Bouncer looks that way.
     hover: Mutex<Value>,
     /// The shown report, its random ID and when it came.
     held: Mutex<Option<(String, Report, Instant)>>,
     /// Numbers drops: an older check finishing never replaces a newer drop.
     seq: AtomicU64,
+    /// Numbers drag enters and leaves: a leave takes the hover away only if
+    /// nothing came after it (see `LEAVE_GRACE`).
+    moves: AtomicU64,
 }
+
+/// A leave counts only if no enter follows within this. Growing the island
+/// for the catch target reshapes the window under the cursor, and Windows
+/// reports a leave and an enter at once: without the grace the island would
+/// flick back to the pill and the catch would start over.
+const LEAVE_GRACE: Duration = Duration::from_millis(150);
 
 impl Drops {
     /// What the page's view carries: `drop` and `dropHover`.
@@ -73,11 +84,32 @@ pub fn on_drag(app: &AppHandle, event: &DragDropEvent) {
         return;
     };
     match event {
-        DragDropEvent::Enter { paths, .. } => {
-            *drops.hover.lock().unwrap() = if paths.len() == 1 { "one" } else { "many" }.into();
+        DragDropEvent::Enter { paths, position } => {
+            drops.moves.fetch_add(1, Ordering::SeqCst);
+            let kind = if paths.len() == 1 { "one" } else { "many" };
+            let hover = json!({"kind": kind, "x": position.x, "y": position.y});
+            let mut now = drops.hover.lock().unwrap();
+            // Back within the grace: still the same hover, nothing to redraw.
+            if now["kind"] == kind {
+                return;
+            }
+            *now = hover;
         }
-        DragDropEvent::Leave => *drops.hover.lock().unwrap() = Value::Null,
+        DragDropEvent::Leave => {
+            let n = drops.moves.fetch_add(1, Ordering::SeqCst) + 1;
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(LEAVE_GRACE);
+                let drops = app.state::<Drops>();
+                if drops.moves.load(Ordering::SeqCst) == n {
+                    *drops.hover.lock().unwrap() = Value::Null;
+                    crate::refresh(&app);
+                }
+            });
+            return;
+        }
         DragDropEvent::Drop { paths, .. } => {
+            drops.moves.fetch_add(1, Ordering::SeqCst);
             *drops.hover.lock().unwrap() = Value::Null;
             dropped(app, &drops, paths.clone());
         }
@@ -93,13 +125,16 @@ fn dropped(app: &AppHandle, drops: &Drops, paths: Vec<PathBuf>) {
         chats.stop_drop();
     }
     drops.clear();
+    // Every drop's views carry its number: the page plays its gulp or
+    // "nope" once per drop, not on every redraw.
     let n = drops.seq.load(Ordering::SeqCst);
     let [path] = paths.as_slice() else {
-        *drops.view.lock().unwrap() = json!({"state": "refused", "text": drop::ONE_AT_A_TIME});
+        *drops.view.lock().unwrap() =
+            json!({"state": "refused", "text": drop::ONE_AT_A_TIME, "n": n});
         return;
     };
     let name = drop::name_of(path);
-    *drops.view.lock().unwrap() = json!({"state": "checking", "name": name});
+    *drops.view.lock().unwrap() = json!({"state": "checking", "name": name, "n": n});
     let path = path.clone();
     let app = app.clone();
     std::thread::spawn(move || {
@@ -112,7 +147,7 @@ fn dropped(app: &AppHandle, drops: &Drops, paths: Vec<PathBuf>) {
         if drops.seq.load(Ordering::SeqCst) != n {
             return;
         }
-        let view = match (result, id) {
+        let mut view = match (result, id) {
             (Ok(report), Some(id)) => {
                 let mut view = report.to_json();
                 view["state"] = "report".into();
@@ -123,6 +158,7 @@ fn dropped(app: &AppHandle, drops: &Drops, paths: Vec<PathBuf>) {
             (Err(reason), _) => json!({"state": "refused", "name": name, "text": reason}),
             (Ok(_), None) => json!({"state": "refused", "name": name, "text": drop::UNREADABLE}),
         };
+        view["n"] = n.into();
         *drops.view.lock().unwrap() = view;
         drop(held);
         crate::refresh(&app);

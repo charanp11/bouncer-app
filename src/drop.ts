@@ -9,6 +9,8 @@ export type Finding = { risky: boolean; text: string };
 
 export type DropReport = {
   state: "report";
+  /** The drop's number: a new drop, or the same one drawn again. */
+  n: number;
   /** The drop's random ID: the only thing the page sends back. */
   id: string;
   name: string;
@@ -24,12 +26,13 @@ export type DropReport = {
 
 export type DropView =
   | null
-  | { state: "checking"; name: string }
-  | { state: "refused"; name?: string; text: string }
+  | { state: "checking"; name: string; n: number }
+  | { state: "refused"; name?: string; text: string; n: number }
   | DropReport;
 
-/** Something is being dragged over the island: one item or several. */
-export type DropHover = null | "one" | "many";
+/** Something is being dragged over the island: one item or several, and
+ * where it came in (the page's physical pixels). */
+export type DropHover = null | { kind: "one" | "many"; x: number; y: number };
 
 /** A file answer's event: a chat event tagged with the drop's ID. */
 export type DropEvent = { drop: string } & (
@@ -65,8 +68,36 @@ export function verdict(r: DropReport): string {
   return r.risky ? "Looks risky. Read why below." : "Nothing risky found.";
 }
 
-export function hoverText(h: Exclude<DropHover, null>): string {
-  return h === "one" ? "Drop to check it" : "One file at a time";
+export function hoverText(kind: "one" | "many"): string {
+  return kind === "one" ? "Drop to check it" : "One file at a time";
+}
+
+/** Bouncer's reactions (prototype v0.31): the gulp as a report appears, the
+ * "nope" for a refusal. Each well under 600 ms, and only ever played as or
+ * after the screen it belongs to is drawn: never holding anything back. */
+export const GULP_MS = 450;
+export const NOPE_MS = 360;
+
+/** A drop's one reaction: when it started (`at`), for drop number `n`. */
+export type Shot = { n: number; at: number };
+
+/** Where drop `n`'s reaction is at `now`: started the first time it's drawn,
+ * `into` ms in while it lasts (a redraw carries on), null once it's over or
+ * was cut. */
+export function shot(last: Shot | null, n: number, now: number, ms: number): { last: Shot; into: number | null } {
+  const s = last && last.n === n ? last : { n, at: now };
+  const into = now - s.at;
+  return { last: s, into: into >= 0 && into < ms ? into : null };
+}
+
+/** A card came: the reaction under way is cut for good (not resumed after). */
+export function cut(last: Shot | null): Shot | null {
+  return last && { n: last.n, at: -Infinity };
+}
+
+/** Bouncer's face over his own report: never happy. */
+export function face(r: DropReport): "wary" | "curious" {
+  return r.risky ? "wary" : "curious";
 }
 
 /** 512 → "512 bytes", 1536 → "1.5 KB" (as the backend's `human`). */
