@@ -2764,7 +2764,7 @@ runs the four stages (Audit → Implement → Test → Verify) with its tests,
 | e | Music (Phase 8) | Within the motion and CPU budget. |
 | f | 6d "Ask about this session" | Fork a session read-only (Phase 6 audit, "Starting from an existing session"). |
 | g | Mac release | Phase 9's Mac part, tested on a real Mac (the checklist under Phase 9). |
-| h | Other agents | For each (Codex, Cursor, Gemini CLI, Copilot CLI, others): audit first whether its hooks can block a tool call. Yes: full approvals. No: watch-and-flag only, clearly labelled as such. One agent per PR. |
+| h | Other agents | For each (Codex, Cursor, Antigravity CLI (Gemini CLI is now enterprise only), Copilot CLI, others): audit first whether its hooks can block a tool call. Yes: full approvals. No: watch-and-flag only, clearly labelled as such. One agent per PR. |
 | i | Linux build | Optional. |
 
 **Goal (Charan):** on Windows, Bouncer must be clearly better than Coucou
