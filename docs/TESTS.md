@@ -33,6 +33,7 @@ isn't ready until every automated row passes in CI (Windows and macOS).
 | R12 | Big fields and error text | Tool output, transcript path and a failure's error text never leave the relay | unit | `tests::keeps_event_and_drops_large_fields` `tests::a_failure_never_forwards_its_error_text` | CI |
 | R13 | Release builds | Ignore the test overrides (endpoint, rules, away time, autostart key, WebView arguments) | unit (also run in release by CI) | `tests::override_is_honored_only_in_debug_builds` `rules::tests::override_is_honored_only_in_debug_builds` `away::tests::override_is_honored_only_in_debug_builds` `autostart::tests::override_is_honored_only_in_debug_builds` `tests::release_builds_drop_webview_browser_arguments` | CI |
 | R14 | Windows paths in events | Reach the island intact | integration | `windows_paths_reach_the_island_intact` | CI |
+| R15 | Another agent's hook input (GitHub Copilot CLI camelCase or VS Code style, other agents' event names, unreadable payloads) | Prints nothing, exits 0 for every event, `preToolUse` included (a crash or non-zero exit there makes Copilot deny); camelCase and unreadable input never reach the app; Claude Code's shape with an unknown event name is only watched, never answered, even if the app says allow or ask | integration | `copilot_camel_case_events_print_nothing_and_never_reach_the_app` `unknown_hook_payloads_print_nothing` `copilot_vs_code_style_events_print_nothing_unless_answered` | CI |
 
 ## Approvals
 
