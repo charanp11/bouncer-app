@@ -657,6 +657,147 @@ fn the_desk_guards_risky_requests_through_the_real_relay() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Every event GitHub Copilot CLI documents, by its camelCase name.
+const COPILOT_EVENTS: &[&str] = &[
+    "sessionStart",
+    "sessionEnd",
+    "userPromptSubmitted",
+    "userPromptTransformed",
+    "preToolUse",
+    "permissionRequest",
+    "postToolUse",
+    "postToolUseFailure",
+    "subagentStart",
+    "subagentStop",
+    "agentStop",
+    "preCompact",
+    "notification",
+    "errorOccurred",
+];
+
+/// A server that answers `decision` to everything and logs what reached it.
+fn recording(name: &str, decision: Decision) -> (Arc<Mutex<Vec<String>>>, PathBuf) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        name,
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock().unwrap().push(e.kind);
+            Some(decision.clone())
+        }),
+    );
+    (seen, path)
+}
+
+/// Copilot CLI's camelCase hook input (`sessionId`, `toolName`, `toolArgs`
+/// as a JSON string), for every event it documents, with and without an
+/// event-name field: never Claude Code's shape, so the relay prints nothing
+/// and exits 0 (a crash or non-zero exit on `preToolUse` makes Copilot deny),
+/// and nothing reaches the app, even one that says allow or ask.
+#[test]
+fn copilot_camel_case_events_print_nothing_and_never_reach_the_app() {
+    for (i, decision) in [Decision::Allow, Decision::Ask].into_iter().enumerate() {
+        let (seen, path) = recording(&format!("copilot-{i}"), decision);
+        for kind in COPILOT_EVENTS {
+            let base = serde_json::json!({
+                "sessionId": "c", "timestamp": 1_760_000_000_000_u64, "cwd": "/p",
+                "toolName": "bash", "toolArgs": r#"{"command":"ls"}"#,
+            });
+            let mut named = base.clone();
+            named["hookEventName"] = (*kind).into();
+            for input in [base, named] {
+                assert_silent(&relay(&path, input.to_string().as_bytes()));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
+    }
+}
+
+/// Payloads Bouncer can't read (wrong types, deep nesting past the parser's
+/// limit, no session): nothing printed, exit 0, nothing reaches the app.
+/// Claude Code's shape with an event name it doesn't send (another agent's,
+/// Copilot's in camelCase, a future one): passed on to be watched, and
+/// never printed, even if the app says allow or ask.
+#[test]
+fn unknown_hook_payloads_print_nothing() {
+    let deep_array = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    let deep_object = format!(
+        r#"{{"hook_event_name":"PreToolUse","session_id":"u","cwd":"/p","tool_input":{}1{}}}"#,
+        r#"{"a":"#.repeat(10_000),
+        "}".repeat(10_000)
+    );
+    let unreadable: Vec<Vec<u8>> = vec![
+        deep_array.into_bytes(),
+        deep_object.into_bytes(),
+        br#"{"hook_event_name":null,"session_id":"u","cwd":"/p"}"#.to_vec(),
+        br#"{"hook_event_name":["PreToolUse"],"session_id":"u","cwd":"/p"}"#.to_vec(),
+        br#"{"hook_event_name":"PreToolUse","session_id":7,"cwd":"/p"}"#.to_vec(),
+        br#"{"hook_event_name":"PreToolUse","session_id":"u","cwd":null}"#.to_vec(),
+        br#"{"hook_event_name":"PermissionRequest","session_id":"u"}"#.to_vec(),
+        b"\"PreToolUse\"".to_vec(),
+        b"42".to_vec(),
+        b"null".to_vec(),
+    ];
+    let names: Vec<String> = COPILOT_EVENTS
+        .iter()
+        .chain(&[
+            "BeforeTool",
+            "beforeShellExecution",
+            "beforeMCPExecution",
+            "PreInvocation",
+            "PRETOOLUSE",
+            "",
+        ])
+        .map(|k| k.to_string())
+        .collect();
+    for (i, decision) in [Decision::Allow, Decision::Ask].into_iter().enumerate() {
+        let (seen, path) = recording(&format!("unknown-{i}"), decision);
+        for input in &unreadable {
+            assert_silent(&relay(&path, input));
+        }
+        for kind in &names {
+            assert_silent(&relay(&path, &event("u", kind)));
+        }
+        wait_for(&seen, names.len());
+        let mut got = seen.lock().unwrap().clone();
+        let mut want = names.clone();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want);
+    }
+}
+
+/// Copilot CLI's VS Code-compatible input (PascalCase names, snake_case
+/// fields, an ISO `timestamp`) has Claude Code's own shape. With the app
+/// closed, or an app that doesn't answer, the relay prints nothing and
+/// exits 0 for every event.
+#[test]
+fn copilot_vs_code_style_events_print_nothing_unless_answered() {
+    let input = |kind: &str| {
+        serde_json::json!({
+            "hook_event_name": kind, "session_id": "v", "timestamp": "2026-10-20T12:00:00.000Z",
+            "cwd": "/p", "tool_name": "Bash", "tool_input": { "command": "ls" },
+        })
+        .to_string()
+        .into_bytes()
+    };
+    let kinds = COPILOT_EVENTS.iter().map(|k| {
+        let mut c = k.chars();
+        c.next()
+            .unwrap()
+            .to_uppercase()
+            .chain(c)
+            .collect::<String>()
+    });
+    let closed = endpoint("copilot-vs-closed");
+    let quiet = serve("copilot-vs-quiet", always(None));
+    for kind in kinds {
+        assert_silent(&relay(&closed, &input(&kind)));
+        assert_silent(&relay(&quiet, &input(&kind)));
+    }
+}
+
 /// An app slower than the fire-and-forget budget: nothing is printed, and
 /// the relay is gone in about 2 s, so Claude Code goes on as usual.
 #[test]
