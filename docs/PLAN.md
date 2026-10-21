@@ -4327,6 +4327,36 @@ compared file by file before and after: unchanged.
 8. **Budgets.** The installed `timeout` is above the relay's budget, as for
    Claude Code; PowerShell's start-up adds to every hook (measure it).
 
+### Incident: a test wrote the real Claude Code settings (2026-10-21)
+
+**What happened.** Step 2 added the uninstaller's Codex step to
+`bouncer uninstall-hooks --uninstalling`. The new branch resolved the users'
+own files and ignored `--settings`. The existing CLI test
+`the_uninstaller_asks_explains_and_waits` passes `--settings <temp>` and
+answers `y`, so `cargo test` removed Bouncer's 9 hook entries from
+Charan's real `~/.claude/settings.json` (only those; a dated backup was
+written; `~/.codex` had no hooks file and wasn't touched). Charan restored
+them himself from his installed Bouncer (Settings → Claude Code hooks →
+Install…); checked read-only afterwards: the same 9 entries, every other key
+as before. Broke the standing rule "no destructive step near the real
+profile".
+
+**Why.** A code path that picks a default file had a test that relied on
+an argument to keep it in a temp folder; nothing stopped the default from
+being the real one.
+
+**Fix.** `--uninstalling` with `--settings` touches only that file. Every
+CLI test runs through `hermetic()`: HOME, USERPROFILE, `CLAUDE_CONFIG_DIR`
+and `CODEX_HOME` point into its own temp folder.
+
+**Guard.** Real profile files (Claude Code's `settings.json`, Codex's
+`hooks.json`; Codex's `config.toml` is never resolved) are resolved in one
+place only, `hooks::user_file`. In core's test build, or with
+`BOUNCER_TEST_GUARD` set (`hermetic()` sets it), it panics unless the path
+is inside the temp folder. Tests: `hooks::tests::the_test_guard_allows_only_temp_paths`,
+`hooks::tests::user_file_refuses_real_profile_paths_under_test`,
+`the_cli_refuses_a_real_profile_path_under_test` (TESTS CX11).
+
 ### Done when
 
 - [ ] core: a Codex event maps onto the existing request type; unknown
