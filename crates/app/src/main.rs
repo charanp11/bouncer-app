@@ -16,7 +16,7 @@ use bouncer_core::activity;
 use bouncer_core::approvals::{self, Desk, WAIT};
 use bouncer_core::autostart;
 use bouncer_core::away::{self, Away};
-use bouncer_core::hooks;
+use bouncer_core::hooks::{self, Agent};
 use bouncer_core::ipc::{self, Handler, Server};
 use bouncer_core::prefs::{self, Prefs, Size, Style};
 use bouncer_core::rules::{self, Mode};
@@ -973,7 +973,8 @@ fn about(app: AppHandle, island: State<'_, Island>) -> Value {
     json!({
         "version": app.package_info().version.to_string(),
         "rules": rules::path().map(|p| p.display().to_string()),
-        "hooks": hook_status(),
+        "hooks": hook_status(Agent::ClaudeCode),
+        "codexHooks": hook_status(Agent::Codex),
         "autostart": std::env::current_exe().ok().and_then(|exe| autostart::enabled(&exe)),
         "shortcutTaken": island.shortcut_taken.load(Ordering::Relaxed),
     })
@@ -989,11 +990,15 @@ fn set_autostart(on: bool) -> Result<bool, String> {
 }
 
 /// "installed", "incomplete", "moved", "missing" (no file, or none of ours)
-/// or "unknown" (unreadable), for the relay beside this app.
-fn hook_status() -> &'static str {
-    let (Ok(path), Ok(relay)) = (hooks::user_settings(), hooks::relay_beside_me()) else {
+/// or "unknown" (unreadable), for the relay beside this app. For Codex also
+/// "absent": no Codex folder, so Settings doesn't offer its hooks.
+fn hook_status(agent: Agent) -> &'static str {
+    let (Ok(path), Ok(relay)) = (hooks::user_file(agent), hooks::relay_beside_me()) else {
         return "unknown";
     };
+    if agent == Agent::Codex && !path.parent().is_some_and(Path::is_dir) {
+        return "absent";
+    }
     let mut text = String::new();
     match std::fs::File::open(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return "missing",
@@ -1005,7 +1010,7 @@ fn hook_status() -> &'static str {
         }
     }
     match (serde_json::from_str::<Value>(&text), relay.to_str()) {
-        (Ok(settings), Some(relay)) => hooks::status(&settings, relay).name(),
+        (Ok(settings), Some(relay)) => hooks::status_for(agent, &settings, relay).name(),
         _ => "unknown",
     }
 }
@@ -1015,8 +1020,17 @@ fn hook_status() -> &'static str {
 /// secrets redacted (its context lines may hold some). `null`: nothing to
 /// change. The id is the only way to write this change (`hooks_write`).
 #[tauri::command]
-fn hooks_preview(island: State<'_, Island>, install: bool) -> Result<Value, String> {
-    let path = hooks::user_settings()?;
+fn hooks_preview(
+    island: State<'_, Island>,
+    install: bool,
+    agent: Option<String>,
+) -> Result<Value, String> {
+    let agent = match agent.as_deref() {
+        None | Some("claude-code") => Agent::ClaudeCode,
+        Some("codex") => Agent::Codex,
+        Some(_) => return Err("unknown agent".into()),
+    };
+    let path = hooks::user_file(agent)?;
     let relay = if install {
         Some(hooks::relay_beside_me()?)
     } else {
@@ -1024,7 +1038,7 @@ fn hooks_preview(island: State<'_, Island>, install: bool) -> Result<Value, Stri
     };
     let mut pending = island.hooks_change.lock().unwrap();
     *pending = None;
-    let Some(change) = hooks::plan(&path, relay.as_deref())? else {
+    let Some(change) = hooks::plan_for(agent, &path, relay.as_deref())? else {
         return Ok(Value::Null);
     };
     let id = approvals::request_id().ok_or("no random source")?;

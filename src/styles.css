@@ -520,6 +520,13 @@ pre.cmd {
 }
 
 /* Observe mode: what a rule would have done. */
+/* An agent's own words on why it asks (Codex): its text, labelled. */
+.said {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .would {
   display: flex;
   gap: 6px;
