@@ -25,7 +25,12 @@ fn serve(name: &str, handler: Handler) -> PathBuf {
 }
 
 fn spawn_relay(path: &Path, input: &[u8]) -> Child {
+    spawn_relay_with(path, input, &[])
+}
+
+fn spawn_relay_with(path: &Path, input: &[u8], args: &[&str]) -> Child {
     let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer-hook"))
+        .args(args)
         .env(bouncer_relay::ENDPOINT_ENV, path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -796,6 +801,206 @@ fn copilot_vs_code_style_events_print_nothing_unless_answered() {
         assert_silent(&relay(&closed, &input(&kind)));
         assert_silent(&relay(&quiet, &input(&kind)));
     }
+}
+
+const CODEX: &[&str] = &["--agent", "codex"];
+
+fn codex_fixtures() -> Vec<(String, Vec<u8>)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/codex-fixtures");
+    let mut all: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| {
+            let file = e.unwrap().path();
+            let name = file.file_name().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read(&file).unwrap())
+        })
+        .collect();
+    all.sort();
+    all
+}
+
+/// Codex 0.163.0's recorded events through the real relay with
+/// `--agent codex`: each reaches the app as Codex's; only the permission
+/// request prints, and only the plain allow Codex documents.
+#[test]
+fn codex_fixtures_reach_the_app_as_codex_and_only_the_request_prints() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "codex-fixtures",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock()
+                .unwrap()
+                .push((e.agent, e.kind, e.tool, e.reason));
+            Some(Decision::Allow)
+        }),
+    );
+    let fixtures = codex_fixtures();
+    assert_eq!(fixtures.len(), 6);
+    for (name, raw) in &fixtures {
+        let json: serde_json::Value = serde_json::from_slice(raw).unwrap();
+        let mut expected = format!(
+            "codex-0.163.0-{}",
+            json["hook_event_name"].as_str().unwrap()
+        );
+        if let Some(tool) = json["tool_name"].as_str() {
+            expected += &format!("-{tool}");
+        }
+        assert_eq!(*name, format!("{expected}.json"));
+        let out = spawn_relay_with(&path, raw, CODEX)
+            .wait_with_output()
+            .unwrap();
+        if json["hook_event_name"] == "PermissionRequest" {
+            assert_eq!(
+                stdout_json(&out),
+                serde_json::json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": { "behavior": "allow" } } })
+            );
+        } else {
+            assert_silent(&out);
+        }
+    }
+    wait_for(&seen, fixtures.len());
+    let tool = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    for (agent, kind, t, reason) in seen.lock().unwrap().iter() {
+        assert_eq!(*agent, "codex");
+        if kind.contains("Tool") || kind == "PermissionRequest" {
+            assert_eq!(t.as_deref(), Some(tool), "{kind}");
+        }
+        assert_eq!(reason.is_some(), kind == "PermissionRequest", "{kind}");
+    }
+}
+
+/// Codex's answers: allow and deny only, in Codex's documented shape; the
+/// guard's `ask` on a PreToolUse prints nothing; no answer, a closed app or
+/// unknown arguments print nothing (and with unknown arguments nothing even
+/// reaches the app).
+#[test]
+fn codex_gets_only_allow_or_deny_through_the_real_relay() {
+    let request = codex_fixtures()
+        .into_iter()
+        .find(|(n, _)| n.contains("PermissionRequest"))
+        .unwrap()
+        .1;
+    let pre = codex_fixtures()
+        .into_iter()
+        .find(|(n, _)| n.contains("PreToolUse"))
+        .unwrap()
+        .1;
+    for (i, (decision, want)) in [
+        (
+            Some(Decision::Allow),
+            Some(serde_json::json!({ "behavior": "allow" })),
+        ),
+        (
+            Some(Decision::Deny),
+            Some(serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" })),
+        ),
+        (Some(Decision::Ask), None),
+        (Some(Decision::Plan(true)), None),
+        (Some(Decision::Answer(vec![vec![0]])), None),
+        (None, None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = serve(&format!("codex-answer-{i}"), always(decision));
+        let out = spawn_relay_with(&path, &request, CODEX)
+            .wait_with_output()
+            .unwrap();
+        match want {
+            Some(d) => assert_eq!(stdout_json(&out)["hookSpecificOutput"]["decision"], d),
+            None => assert_silent(&out),
+        }
+        assert_silent(
+            &spawn_relay_with(&path, &pre, CODEX)
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    let start = Instant::now();
+    assert_silent(
+        &spawn_relay_with(&endpoint("codex-closed"), &request, CODEX)
+            .wait_with_output()
+            .unwrap(),
+    );
+    assert!(start.elapsed() < Duration::from_secs(1));
+    let (seen, path) = recording("codex-args", Decision::Allow);
+    for args in [
+        &["--agent"][..],
+        &["--agent", "Codex"],
+        &["--agent", "codex", "x"],
+        &["--agent=codex"],
+        &["x"],
+    ] {
+        assert_silent(
+            &spawn_relay_with(&path, &request, args)
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
+}
+
+/// The installed Codex command, run the way Codex runs it (`powershell
+/// -NoProfile -Command` on Windows, `sh -c` elsewhere), with the relay in a
+/// folder whose name holds quotes, PowerShell's curly quotes, `$(...)`,
+/// backticks, `;`, `&` and brackets: the relay runs with `--agent codex`
+/// and answers, and nothing in the name runs (no canary file appears).
+#[test]
+fn a_codex_command_with_an_odd_relay_path_runs_only_the_relay() {
+    let base = std::env::temp_dir().join(format!("bouncer-odd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let odd = base.join(
+        "O'Brien \u{2018}q\u{2019} \u{201A}\u{201B} $(New-Item -ItemType File canary1) $(touch canary2) `touch canary3` ; New-Item canary4 ; touch canary5 & %PATH% [a] {b} $HOME",
+    );
+    std::fs::create_dir_all(&odd).unwrap();
+    let relay = odd.join(format!("bouncer-hook{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(env!("CARGO_BIN_EXE_bouncer-hook"), &relay).unwrap();
+    let command = bouncer_core::hooks::codex_command(relay.to_str().unwrap(), cfg!(windows));
+    let (seen, path) = recording("codex-odd", Decision::Allow);
+    let request = codex_fixtures()
+        .into_iter()
+        .find(|(n, _)| n.contains("PermissionRequest"))
+        .unwrap()
+        .1;
+    let mut shell = if cfg!(windows) {
+        let mut c = Command::new("powershell.exe");
+        c.args(["-NoProfile", "-Command", &command]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.args(["-c", &command]);
+        c
+    };
+    let mut child = shell
+        .current_dir(&base)
+        .env(bouncer_relay::ENDPOINT_ENV, &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&request).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        stdout_json(&out)["hookSpecificOutput"]["decision"]["behavior"],
+        "allow",
+        "{command}\n{out:?}"
+    );
+    wait_for(&seen, 1);
+    assert_eq!(seen.lock().unwrap()[0], "PermissionRequest");
+    let mut stray = Vec::new();
+    for dir in [&base, &odd] {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if name.starts_with("canary") {
+                stray.push(name);
+            }
+        }
+    }
+    assert!(stray.is_empty(), "ran from the path: {stray:?}");
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// An app slower than the fire-and-forget budget: nothing is printed, and
