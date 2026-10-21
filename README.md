@@ -1,7 +1,7 @@
 # Bouncer
 
 **The security guard for coding agents.** A free, open-source desktop
-companion for Claude Code: it watches your sessions, lets safe actions
+companion for Claude Code and Codex: it watches your sessions, lets safe actions
 through under rules you control, stops risky ones at the door with a plain
 reason, and never blocks the agent.
 
@@ -113,7 +113,8 @@ Settings → Apps → Installed apps → Bouncer → Uninstall.
   you're installing Bouncer again next. Kept hooks point at a program that's
   gone, so Claude Code shows a hook error on each event and carries on,
   asking in its own prompt; remove them later from a reinstalled Bouncer, or
-  by hand.
+  by hand. Then the same for Codex's `hooks.json`, if it has Bouncer's
+  entries.
 - **"Delete the application data".** Unticked by default: your rules,
   settings and history (`%APPDATA%\Bouncer`) stay for next time. Ticked, that
   folder and Bouncer's WebView2 data folder are deleted. Nothing else is.
@@ -134,6 +135,32 @@ prompt closes; answer in the app and the card stays until Claude Code moves
 on. Cards come only when Claude Code asks, so the permission mode matters:
 see the first item under "What it can't do".
 
+## Codex
+
+Bouncer also works with the [Codex CLI](https://developers.openai.com/codex) (0.163.0
+or newer; older versions have no hooks). Settings shows **Codex hooks** when
+there's a Codex folder (`~/.codex`, or `$CODEX_HOME`): **Install…** shows the
+exact change to its `hooks.json` and **Write changes** saves it, with a dated
+backup, as for Claude Code. The command line also works:
+`bouncer install-hooks --codex`.
+
+- **Trust them once in Codex.** Codex runs a new hook only after you trust
+  it: the next time you start Codex it asks; choose **Trust all and continue**
+  (or review them in `/hooks`). Updates of Bouncer keep the same hooks, so
+  you trust them once.
+- **Allow or deny only.** Codex's approval requests get the same cards, rules
+  and risk checks as Claude Code's. On Windows Codex runs its commands in
+  PowerShell, so Bouncer checks them as PowerShell; anything it can't read
+  always asks. There are no question or plan cards and no Guard every mode
+  for Codex.
+- **Codex's own words.** When Codex says why it asks, the card shows it as
+  "Codex says …": its text, not Bouncer's verdict, and never part of the
+  checks.
+- **Fail-safe.** If Bouncer is closed, slow or confused, or its hook fails,
+  Codex asks in its own prompt as usual.
+- **Tested without a real model.** Bouncer was tested with the real Codex
+  0.163.0 and a local stand-in for the model, not with a Codex subscription.
+
 ## What it can't do
 
 - **It can only approve or deny when Claude Code asks.** In
@@ -146,8 +173,10 @@ see the first item under "What it can't do".
   bypass mode stops for Claude Code's prompt and Bouncer's card instead of
   running. In a `claude -p` run, which can't show a prompt, it's refused
   instead. Safe requests in those modes still run unasked, and Bouncer never
-  allows or denies anything on its own.
-- **Only Claude Code for now.** Other agents come one per release.
+  allows or denies anything on its own. Guard every mode is Claude Code only:
+  Codex's hooks can't make it ask.
+- **Claude Code and Codex for now.** Other agents come one per release. For
+  Codex, Bouncer only allows or denies (see [Codex](#codex)).
 - **Some questions stay in the terminal.** Typing your own answer ("Type
   something"), questions Bouncer can't show unambiguously (for example a
   multi-select option whose label contains ", "), and any question while
