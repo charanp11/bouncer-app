@@ -4247,6 +4247,101 @@ signature in the file" and its SHA-256 (F11); a question card answered with
 one click (Q9). v0.9.0 is done; the next roadmap item (h, other agents, one
 per release) starts in a new session when Charan says.
 
+## Roadmap h1 — Codex CLI (current)
+
+First of roadmap h (Charan, 2026-10-20). Picked over Copilot CLI, Cursor
+CLI and Antigravity CLI: Codex's `PermissionRequest` hook fires only where
+Codex would ask, takes Claude Code's answer shape
+(`hookSpecificOutput.decision.behavior` = `allow` / `deny`), and with no
+answer Codex shows its own prompt. Copilot's `preToolUse` denies on a crash;
+Cursor's CLI runs only its shell hooks and blocks on output it can't parse;
+Antigravity's failure behaviour isn't documented. PR #52 (merged) proves
+the relay stays silent on Copilot's camelCase input and on unknown payloads;
+Copilot's VS Code-style input has Claude Code's shape and is left for
+Copilot's own release (Charan, 2026-10-20). Copilot reads only a
+repository's `.claude/settings.json`, never `~/.claude`.
+
+### Step 1: confirmed in scratch (2026-10-20, Codex 0.163.0)
+
+Codex 0.163.0 installed into a scratch folder with `npm install --prefix`
+(the global 0.116.0 untouched: its hooks are an off-by-default
+"under development" flag). `CODEX_HOME` a scratch folder, hooks only in
+`bouncer-playground/.codex/hooks.json`, no login: a fake Responses API on
+`127.0.0.1` asks for one escalated shell command, and a ConPTY driver runs
+the interactive TUI (`codex exec` never asks). The real `~/.codex` was
+compared file by file before and after: unchanged.
+
+1. **Hooks fire on native Windows.** `SessionStart`, `PreToolUse` and
+   `PermissionRequest` ran the `commandWindows` command (the `command` was
+   a POSIX path that can't run). Codex runs it as
+   `powershell.exe -NoProfile -Command "<commandWindows>"`.
+2. **No output → Codex's own prompt** ("Would you like to run the
+   following command?").
+3. **Crash, exit 1, exit 2, timeout → Codex's own prompt** each time, after
+   "Hook failed" (exit code 1 for all three exits: PowerShell 5.1 reports
+   any failure as 1, so exit 2 never blocks; "timed out after 15s"). The
+   timed-out hook was gone afterwards (not proven whether Codex or the
+   console's close ended it).
+4. **allow** ran the command with no prompt; **deny** showed "Blocked by
+   hook" with our message.
+5. **Trust** is kept in `CODEX_HOME`'s `config.toml` under `[hooks.state]`,
+   one `trusted_hash` per hook (`<hooks.json>:<event>:<group>:<index>`). It
+   covers the hook's definition, not the file it runs: a changed script
+   behind the same command stayed trusted; a changed `timeout` asked again
+   ("3 hooks are new or changed"); the old definition was trusted again.
+   An update that keeps the same path and definition keeps the trust.
+   Untrusted hooks don't run (Codex asks as usual).
+6. **Event data** (snake_case, like Claude Code's): `session_id`,
+   `turn_id`, `transcript_path` (under `CODEX_HOME/sessions`), `cwd`,
+   `hook_event_name`, `model`, `permission_mode`, `tool_name`, `tool_input`
+   (`command`; `description` = the model's own reason), `tool_use_id`. A
+   PowerShell command arrives as `tool_name: "Bash"`.
+
+### Threats
+
+1. **Codex taken for Claude Code.** The shapes are nearly the same. The
+   relay must not guess: the installed command names the agent
+   (`bouncer-hook --agent codex`); no flag = Claude Code; any other value
+   prints nothing. Codex's cards say Codex.
+2. **An answer Codex can't take.** Only `allow` / `deny` for Codex.
+   `updatedInput`, `updatedPermissions` and `interrupt` "fail closed
+   today" (would block): never sent. No question or plan cards; no guard
+   `ask` (Codex's `PreToolUse` takes no `ask`): a Codex `PreToolUse`
+   prints nothing.
+3. **PowerShell rules for "Bash".** On Windows Codex's "Bash" commands run
+   in PowerShell: checks and rules read them as PowerShell, and anything
+   the parser can't read is never auto-allowed (rule 8).
+4. **The command line.** `commandWindows` goes through
+   `powershell -Command`, so it is `& '<relay path>' --agent codex`, the
+   path in single quotes with `'` doubled. A missing relay should be a
+   failure (exit 1), so Codex asks (to test).
+5. **Trust bypass.** Bouncer never writes `[hooks.state]` (that would trust
+   our hook for the user). The install step says that Codex asks once in
+   `/hooks`; an update keeps the definition so trust holds.
+6. **Model text and private fields.** `model` and `transcript_path` never
+   leave the relay; `description` is the model's reason, shown with
+   `textContent` and labelled as Codex's, never as Bouncer's verdict.
+7. **Writing Codex's settings.** The user-level `hooks.json` in
+   `CODEX_HOME` (or `~/.codex`) gets rule 6: dated backup, our entries
+   only, the diff, a yes, an atomic write; uninstall removes only ours.
+8. **Budgets.** The installed `timeout` is above the relay's budget, as for
+   Claude Code; PowerShell's start-up adds to every hook (measure it).
+
+### Done when
+
+- [ ] core: a Codex event maps onto the existing request type; unknown
+  events or shapes print nothing; fixtures recorded from Codex 0.163.0
+  (fake model, paths as `dev`)
+- [ ] relay: `--agent codex` answers `PermissionRequest` with allow / deny
+  only; every other event and every failure prints nothing, exit 0
+- [ ] install / uninstall of Codex's `hooks.json` under rule 6, with the
+  `/hooks` trust step explained; `CODEX_HOME` respected
+- [ ] the island labels Codex sessions and cards; PowerShell rules for
+  Codex's commands on Windows
+- [ ] TESTS rows for each; CI green on Windows and macOS
+- [ ] end-to-end in scratch: real Codex 0.163.0 + fake model through the
+  test instance (no real-model check: no Codex subscription)
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
