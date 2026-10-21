@@ -28,5 +28,10 @@ test("Codex's hooks: offered only where Codex is, previewed by agent, trusted on
   assert.match(row, /invoke<HooksChange \| null>\("hooks_preview", \{ install, agent \}\)/);
   assert.match(row, /if \(codex && installing\) hooksNote \+= `\\n\$\{CODEX_TRUST\}`/);
   assert.match(main, /const CODEX_TRUST = "Codex asks you to trust these hooks once/);
+  // The minimum version, the same as the README's.
+  assert.match(main, /const CODEX_MIN = "Needs Codex 0\.145 or newer; older versions ignore these hooks\.";/);
+  assert.match(row, /\$\{CODEX_MIN\}/);
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /It needs Codex 0\.145 or newer/);
   assert.deepEqual([...row.matchAll(/invoke(?:<[^>]+>)?\("([a-z_]+)"/g)].map((m) => m[1]), ["hooks_write", "hooks_preview"]);
 });

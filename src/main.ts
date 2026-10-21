@@ -2346,6 +2346,9 @@ const CODEX_HINT: Partial<Record<HookStatus, string>> = {
   missing: "Until they're in, Codex asks in its terminal.",
   unknown: "Couldn't read Codex's hooks file.",
 };
+/** From Codex's release notes: hooks on by default from 0.124.0, quoted hook
+ * commands work on Windows from 0.145.0 (README, Codex). */
+const CODEX_MIN = "Needs Codex 0.145 or newer; older versions ignore these hooks.";
 /** Codex runs a new hook only after the user trusts it, once. */
 const CODEX_TRUST = "Codex asks you to trust these hooks once: open Codex and choose “Trust all and continue” (or review them in /hooks).";
 
@@ -2355,7 +2358,7 @@ const CODEX_TRUST = "Codex asks you to trust these hooks once: open Codex and ch
 function hooksRow(status: HookStatus | undefined, agent: HookAgent): HTMLElement {
   const codex = agent === "codex";
   const prefix = codex ? "codex-" : "";
-  const hint = status ? (codex ? CODEX_HINT[status] ?? HOOK_HINT[status] : HOOK_HINT[status]) : undefined;
+  const hint = status ? (codex ? `${CODEX_HINT[status] ?? HOOK_HINT[status]} ${CODEX_MIN}` : HOOK_HINT[status]) : undefined;
   const row = setRow(
     codex ? "Codex hooks" : "Claude Code hooks",
     [el("span", `status${status === "installed" ? "" : " off"}`, status ? HOOK_LABEL[status] : "…")],
