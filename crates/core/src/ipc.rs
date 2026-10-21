@@ -15,7 +15,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::event::Event;
+use crate::event::{CLAUDE_CODE, Event};
 use bouncer_relay::questions::{ASK, PLAN, picks_line};
 
 pub use bouncer_relay::{NAME, endpoint};
@@ -66,14 +66,19 @@ fn handle(mut stream: impl Conn, handler: &Handler) {
     }
     let Some(event) = serde_json::from_slice(&line)
         .ok()
-        .and_then(|v| Event::from_claude_code(&v))
+        .and_then(|v| Event::from_hook(&v))
     else {
         return;
     };
+    // Codex gets only allow / deny: no guard, no question or plan answers.
+    let claude = event.agent == CLAUDE_CODE;
     let asks = event.is_permission_request();
-    let pre = event.kind == "PreToolUse";
+    let pre = claude && event.kind == "PreToolUse";
     let tool = event.tool.clone().unwrap_or_default();
-    let (question, plan) = (asks && tool == ASK, asks && tool == PLAN);
+    let (question, plan) = (
+        claude && asks && tool == ASK,
+        claude && asks && tool == PLAN,
+    );
     let other = asks && !question && !plan;
     let answer = match handler(event, &|| stream.gone()) {
         Some(Decision::Allow) if other => "allow\n".to_owned(),
@@ -387,6 +392,37 @@ mod tests {
         assert_eq!(reply(&bash, Some(Decision::Plan(true))), "");
         assert_eq!(reply(PRE, picks()), "");
         assert_eq!(reply(&bash, Some(Decision::Allow)), "allow\n");
+    }
+
+    /// A Codex event (the relay's mark) gets only allow / deny, for any
+    /// tool, including ones named like Claude Code's question and plan;
+    /// never `ask`, `answer`, `approve` or `keep`.
+    #[test]
+    fn codex_gets_only_allow_or_deny() {
+        let line = |kind: &str, tool: &str| {
+            format!(
+                r#"{{"session_id":"s","cwd":"/p","hook_event_name":"{kind}","tool_name":"{tool}","bouncer_agent":"codex"}}"#
+            ) + "\n"
+        };
+        for tool in ["Bash", "apply_patch", "AskUserQuestion", "ExitPlanMode"] {
+            let ask = line("PermissionRequest", tool);
+            assert_eq!(reply(&ask, Some(Decision::Allow)), "allow\n", "{tool}");
+            assert_eq!(reply(&ask, Some(Decision::Deny)), "deny\n", "{tool}");
+            for other in [
+                Decision::Ask,
+                Decision::Answer(vec![vec![0]]),
+                Decision::Plan(true),
+                Decision::Plan(false),
+            ] {
+                assert_eq!(reply(&ask, Some(other.clone())), "", "{tool} {other:?}");
+                assert_eq!(reply(&line("PreToolUse", tool), Some(other)), "", "{tool}");
+            }
+            assert_eq!(reply(&line("PreToolUse", tool), Some(Decision::Allow)), "");
+        }
+        let marked = |mark: &str| ASK.replace('}', &format!(r#","bouncer_agent":{mark}}}"#));
+        for mark in [r#""other""#, "1", "null"] {
+            assert_eq!(reply(&marked(mark), Some(Decision::Allow)), "", "{mark}");
+        }
     }
 
     #[test]

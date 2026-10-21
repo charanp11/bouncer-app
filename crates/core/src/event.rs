@@ -1,13 +1,21 @@
-//! One internal event format for every agent. Claude Code hook JSON is the
-//! only input today; a second agent becomes another `from_*` constructor.
+//! One internal event format for every agent: Claude Code's hook JSON, or
+//! Codex's, which the relay marks (`AGENT_FIELD`) when its command line
+//! says so. The shape alone never decides: the two are nearly the same.
 
 use std::time::SystemTime;
 
 use serde_json::Value;
 
+pub const CLAUDE_CODE: &str = "claude-code";
+pub const CODEX: &str = "codex";
+
+/// Set by the relay (`--agent codex`) on the line it sends; any copy in the
+/// agent's own JSON is removed first.
+pub const AGENT_FIELD: &str = "bouncer_agent";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
-    /// Which agent sent it, e.g. `claude-code`.
+    /// Which agent sent it: `CLAUDE_CODE` or `CODEX`.
     pub agent: &'static str,
     pub session: String,
     /// The session's working directory.
@@ -23,17 +31,31 @@ pub struct Event {
     /// not by the tool failing.
     pub interrupted: bool,
     /// Claude Code's permission mode for this event (`default`, `auto`,
-    /// `acceptEdits`, `bypassPermissions`, ...), when it sent one.
+    /// `acceptEdits`, `bypassPermissions`, ...), when it sent one. Never set
+    /// for Codex (the guard is Claude Code only).
     pub mode: Option<String>,
+    /// The agent's own words on why it asks (Codex's `description`): shown
+    /// as its text, never part of `input`, so no check ever reads it.
+    pub reason: Option<String>,
 }
 
 impl Event {
+    /// The relay's line: Codex's JSON if the relay marked it so, Claude
+    /// Code's if unmarked; any other mark is refused.
+    pub fn from_hook(hook: &Value) -> Option<Event> {
+        match hook.get(AGENT_FIELD) {
+            None => Event::from_claude_code(hook),
+            Some(v) if v == CODEX => Event::from_codex(hook, cfg!(windows)),
+            Some(_) => None,
+        }
+    }
+
     /// Builds an event from Claude Code hook JSON. `None` if a required field
     /// is missing or has the wrong type.
     pub fn from_claude_code(hook: &Value) -> Option<Event> {
         let text = |key| hook.get(key)?.as_str().map(str::to_owned);
         Some(Event {
-            agent: "claude-code",
+            agent: CLAUDE_CODE,
             session: text("session_id")?,
             project: text("cwd")?,
             kind: text("hook_event_name")?,
@@ -45,7 +67,33 @@ impl Event {
             time: SystemTime::now(),
             interrupted: hook.get("is_interrupt") == Some(&Value::Bool(true)),
             mode: text("permission_mode"),
+            reason: None,
         })
+    }
+
+    /// Builds an event from Codex hook JSON (Codex 0.163.0's fields). On
+    /// Windows Codex runs its "Bash" commands in PowerShell, so they are
+    /// checked as PowerShell. For its own tools (`Bash`, `apply_patch`),
+    /// `tool_input.description` is the model's reason: moved out of the
+    /// input into `reason`. An MCP tool's arguments stay as they came (a
+    /// `description` there is part of the request). `None` as above.
+    pub fn from_codex(hook: &Value, windows: bool) -> Option<Event> {
+        let mut event = Event::from_claude_code(hook)?;
+        event.agent = CODEX;
+        event.mode = None;
+        event.interrupted = false;
+        let own = matches!(event.tool.as_deref(), Some("Bash" | "apply_patch"));
+        if own && let Some(input) = event.input.as_mut().and_then(Value::as_object_mut) {
+            event.reason = match input.remove("description") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) => Some(s),
+                Some(_) => return None,
+            };
+        }
+        if windows && event.tool.as_deref() == Some("Bash") {
+            event.tool = Some("PowerShell".into());
+        }
+        Some(event)
     }
 
     pub fn is_permission_request(&self) -> bool {
@@ -112,5 +160,98 @@ mod tests {
         assert!(!fail(json!(true)));
         let stop = json!({"session_id": "s", "cwd": "/p", "hook_event_name": "PostToolUse", "is_interrupt": false});
         assert!(!Event::from_claude_code(&stop).unwrap().is_failure());
+    }
+
+    fn codex_request(tool: &str, input: Value) -> Value {
+        json!({ "session_id": "c", "cwd": "/p", "hook_event_name": "PermissionRequest",
+            "permission_mode": "bypassPermissions", "model": "m", "tool_name": tool,
+            "tool_input": input, AGENT_FIELD: CODEX })
+    }
+
+    /// Only the relay's mark makes a Codex event; no mark is Claude Code;
+    /// any other mark (or a mark that isn't text) is refused.
+    #[test]
+    fn the_relay_mark_decides_the_agent() {
+        let plain = json!({ "session_id": "s", "cwd": "/p", "hook_event_name": "Stop" });
+        assert_eq!(Event::from_hook(&plain).unwrap().agent, CLAUDE_CODE);
+        let mut codex = plain.clone();
+        codex[AGENT_FIELD] = json!(CODEX);
+        assert_eq!(Event::from_hook(&codex).unwrap().agent, CODEX);
+        for other in [
+            json!("claude-code"),
+            json!("Codex"),
+            json!(""),
+            json!(1),
+            json!(null),
+        ] {
+            let mut bad = plain.clone();
+            bad[AGENT_FIELD] = other.clone();
+            assert!(Event::from_hook(&bad).is_none(), "{other}");
+        }
+    }
+
+    /// Codex's shell command: PowerShell on Windows, Bash elsewhere; its
+    /// `description` leaves the input for `reason`; no permission mode, so
+    /// the guard never applies.
+    #[test]
+    fn a_codex_command_keeps_its_reason_apart() {
+        let hook = codex_request(
+            "Bash",
+            json!({ "command": "ls", "description": "Probe\u{202E}." }),
+        );
+        for (windows, tool) in [(true, "PowerShell"), (false, "Bash")] {
+            let e = Event::from_codex(&hook, windows).unwrap();
+            assert_eq!(e.agent, CODEX);
+            assert_eq!(e.tool.as_deref(), Some(tool));
+            assert_eq!(e.input, Some(json!({ "command": "ls" })));
+            assert_eq!(e.reason.as_deref(), Some("Probe\u{202E}."));
+            assert_eq!(e.mode, None);
+        }
+        let none = codex_request("Bash", json!({ "command": "ls", "description": null }));
+        assert_eq!(Event::from_codex(&none, true).unwrap().reason, None);
+        let bad = codex_request("Bash", json!({ "command": "ls", "description": ["x"] }));
+        assert!(Event::from_codex(&bad, true).is_none());
+        let patch = codex_request(
+            "apply_patch",
+            json!({ "command": "*** Begin Patch", "description": "edit" }),
+        );
+        let e = Event::from_codex(&patch, true).unwrap();
+        assert_eq!(
+            (e.tool.as_deref(), e.reason.as_deref()),
+            (Some("apply_patch"), Some("edit"))
+        );
+    }
+
+    /// An MCP tool's arguments are the request: a `description` there stays.
+    #[test]
+    fn an_mcp_tool_keeps_every_argument() {
+        let input = json!({ "title": "t", "description": "the issue body" });
+        let e = Event::from_codex(
+            &codex_request("mcp__github__create_issue", input.clone()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(e.input, Some(input));
+        assert_eq!(e.reason, None);
+    }
+
+    /// Codex 0.163.0's recorded events (paths as `dev`) all parse.
+    #[test]
+    fn recorded_codex_events_parse() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../relay/tests/codex-fixtures");
+        let mut count = 0;
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let mut hook: Value =
+                serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap();
+            hook[AGENT_FIELD] = json!(CODEX);
+            let e = Event::from_hook(&hook).unwrap();
+            assert_eq!(e.agent, CODEX);
+            if e.is_permission_request() {
+                assert_eq!(e.reason.as_deref(), Some("Probe for the hook checks."));
+            }
+            count += 1;
+        }
+        assert_eq!(count, 6);
     }
 }

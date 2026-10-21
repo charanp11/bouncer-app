@@ -342,6 +342,7 @@ pub(crate) mod tests {
             time: UNIX_EPOCH + Duration::from_millis(t),
             interrupted: false,
             mode: None,
+            reason: None,
         }
     }
 
