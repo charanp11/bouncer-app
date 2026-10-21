@@ -137,8 +137,11 @@ see the first item under "What it can't do".
 
 ## Codex
 
-Bouncer also works with the [Codex CLI](https://developers.openai.com/codex) (0.163.0
-or newer; older versions have no hooks). Settings shows **Codex hooks** when
+Bouncer also works with the [Codex CLI](https://developers.openai.com/codex).
+**It needs Codex 0.145 or newer; older versions ignore these hooks or can't
+run them, and Codex then asks as usual.** Codex's own release notes: hooks
+are on by default from 0.124.0, the Windows-only hook command from 0.131.0,
+and quoted hook commands work on Windows from 0.145.0. Settings shows **Codex hooks** when
 there's a Codex folder (`~/.codex`, or `$CODEX_HOME`): **Install…** shows the
 exact change to its `hooks.json` and **Write changes** saves it, with a dated
 backup, as for Claude Code. The command line also works:
@@ -158,8 +161,8 @@ backup, as for Claude Code. The command line also works:
   checks.
 - **Fail-safe.** If Bouncer is closed, slow or confused, or its hook fails,
   Codex asks in its own prompt as usual.
-- **Tested without a real model.** Bouncer was tested with the real Codex
-  0.163.0 and a local stand-in for the model, not with a Codex subscription.
+- **Tested without a live model.** Bouncer was tested with the real Codex
+  0.163.0 and a local test model; not yet with a live model.
 
 ## What it can't do
 
