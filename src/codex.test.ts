@@ -16,7 +16,7 @@ test("sessions and cards name Codex", () => {
 
 test("Codex's reason is its own text, labelled, never markup", () => {
   const line = body("reasonLine");
-  assert.match(line, /says`/, "labelled as the agent's words");
+  assert.match(line, /el\("span", "badge", `\$\{AGENTS\[request\.agent\] \?\? request\.agent\} says`\)/, "labelled with the agent's name");
   // As text only (no HTML sink anywhere is crates/app/tests/no_html_sinks.rs).
   assert.match(line, /agentText\(line, request\.reason/);
   assert.match(main, /if \(request\.reason\) c\.append\(reasonLine\(request\)\);/);

@@ -723,7 +723,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
  * hidden characters come visible from the backend, and it goes in as text. */
 function reasonLine(request: Request): HTMLElement {
   const line = el("div", "said");
-  line.append(el("span", "badge", ` says`), " ");
+  line.append(el("span", "badge", `${AGENTS[request.agent] ?? request.agent} says`), " ");
   agentText(line, request.reason ?? "");
   return line;
 }
