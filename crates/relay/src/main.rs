@@ -1,6 +1,8 @@
-//! Claude Code hook relay.
+//! Claude Code (and Codex) hook relay.
 //!
-//! Reads one hook event on stdin and forwards it to the Bouncer app.
+//! Reads one hook event on stdin and forwards it to the Bouncer app. No
+//! arguments: Claude Code. `--agent codex`: Codex (its line is marked so,
+//! and it only ever gets allow / deny). Any other arguments: nothing at all.
 //!
 //! Fail safe: on any error, timeout or unknown input it prints nothing and exits
 //! 0, so Claude Code falls back to its normal terminal prompt. The main thread
@@ -20,6 +22,30 @@ const MAX_INPUT: u64 = 1024 * 1024;
 /// Fields that can be huge, or hold text Bouncer never shows (a failed
 /// tool's `error` can quote a secret): they never leave the relay.
 const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path", "error"];
+/// What else Codex sends that Bouncer never needs: the model's name, the
+/// user's prompt and the model's last message.
+const CODEX_DROPPED: &[&str] = &["model", "prompt", "last_assistant_message"];
+/// Marks the line for the app as Codex's (`bouncer_core::event::AGENT_FIELD`).
+const AGENT_FIELD: &str = "bouncer_agent";
+
+/// Which agent's hook ran this relay, from its command line.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Agent {
+    ClaudeCode,
+    Codex,
+}
+
+impl Agent {
+    /// No arguments: Claude Code; exactly `--agent codex`: Codex; anything
+    /// else: `None` (the relay then does nothing).
+    fn from_args(args: &[String]) -> Option<Agent> {
+        match args {
+            [] => Some(Agent::ClaudeCode),
+            [flag, name] if flag == "--agent" && name == "codex" => Some(Agent::Codex),
+            _ => None,
+        }
+    }
+}
 /// Whole-run budget for an event nobody waits on.
 const FIRE_AND_FORGET: Duration = Duration::from_secs(2);
 /// Longest answer line read from the app.
@@ -51,9 +77,11 @@ enum Step {
 /// reading stdin included, happens on the worker under the deadline.
 fn run() -> Option<String> {
     let start = Instant::now();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let agent = Agent::from_args(&args)?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(Step::Done(work(|| {
+        let _ = tx.send(Step::Done(work(agent, || {
             let _ = tx.send(Step::Waiting);
         })));
     });
@@ -69,10 +97,17 @@ fn run() -> Option<String> {
 
 /// Reads the event, forwards it, and for a permission request (or a
 /// PreToolUse the app guards) turns the app's answer into output. `waiting`
-/// is called only for permission requests.
-fn work(waiting: impl FnOnce()) -> Option<String> {
-    let (line, payload) = read_event(std::io::stdin().lock())?;
+/// is called only for permission requests. Codex gets only allow / deny.
+fn work(agent: Agent, waiting: impl FnOnce()) -> Option<String> {
+    let (line, payload) = read_event(std::io::stdin().lock(), agent)?;
     match payload["hook_event_name"].as_str()? {
+        "PermissionRequest" if agent == Agent::Codex => {
+            decision_json(&talk(&line, true, waiting)?, None, &Value::Null)
+        }
+        "PreToolUse" if agent == Agent::Codex => {
+            talk(&line, false, || {});
+            None
+        }
         "PermissionRequest" => {
             let answer = talk(&line, true, waiting)?;
             decision_json(
@@ -134,8 +169,9 @@ fn decision_json(answer: &str, tool: Option<&str>, input: &Value) -> Option<Stri
 
 /// Reads and trims the hook JSON. Returns the line to send and the trimmed
 /// event (a question's answer is built from its `tool_input`); `None` if
-/// it's too big, not a JSON object, or has no event name.
-fn read_event(input: impl Read) -> Option<(String, Value)> {
+/// it's too big, not a JSON object, or has no event name. The agent's mark
+/// comes only from the relay's own command line: any copy in the input goes.
+fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     let mut raw = Vec::new();
     input.take(MAX_INPUT + 1).read_to_end(&mut raw).ok()?;
     if raw.len() as u64 > MAX_INPUT {
@@ -145,8 +181,15 @@ fn read_event(input: impl Read) -> Option<(String, Value)> {
     let mut payload: Value = serde_json::from_slice(raw).ok()?;
     let map = payload.as_object_mut()?;
     map.get("hook_event_name")?.as_str()?;
+    map.remove(AGENT_FIELD);
     for field in DROPPED_FIELDS {
         map.remove(*field);
+    }
+    if agent == Agent::Codex {
+        for field in CODEX_DROPPED {
+            map.remove(*field);
+        }
+        map.insert(AGENT_FIELD.into(), "codex".into());
     }
     let mut line = payload.to_string();
     line.push('\n');
@@ -177,10 +220,55 @@ fn talk(line: &str, asks: bool, waiting: impl FnOnce()) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn read_event_claude(input: &[u8]) -> Option<(String, Value)> {
+        read_event(input, Agent::ClaudeCode)
+    }
+
+    #[test]
+    fn only_no_arguments_or_exactly_agent_codex_run() {
+        let args =
+            |a: &[&str]| Agent::from_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(args(&[]), Some(Agent::ClaudeCode));
+        assert_eq!(args(&["--agent", "codex"]), Some(Agent::Codex));
+        for bad in [
+            &["--agent"][..],
+            &["--agent", "Codex"],
+            &["--agent", "claude-code"],
+            &["--agent", "codex", "x"],
+            &["--agent=codex"],
+            &["codex"],
+            &["--agent", ""],
+            &[""],
+        ] {
+            assert_eq!(args(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Codex's line is marked by the relay alone, and its model name,
+    /// prompt and last message never leave; Claude Code's line never
+    /// carries a mark, whatever its input says.
+    #[test]
+    fn the_mark_comes_only_from_the_command_line() {
+        let input = br#"{"hook_event_name":"Stop","bouncer_agent":"codex","model":"m","prompt":"p","last_assistant_message":"l","transcript_path":"t","cwd":"/p"}"#;
+        let (_, claude) = read_event(&input[..], Agent::ClaudeCode).unwrap();
+        assert_eq!(claude.get(AGENT_FIELD), None);
+        assert_eq!(claude["prompt"], "p", "Claude Code's line is as before");
+        let (line, codex) = read_event(&input[..], Agent::Codex).unwrap();
+        assert_eq!(
+            codex,
+            serde_json::json!({ "hook_event_name": "Stop", "cwd": "/p", "bouncer_agent": "codex" })
+        );
+        assert!(line.ends_with('\n'));
+        let spoof = br#"{"hook_event_name":"Stop","bouncer_agent":"other"}"#;
+        assert_eq!(
+            read_event(&spoof[..], Agent::Codex).unwrap().1[AGENT_FIELD],
+            "codex"
+        );
+    }
+
     #[test]
     fn keeps_event_and_drops_large_fields() {
-        let (line, event) = read_event(
-            &br#"{"hook_event_name":"PostToolUse","tool_input":{"command":"ls"},"tool_response":"x","transcript_path":"t"}"#[..],
+        let (line, event) = read_event_claude(&br#"{"hook_event_name":"PostToolUse","tool_input":{"command":"ls"},"tool_response":"x","transcript_path":"t"}"#[..],
         )
         .unwrap();
         assert_eq!(
@@ -192,8 +280,7 @@ mod tests {
 
     #[test]
     fn a_failure_never_forwards_its_error_text() {
-        let (line, event) = read_event(
-            &br#"{"hook_event_name":"PostToolUseFailure","tool_input":{"command":"cat x"},"error":"Exit code 1\ncat: x: No such file","is_interrupt":false}"#[..],
+        let (line, event) = read_event_claude(&br#"{"hook_event_name":"PostToolUseFailure","tool_input":{"command":"cat x"},"error":"Exit code 1\ncat: x: No such file","is_interrupt":false}"#[..],
         )
         .unwrap();
         assert_eq!(
@@ -331,7 +418,7 @@ mod tests {
 
     #[test]
     fn strips_utf8_bom() {
-        assert!(read_event(&b"\xEF\xBB\xBF{\"hook_event_name\":\"Stop\"}"[..]).is_some());
+        assert!(read_event_claude(&b"\xEF\xBB\xBF{\"hook_event_name\":\"Stop\"}"[..]).is_some());
     }
 
     #[test]
@@ -343,7 +430,7 @@ mod tests {
             b"{}",
             br#"{"hook_event_name":7}"#,
         ] {
-            assert!(read_event(bad).is_none());
+            assert!(read_event_claude(bad).is_none());
         }
     }
 
@@ -352,6 +439,6 @@ mod tests {
         let mut big = br#"{"hook_event_name":"Stop","x":""#.to_vec();
         big.resize(MAX_INPUT as usize + 1, b'a');
         big.extend_from_slice(br#""}"#);
-        assert!(read_event(&big[..]).is_none());
+        assert!(read_event_claude(&big[..]).is_none());
     }
 }
