@@ -1,6 +1,8 @@
-//! Adding and removing Bouncer's entries in a Claude Code settings file.
+//! Adding and removing Bouncer's entries in a Claude Code settings file, or
+//! in Codex's `hooks.json` (same `hooks` layout; `Agent` says which).
 //!
-//! Only hook commands whose file name is `bouncer-hook[.exe]` are ours. Install
+//! Only hook commands whose file name is `bouncer-hook[.exe]` are ours (for
+//! Codex: exactly the command line `codex_command` writes). Install
 //! adds one group per event; uninstall removes our commands, plus any group,
 //! event list or `hooks` object that only became empty because of that. Key
 //! order is kept (`serde_json` `preserve_order`), so install followed by
@@ -32,12 +34,128 @@ pub const EVENTS: &[(&str, u64)] = &[
     ("Stop", 5),
 ];
 
-fn is_ours(hook: &Value) -> bool {
-    let Some(command) = hook.get("command").and_then(Value::as_str) else {
-        return false;
-    };
-    let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
+/// Codex's events, with the hook timeout in seconds. Never change these:
+/// Codex trusts a hook by its definition, so a new timeout (or command)
+/// makes the user trust it again in `/hooks`. The permission request's stays
+/// above the relay's 110 s budget; SessionEnd's is Codex's 3 s maximum.
+pub const CODEX_EVENTS: &[(&str, u64)] = &[
+    ("SessionStart", 5),
+    ("SessionEnd", 3),
+    ("UserPromptSubmit", 5),
+    ("PreToolUse", 5),
+    ("PostToolUse", 5),
+    ("PermissionRequest", 120),
+    ("Stop", 5),
+];
+
+/// Whose hooks file it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Agent {
+    ClaudeCode,
+    Codex,
+}
+
+impl Agent {
+    fn events(self) -> &'static [(&'static str, u64)] {
+        match self {
+            Agent::ClaudeCode => EVENTS,
+            Agent::Codex => CODEX_EVENTS,
+        }
+    }
+
+    fn is_ours(self, hook: &Value) -> bool {
+        match self {
+            Agent::ClaudeCode => is_ours(hook),
+            Agent::Codex => is_ours_codex(hook),
+        }
+    }
+
+    /// Our hook entry running `relay` with `timeout`.
+    fn entry(self, relay: &str, timeout: u64) -> Value {
+        match self {
+            Agent::ClaudeCode => {
+                json!({ "type": "command", "command": relay, "args": [], "timeout": timeout })
+            }
+            Agent::Codex => {
+                let command = codex_command(relay, cfg!(windows));
+                let mut entry =
+                    json!({ "type": "command", "command": command, "timeout": timeout });
+                if cfg!(windows) {
+                    entry["commandWindows"] = command.into();
+                }
+                entry
+            }
+        }
+    }
+}
+
+fn is_relay_name(path: &str) -> bool {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     name.eq_ignore_ascii_case("bouncer-hook") || name.eq_ignore_ascii_case("bouncer-hook.exe")
+}
+
+fn is_ours(hook: &Value) -> bool {
+    hook.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(is_relay_name)
+}
+
+/// The quote characters PowerShell ends a single-quoted string with: `'`
+/// and the curly ones it treats the same.
+const PS_QUOTES: &[char] = &['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// Codex runs a hook's command through a shell: `powershell -Command` on
+/// Windows (`windows`), `sh` elsewhere. The relay's path goes in single
+/// quotes, the only quoting with no expansion: PowerShell ends one at any of
+/// `PS_QUOTES`, each doubled inside; sh at `'`, written `'\''`. Then
+/// `--agent codex`. Nothing in the path can end the quotes or run.
+pub fn codex_command(relay: &str, windows: bool) -> String {
+    if windows {
+        let mut quoted = String::new();
+        for c in relay.chars() {
+            quoted.push(c);
+            if PS_QUOTES.contains(&c) {
+                quoted.push(c);
+            }
+        }
+        format!("& '{quoted}' --agent codex")
+    } else {
+        format!("'{}' --agent codex", relay.replace('\'', r"'\''"))
+    }
+}
+
+/// The relay path in a command `codex_command` wrote, in either form; `None`
+/// for anything else (it must come back out exactly).
+fn codex_relay(command: &str) -> Option<String> {
+    let ps = command
+        .strip_prefix("& '")
+        .and_then(|c| c.strip_suffix("' --agent codex"))
+        .map(|inner| {
+            let mut path = String::new();
+            let mut chars = inner.chars().peekable();
+            while let Some(c) = chars.next() {
+                path.push(c);
+                if PS_QUOTES.contains(&c) && chars.peek() == Some(&c) {
+                    chars.next();
+                }
+            }
+            (path, true)
+        });
+    let sh = command
+        .strip_prefix('\'')
+        .and_then(|c| c.strip_suffix("' --agent codex"))
+        .map(|inner| (inner.replace(r"'\''", "'"), false));
+    let (path, windows) = ps.or(sh)?;
+    (codex_command(&path, windows) == command).then_some(path)
+}
+
+fn is_ours_codex(hook: &Value) -> bool {
+    ["command", "commandWindows"].iter().any(|key| {
+        hook.get(*key)
+            .and_then(Value::as_str)
+            .and_then(codex_relay)
+            .is_some_and(|path| is_relay_name(&path))
+    })
 }
 
 /// `$CLAUDE_CONFIG_DIR/settings.json` (as Claude Code reads it), else
@@ -56,16 +174,75 @@ pub fn settings_path(
     Ok(PathBuf::from(home).join(".claude").join("settings.json"))
 }
 
-/// The user's Claude Code settings file, from this process's environment.
-pub fn user_settings() -> Result<PathBuf, String> {
-    settings_path(
-        std::env::var_os("CLAUDE_CONFIG_DIR"),
-        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }),
-    )
+/// `$CODEX_HOME/hooks.json` (as Codex reads it), else `~/.codex/hooks.json`.
+/// Empty values count as unset.
+pub fn codex_hooks_path(
+    codex_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = codex_home.filter(|d| !d.is_empty()) {
+        return Ok(PathBuf::from(dir).join("hooks.json"));
+    }
+    let home = home
+        .filter(|h| !h.is_empty())
+        .ok_or("can't find your home folder; pass --settings")?;
+    Ok(PathBuf::from(home).join(".codex").join("hooks.json"))
+}
+
+/// Set (to anything) by tests that run Bouncer's programs: every real
+/// profile file `user_file` resolves must then be inside the temp folder.
+pub const TEST_GUARD_ENV: &str = "BOUNCER_TEST_GUARD";
+
+/// The agent's user-level hooks file, from this process's environment: the
+/// only place Bouncer resolves a real profile file (Claude Code's
+/// `settings.json`, Codex's `hooks.json`; Codex's `config.toml` is never
+/// read or written). In this crate's test build, or with `TEST_GUARD_ENV`
+/// set, it panics unless the path is inside the temp folder, so no test can
+/// ever reach the user's own settings (2026-10-21, PLAN roadmap h1).
+pub fn user_file(agent: Agent) -> Result<PathBuf, String> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let path = match agent {
+        Agent::ClaudeCode => settings_path(std::env::var_os("CLAUDE_CONFIG_DIR"), home)?,
+        Agent::Codex => codex_hooks_path(std::env::var_os("CODEX_HOME"), home)?,
+    };
+    if cfg!(test) || std::env::var_os(TEST_GUARD_ENV).is_some() {
+        guard_test_path(&path, &std::env::temp_dir());
+    }
+    Ok(path)
+}
+
+/// Panics unless `path` is inside `temp` (by its parts, case-insensitive on
+/// Windows; any `..` refused).
+fn guard_test_path(path: &Path, temp: &Path) {
+    use std::path::Component;
+    let parts = |p: &Path| -> Vec<String> {
+        p.components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .map(|c| {
+                let s = c.as_os_str().to_string_lossy().into_owned();
+                if cfg!(windows) { s.to_lowercase() } else { s }
+            })
+            .collect()
+    };
+    let (path_parts, temp_parts) = (parts(path), parts(temp));
+    let inside = path.is_absolute()
+        && !path.components().any(|c| c == Component::ParentDir)
+        && path_parts.len() > temp_parts.len()
+        && path_parts.starts_with(&temp_parts);
+    assert!(
+        inside,
+        "a test reached a real profile file: {} (only paths inside {} are allowed under test)",
+        path.display(),
+        temp.display()
+    );
 }
 
 /// Whether any of our hook commands is in `settings`.
 pub fn installed(settings: &Value) -> bool {
+    installed_for(Agent::ClaudeCode, settings)
+}
+
+fn installed_for(agent: Agent, settings: &Value) -> bool {
     settings["hooks"].as_object().is_some_and(|events| {
         events
             .values()
@@ -74,7 +251,7 @@ pub fn installed(settings: &Value) -> bool {
             .any(|group| {
                 group["hooks"]
                     .as_array()
-                    .is_some_and(|list| list.iter().any(is_ours))
+                    .is_some_and(|list| list.iter().any(|h| agent.is_ours(h)))
             })
     })
 }
@@ -82,7 +259,13 @@ pub fn installed(settings: &Value) -> bool {
 /// Adds our hooks (replacing any old ones) pointing at the `relay` executable.
 /// Runs exec form (`args`), so no shell ever parses the path.
 pub fn install(settings: &mut Value, relay: &str) -> Result<(), String> {
-    uninstall(settings);
+    install_for(Agent::ClaudeCode, settings, relay)
+}
+
+/// As `install`, for `agent`. Codex's command goes through its shell,
+/// quoted by `codex_command`.
+pub fn install_for(agent: Agent, settings: &mut Value, relay: &str) -> Result<(), String> {
+    uninstall_for(agent, settings);
     let root = settings
         .as_object_mut()
         .ok_or("the settings file is not a JSON object")?;
@@ -91,21 +274,23 @@ pub fn install(settings: &mut Value, relay: &str) -> Result<(), String> {
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or("\"hooks\" is not an object")?;
-    for &(event, timeout) in EVENTS {
+    for &(event, timeout) in agent.events() {
         hooks
             .entry(event)
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .ok_or(format!("\"hooks.{event}\" is not a list"))?
-            .push(json!({
-                "hooks": [{ "type": "command", "command": relay, "args": [], "timeout": timeout }]
-            }));
+            .push(json!({ "hooks": [agent.entry(relay, timeout)] }));
     }
     Ok(())
 }
 
 /// Removes our hooks and only the containers that we emptied.
 pub fn uninstall(settings: &mut Value) {
+    uninstall_for(Agent::ClaudeCode, settings);
+}
+
+fn uninstall_for(agent: Agent, settings: &mut Value) {
     let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
         return;
     };
@@ -121,7 +306,7 @@ pub fn uninstall(settings: &mut Value) {
                 return true;
             };
             let had_hooks = !list.is_empty();
-            list.retain(|hook| !is_ours(hook));
+            list.retain(|hook| !agent.is_ours(hook));
             !(had_hooks && list.is_empty())
         });
         if had_groups && groups.is_empty() {
@@ -186,25 +371,34 @@ impl Status {
 
 /// Checks every event in `EVENTS` for our hook running `relay`.
 pub fn status(settings: &Value, relay: &str) -> Status {
-    if !installed(settings) {
+    status_for(Agent::ClaudeCode, settings, relay)
+}
+
+/// As `status`, for `agent`: each event must have exactly our entry.
+pub fn status_for(agent: Agent, settings: &Value, relay: &str) -> Status {
+    if !installed_for(agent, settings) {
         return Status::Missing;
     }
     let mut moved = false;
-    for &(event, timeout) in EVENTS {
+    for &(event, timeout) in agent.events() {
         let ours: Vec<&Value> = settings["hooks"][event]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|group| group["hooks"].as_array())
             .flatten()
-            .filter(|hook| is_ours(hook))
+            .filter(|hook| agent.is_ours(hook))
             .collect();
-        let exact =
-            |h: &&Value| h["command"] == relay && h["timeout"] == timeout && h["args"] == json!([]);
+        let want = agent.entry(relay, timeout);
+        let same_relay = |h: &&Value| want["command"] == h["command"];
+        let exact = |h: &&Value| {
+            want.as_object()
+                .is_some_and(|w| w.iter().all(|(k, v)| h[k] == *v))
+        };
         if ours.is_empty() {
             return Status::Incomplete;
         } else if !ours.iter().any(exact) {
-            if ours.iter().all(|h| h["command"] == relay) {
+            if ours.iter().all(same_relay) {
                 return Status::Incomplete;
             }
             moved = true;
@@ -262,6 +456,11 @@ fn read(path: &Path) -> Result<Option<String>, String> {
 /// Refuses a file that isn't valid JSON, and a relay that isn't an absolute
 /// path to a file.
 pub fn plan(path: &Path, relay: Option<&Path>) -> Result<Option<Change>, String> {
+    plan_for(Agent::ClaudeCode, path, relay)
+}
+
+/// As `plan`, for `agent`'s file.
+pub fn plan_for(agent: Agent, path: &Path, relay: Option<&Path>) -> Result<Option<Change>, String> {
     let before = read(path)?;
     let mut value = match &before {
         Some(text) => serde_json::from_str(text).map_err(|e| {
@@ -279,9 +478,9 @@ pub fn plan(path: &Path, relay: Option<&Path>) -> Result<Option<Change>, String>
                 return Err(format!("relay not found at {}", relay.display()));
             }
             let relay = relay.to_str().ok_or("relay path is not valid UTF-8")?;
-            install(&mut value, relay)?;
+            install_for(agent, &mut value, relay)?;
         }
-        None => uninstall(&mut value),
+        None => uninstall_for(agent, &mut value),
     }
     let mut after = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     if before.as_ref().is_none_or(|t| t.ends_with('\n')) {
@@ -615,6 +814,177 @@ mod tests {
         let fake =
             json!({ "hooks": { "Stop": [{ "hooks": [{ "command": "bouncer-hook-extra" }] }] } });
         assert_eq!(status(&fake, RELAY), Status::Missing);
+    }
+
+    /// Paths a user can have: a quote in the name (O'Brien), PowerShell's
+    /// curly quotes, `$`, backticks, `;`, `&`, `%`, brackets, spaces.
+    const ODD: &str = "C:\\Users\\O'Brien \u{2018}x\u{2019} \u{201A}\u{201B} $(calc) `n; & echo %PATH% [a] {b}\\bouncer-hook.exe";
+
+    #[test]
+    fn codex_commands_quote_the_path_for_each_shell() {
+        assert_eq!(
+            codex_command(r"C:\Users\O'Brien\Bouncer\bouncer-hook.exe", true),
+            r"& 'C:\Users\O''Brien\Bouncer\bouncer-hook.exe' --agent codex"
+        );
+        assert_eq!(
+            codex_command("C:\\a\u{2018}b\u{2019}\\bouncer-hook.exe", true),
+            "& 'C:\\a\u{2018}\u{2018}b\u{2019}\u{2019}\\bouncer-hook.exe' --agent codex"
+        );
+        assert_eq!(
+            codex_command("/Users/o'brien/bouncer-hook", false),
+            r"'/Users/o'\''brien/bouncer-hook' --agent codex"
+        );
+        for windows in [true, false] {
+            let command = codex_command(ODD, windows);
+            assert_eq!(codex_relay(&command).as_deref(), Some(ODD), "{command}");
+            assert!(is_ours_codex(&json!({ "command": command })));
+        }
+    }
+
+    /// Only exactly what `codex_command` writes, running bouncer-hook, is
+    /// ours: an unescaped quote, other arguments, another file or no
+    /// arguments are the user's.
+    #[test]
+    fn codex_lookalikes_are_not_ours() {
+        for command in [
+            r"& 'C:\x\not-bouncer-hook.exe' --agent codex",
+            r"& 'C:\a'b\bouncer-hook.exe' --agent codex",
+            r"& 'C:\x\bouncer-hook.exe' --agent codex; calc",
+            r"& 'C:\x\bouncer-hook.exe' --agent codexx",
+            r"& 'C:\x\bouncer-hook.exe'",
+            r"C:\x\bouncer-hook.exe --agent codex",
+            r"'/a'b/bouncer-hook' --agent codex",
+            "'/x/bouncer-hook.sh' --agent codex",
+        ] {
+            assert!(!is_ours_codex(&json!({ "command": command })), "{command}");
+        }
+        assert!(is_ours_codex(
+            &json!({ "command": "x", "commandWindows": r"& 'C:\x\bouncer-hook.exe' --agent codex" })
+        ));
+    }
+
+    /// The timeouts are part of the hook's definition, which Codex trusts:
+    /// they never change by accident.
+    #[test]
+    fn codex_timeouts_are_fixed() {
+        assert_eq!(
+            CODEX_EVENTS,
+            &[
+                ("SessionStart", 5),
+                ("SessionEnd", 3),
+                ("UserPromptSubmit", 5),
+                ("PreToolUse", 5),
+                ("PostToolUse", 5),
+                ("PermissionRequest", 120),
+                ("Stop", 5)
+            ]
+        );
+        let hook = CODEX_EVENTS
+            .iter()
+            .find(|(e, _)| *e == "PermissionRequest")
+            .unwrap()
+            .1;
+        assert!(
+            bouncer_relay::DECISION_BUDGET + std::time::Duration::from_secs(5)
+                <= std::time::Duration::from_secs(hook)
+        );
+    }
+
+    /// Install keeps the user's own Codex hooks, one entry per event (the
+    /// Windows form with `commandWindows`); remove gives the file back; the
+    /// status tells installed, incomplete, moved and missing.
+    #[test]
+    fn codex_install_status_and_uninstall() {
+        let original = json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "notify done" }] }] } });
+        let mut s = original.clone();
+        assert_eq!(status_for(Agent::Codex, &s, ODD), Status::Missing);
+        install_for(Agent::Codex, &mut s, ODD).unwrap();
+        install_for(Agent::Codex, &mut s, ODD).unwrap();
+        assert!(
+            !installed(&s),
+            "Claude Code's check doesn't see Codex's entries"
+        );
+        for &(event, timeout) in CODEX_EVENTS {
+            let ours: Vec<_> = s["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|g| g["hooks"].as_array().unwrap())
+                .filter(|h| is_ours_codex(h))
+                .collect();
+            assert_eq!(ours.len(), 1, "{event}");
+            assert_eq!(ours[0]["timeout"], timeout);
+            assert_eq!(ours[0]["command"], codex_command(ODD, cfg!(windows)));
+            assert_eq!(ours[0].get("commandWindows").is_some(), cfg!(windows));
+        }
+        assert_eq!(status_for(Agent::Codex, &s, ODD), Status::Installed);
+        assert_eq!(
+            status_for(Agent::Codex, &s, r"D:\other\bouncer-hook.exe"),
+            Status::Moved
+        );
+        let mut old = s.clone();
+        old["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"] = json!(60);
+        assert_eq!(status_for(Agent::Codex, &old, ODD), Status::Incomplete);
+        uninstall_for(Agent::Codex, &mut s);
+        assert_eq!(
+            serde_json::to_string(&s).unwrap(),
+            serde_json::to_string(&original).unwrap()
+        );
+        // A Claude Code settings file's entries are never Codex's, and back.
+        let mut claude = json!({});
+        install(&mut claude, RELAY).unwrap();
+        let before = claude.clone();
+        uninstall_for(Agent::Codex, &mut claude);
+        assert_eq!(claude, before);
+    }
+
+    /// Under test only temp paths pass: a home-folder file, the temp folder
+    /// itself, a `..` escape or a relative path panic.
+    #[test]
+    fn the_test_guard_allows_only_temp_paths() {
+        let temp = std::env::temp_dir();
+        guard_test_path(&temp.join("bouncer-x").join("settings.json"), &temp);
+        let home = std::env::home_dir().unwrap();
+        for bad in [
+            home.join(".claude").join("settings.json"),
+            home.join(".codex").join("hooks.json"),
+            temp.clone(),
+            temp.join("..").join("settings.json"),
+            PathBuf::from("settings.json"),
+        ] {
+            let refused = std::panic::catch_unwind(|| guard_test_path(&bad, &temp)).is_err();
+            assert!(refused, "{}", bad.display());
+        }
+    }
+
+    /// This crate's own test build resolves no real profile file: with the
+    /// test process's environment `user_file` panics unless it points into
+    /// the temp folder.
+    #[test]
+    fn user_file_refuses_real_profile_paths_under_test() {
+        for agent in [Agent::ClaudeCode, Agent::Codex] {
+            let resolved = std::panic::catch_unwind(|| user_file(agent));
+            if let Ok(Ok(path)) = &resolved {
+                assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());
+            } else {
+                assert!(resolved.is_err(), "refused by a panic, not an error");
+            }
+        }
+    }
+
+    #[test]
+    fn codex_hooks_path_follows_codex_home() {
+        let path = |dir: Option<&str>, home: Option<&str>| {
+            codex_hooks_path(dir.map(Into::into), home.map(Into::into))
+        };
+        let home = Path::new("h").join(".codex").join("hooks.json");
+        assert_eq!(
+            path(Some("c"), Some("h")),
+            Ok(Path::new("c").join("hooks.json"))
+        );
+        assert_eq!(path(None, Some("h")), Ok(home.clone()));
+        assert_eq!(path(Some(""), Some("h")), Ok(home));
+        assert!(path(None, None).is_err());
     }
 
     /// Settings' path: plan, show, write. A backup of the old file, the new
