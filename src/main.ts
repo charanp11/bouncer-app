@@ -57,6 +57,8 @@ type Request = {
   code: Code | null;
   /** Why it's risky (one sentence), from the rules engine. */
   risk: string | null;
+  /** The agent's own words on why it asks (Codex): its text, never checked. */
+  reason?: string | null;
   /** Observe mode: the rules that would have allowed it. */
   would: string | null;
   /** The exact TOML "Always allow" appends (built by the backend). */
@@ -78,11 +80,11 @@ type Away = {
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
 type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>>; shortcut: boolean; updates: boolean };
 /** Read-only facts for the settings screen (asked for when it opens). */
-type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown";
+type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown" | "absent";
 /** `autostart`: null where it isn't offered (macOS for now). */
-type About = { version?: string; rules: string | null; hooks: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
+type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
-type HooksChange = { id: string; path: string; diff: string };
+type HooksChange = { id: string; path: string; diff: string; install?: boolean };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
 type ChatStatus = { state: "missing" | "unconfirmed" | "changed" | "confirmed"; path: string | null; defaultModel?: string | null };
 type View = {
@@ -128,7 +130,7 @@ const GREET_MS = 2500;
 const DONE_MS = 2800;
 const OPEN_MS = 320;
 const CLOSE_MS = 200;
-const AGENTS: Record<string, string> = { "claude-code": "Claude Code" };
+const AGENTS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
 /** Requests approved with the diff in view (the wide "Approve an edit"). */
 const EDITS = new Set(["Edit", "MultiEdit"]);
 const ORDER: Record<string, number> = {
@@ -698,6 +700,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const cmd = el("pre", "cmd");
   agentText(cmd, cardText(request));
   c.append(cmd);
+  if (request.reason) c.append(reasonLine(request));
   // Never on a risky card (the backend offers nothing then either).
   const offer = request.risk ? null : request.offer;
   if (offer && always.id === request.id) {
@@ -714,6 +717,15 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const next = queue[1];
   if (next) c.append(el("div", "after", `Next: ${what(next.tool)} in ${folder(next.project)}`));
   return c;
+}
+
+/** The agent's own reason, labelled as its words (not Bouncer's verdict);
+ * hidden characters come visible from the backend, and it goes in as text. */
+function reasonLine(request: Request): HTMLElement {
+  const line = el("div", "said");
+  line.append(el("span", "badge", ` says`), " ");
+  agentText(line, request.reason ?? "");
+  return line;
 }
 
 /** `path` relative to `project` when it's inside it, as the prototype shows. */
@@ -909,6 +921,8 @@ let aboutAsked = false;
 /** The hooks change on show (and since when, for its armed Confirm), and the
  * last outcome. */
 let hooksShown: HooksChange | null = null;
+/** Whose hooks the shown change or note is about. */
+let hooksFor: HookAgent = "claude-code";
 let hooksSince = 0;
 let hooksNote = "";
 /** The "Wipe…" confirm is open, and since when (its button arms like Allow). */
@@ -1185,7 +1199,8 @@ function renderSettings(view: View, state: BallState) {
   rules.append(el("pre", "cmd", about?.rules ?? "…"));
   list.append(rules);
 
-  list.append(hooksRow(about?.hooks));
+  list.append(hooksRow(about?.hooks, "claude-code"));
+  if (about?.codexHooks && about.codexHooks !== "absent") list.append(hooksRow(about.codexHooks, "codex"));
   if (typeof about?.autostart === "boolean") list.append(autostartRow(about.autostart));
   list.append(shortcutRow(prefs.shortcut, !!about?.shortcutTaken));
   list.append(updatesRow(prefs.updates));
@@ -2308,12 +2323,15 @@ function autostartRow(on: boolean): HTMLElement {
   return setRow("Start with Windows", [el("span", "", on ? "On" : "Off"), sw], "Off by default. Opens Bouncer when you sign in.");
 }
 
+type HookAgent = "claude-code" | "codex";
+
 const HOOK_LABEL: Record<HookStatus, string> = {
   installed: "Installed",
   incomplete: "Incomplete",
   moved: "Another copy",
   missing: "Not installed",
   unknown: "Unknown",
+  absent: "No Codex",
 };
 const HOOK_HINT: Record<HookStatus, string> = {
   installed: "Claude Code sends every event to Bouncer.",
@@ -2321,45 +2339,61 @@ const HOOK_HINT: Record<HookStatus, string> = {
   moved: "They run a Bouncer from another folder: re-install to fix.",
   missing: "Until they're in, Claude Code asks in its terminal.",
   unknown: "Couldn't read Claude Code's settings.",
+  absent: "",
 };
+const CODEX_HINT: Partial<Record<HookStatus, string>> = {
+  installed: "Codex sends its events to Bouncer: allow or deny only (no questions, plans or guard).",
+  missing: "Until they're in, Codex asks in its terminal.",
+  unknown: "Couldn't read Codex's hooks file.",
+};
+/** Codex runs a new hook only after the user trusts it, once. */
+const CODEX_TRUST = "Codex asks you to trust these hooks once: open Codex and choose “Trust all and continue” (or review them in /hooks).";
 
-/** Settings' "Claude Code hooks": status, then install / re-install /
- * remove. Nothing is written until the diff has been shown and its armed
- * Confirm clicked (rule 6); the backend keeps a dated backup. */
-function hooksRow(status: HookStatus | undefined): HTMLElement {
+/** Settings' "Claude Code hooks" (or "Codex hooks"): status, then install /
+ * re-install / remove. Nothing is written until the diff has been shown and
+ * its armed Confirm clicked (rule 6); the backend keeps a dated backup. */
+function hooksRow(status: HookStatus | undefined, agent: HookAgent): HTMLElement {
+  const codex = agent === "codex";
+  const prefix = codex ? "codex-" : "";
+  const hint = status ? (codex ? CODEX_HINT[status] ?? HOOK_HINT[status] : HOOK_HINT[status]) : undefined;
   const row = setRow(
-    "Claude Code hooks",
+    codex ? "Codex hooks" : "Claude Code hooks",
     [el("span", `status${status === "installed" ? "" : " off"}`, status ? HOOK_LABEL[status] : "…")],
-    status ? HOOK_HINT[status] : undefined,
+    hint,
   );
-  if (hooksShown) {
+  const mine = hooksFor === agent;
+  if (hooksShown && mine) {
     const shown = hooksShown;
     const box = el("div", "confirm");
-    box.append(el("b", "", "Changes to Claude Code's settings"));
+    box.append(el("b", "", codex ? "Changes to Codex's hooks" : "Changes to Claude Code's settings"));
     const path = el("pre", "cmd");
     agentText(path, shown.path);
     const diff = el("pre", "cmd diff");
     agentText(diff, shown.diff);
     box.append(path, diff, el("div", "", "A dated backup of the old file is kept."));
     const cancel = el("button", "btn deny small", "Cancel");
-    cancel.dataset.key = "hooks-cancel";
+    cancel.dataset.key = `${prefix}hooks-cancel`;
     const write = armed("Write changes", hooksSince);
     write.classList.add("small");
-    write.dataset.key = "hooks-write";
+    write.dataset.key = `${prefix}hooks-write`;
     cancel.addEventListener("click", () => {
       hooksShown = null;
-      refocus = "hooks";
+      refocus = `${prefix}hooks`;
       if (current) render(current);
     });
     write.addEventListener("click", () => {
       write.disabled = true;
+      const installing = shown.install;
       invoke<string | null>("hooks_write", { id: shown.id })
-        .then((backup) => (hooksNote = backup ? `Written. Backup: ${backup}` : "Written."))
+        .then((backup) => {
+          hooksNote = backup ? `Written. Backup: ${backup}` : "Written.";
+          if (codex && installing) hooksNote += `\n${CODEX_TRUST}`;
+        })
         .catch((e) => (hooksNote = String(e)))
         .finally(() => {
           hooksShown = null;
           aboutAsked = false;
-          refocus = "hooks";
+          refocus = `${prefix}hooks`;
           if (current) render(current);
         });
     });
@@ -2375,37 +2409,38 @@ function hooksRow(status: HookStatus | undefined): HTMLElement {
     b.addEventListener("click", () => {
       b.disabled = true;
       hooksNote = "";
-      invoke<HooksChange | null>("hooks_preview", { install })
+      hooksShown = null;
+      hooksFor = agent;
+      invoke<HooksChange | null>("hooks_preview", { install, agent })
         .then((change) => {
-          hooksShown = change;
+          hooksShown = change && { ...change, install };
           hooksSince = performance.now();
           if (!change) hooksNote = "Nothing to change.";
         })
         .catch((e) => (hooksNote = String(e)))
         .finally(() => {
-          refocus = hooksShown ? "hooks-cancel" : key;
+          refocus = hooksShown ? `${prefix}hooks-cancel` : key;
           if (current) render(current);
         });
     });
     return b;
   };
   const buttons: HTMLElement[] = [];
-  if (status === "missing") buttons.push(offer("Install…", true, "hooks"));
-  if (status === "incomplete" || status === "moved") buttons.push(offer("Re-install…", true, "hooks"));
-  if (status && status !== "missing" && status !== "unknown") buttons.push(offer("Remove…", false, "hooks-remove"));
+  if (status === "missing") buttons.push(offer("Install…", true, `${prefix}hooks`));
+  if (status === "incomplete" || status === "moved") buttons.push(offer("Re-install…", true, `${prefix}hooks`));
+  if (status && status !== "missing" && status !== "unknown" && status !== "absent") buttons.push(offer("Remove…", false, `${prefix}hooks-remove`));
   if (buttons.length) {
     const actions = el("div", "actions");
     actions.append(...buttons);
     row.append(actions);
   }
-  if (hooksNote) {
+  if (hooksNote && mine) {
     const note = el("pre", "cmd");
     agentText(note, hooksNote);
     row.append(note);
   }
   return row;
 }
-
 /** Settings' row for the claude chat runs: its full path, confirmed or not. */
 function claudeRow(): HTMLElement {
   const s = chatStatus;
