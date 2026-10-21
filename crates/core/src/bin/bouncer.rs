@@ -1,27 +1,36 @@
-//! `bouncer install-hooks` / `bouncer uninstall-hooks`.
+//! `bouncer install-hooks` / `bouncer uninstall-hooks`, for Claude Code or
+//! (`--codex`) Codex.
 //!
 //! Never writes silently: shows the diff, asks, writes a dated backup, then
 //! replaces the file atomically. Refuses files that aren't valid JSON, and
 //! gives up if the file changes while the user is deciding. The same code
-//! (`hooks::plan`, `Change::write`) runs Settings' install and remove.
+//! (`hooks::plan_for`, `Change::write`) runs Settings' install and remove.
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bouncer_core::hooks;
+use bouncer_core::hooks::{self, Agent};
 
-const USAGE: &str = "usage: bouncer install-hooks [--settings FILE] [--relay PATH]
-       bouncer uninstall-hooks [--settings FILE]
+const USAGE: &str = "usage: bouncer install-hooks [--codex] [--settings FILE] [--relay PATH]
+       bouncer uninstall-hooks [--codex] [--settings FILE]
 
-FILE defaults to ~/.claude/settings.json ($CLAUDE_CONFIG_DIR/settings.json if set).
+FILE defaults to ~/.claude/settings.json ($CLAUDE_CONFIG_DIR/settings.json if set);
+with --codex, to ~/.codex/hooks.json ($CODEX_HOME/hooks.json if set).
 PATH defaults to bouncer-hook next to this program.";
 
-/// The uninstaller runs `uninstall-hooks --uninstalling` in its own console.
+/// The uninstaller runs `uninstall-hooks --uninstalling` in its own console:
+/// Claude Code's file, then Codex's.
 const UNINSTALLING: &str =
     "Bouncer is being uninstalled. Remove its hooks from Claude Code's settings?
 Installing Bouncer again next? Answer N to keep them.
 ";
+const UNINSTALLING_CODEX: &str = "Bouncer is being uninstalled. Remove its hooks from Codex?
+Installing Bouncer again next? Answer N to keep them.
+";
+/// Codex runs a new or changed hook only once the user trusts it.
+const CODEX_TRUST: &str = "Codex asks you to trust these hooks once: open Codex and choose\n\
+     \"Trust all and continue\" (or review them in /hooks).";
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -52,9 +61,13 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
         "uninstall-hooks" => false,
         _ => return Err(USAGE.into()),
     };
-    let (mut settings, mut relay) = (None, None);
+    let (mut settings, mut relay, mut agent) = (None, None, Agent::ClaudeCode);
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
+        if flag == "--codex" {
+            agent = Agent::Codex;
+            continue;
+        }
         let value = it.next().ok_or(USAGE)?;
         match flag.as_str() {
             "--settings" => settings = Some(PathBuf::from(value)),
@@ -62,19 +75,45 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
             _ => return Err(USAGE.into()),
         }
     }
-    let path = match settings {
-        Some(p) => p,
-        None => hooks::user_settings()?,
-    };
-    if !installing && !path.exists() {
-        return done("No settings file; nothing to remove.");
+    if uninstalling {
+        // A file given: only that one. Else both agents' user files, Codex's
+        // even if Claude Code's step fails.
+        if settings.is_some() {
+            return one(agent, settings, false, None, true);
+        }
+        let claude = one(Agent::ClaudeCode, None, false, None, true);
+        println!();
+        let codex = one(Agent::Codex, None, false, None, true);
+        return claude.and(codex);
     }
     let relay = match (installing, relay) {
         (false, _) => None,
         (true, Some(p)) => Some(p),
         (true, None) => Some(hooks::relay_beside_me()?),
     };
-    let Some(change) = hooks::plan(&path, relay.as_deref())? else {
+    one(agent, settings, installing, relay, false)
+}
+
+/// Shows and, on a yes, writes one agent's change.
+fn one(
+    agent: Agent,
+    settings: Option<PathBuf>,
+    installing: bool,
+    relay: Option<PathBuf>,
+    uninstalling: bool,
+) -> Result<(), String> {
+    let path = match settings {
+        Some(p) => p,
+        None => hooks::user_file(agent)?,
+    };
+    let what = match agent {
+        Agent::ClaudeCode => "settings file",
+        Agent::Codex => "Codex hooks file",
+    };
+    if !installing && !path.exists() {
+        return done(&format!("No {what}; nothing to remove."));
+    }
+    let Some(change) = hooks::plan_for(agent, &path, relay.as_deref())? else {
         return done("Nothing to change.");
     };
 
@@ -82,7 +121,13 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     print!("{}", change.diff());
     // Right above the question: a long diff scrolls the top out of view.
     if uninstalling {
-        print!("\n{UNINSTALLING}");
+        print!(
+            "\n{}",
+            match agent {
+                Agent::ClaudeCode => UNINSTALLING,
+                Agent::Codex => UNINSTALLING_CODEX,
+            }
+        );
     }
     print!("\nWrite these changes? [y/N] ");
     io::stdout().flush().map_err(|e| e.to_string())?;
@@ -94,8 +139,12 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
         if uninstalling {
             println!(
-                "Kept. Without Bouncer, Claude Code will report a missing hook until\n\
+                "Kept. Without Bouncer, {} will report a missing hook until\n\
                  the entries running bouncer-hook.exe are removed from {}.",
+                match agent {
+                    Agent::ClaudeCode => "Claude Code",
+                    Agent::Codex => "Codex",
+                },
                 path.display()
             );
         }
@@ -104,7 +153,11 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     if let Some(backup) = change.write()? {
         println!("Backup: {}", backup.display());
     }
-    done(&format!("Wrote {}.", path.display()))
+    done(&format!("Wrote {}.", path.display()))?;
+    if installing && agent == Agent::Codex {
+        println!("{CODEX_TRUST}");
+    }
+    Ok(())
 }
 
 fn done(message: &str) -> Result<(), String> {

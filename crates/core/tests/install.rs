@@ -63,8 +63,22 @@ fn temp_dir(name: &str) -> TempDir {
     TempDir(dir)
 }
 
+/// The CLI with every place it could find a real file pointed into `dir`
+/// (home, Claude Code's and Codex's folders), so no test can ever reach the
+/// user's own settings, whatever the arguments.
+fn hermetic(dir: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bouncer"));
+    command
+        .env(bouncer_core::hooks::TEST_GUARD_ENV, "1")
+        .env("HOME", dir)
+        .env("USERPROFILE", dir)
+        .env("CLAUDE_CONFIG_DIR", dir.join("claude-config"))
+        .env("CODEX_HOME", dir.join("codex-home"));
+    command
+}
+
 fn bouncer(dir: &Path, args: &[&str], answer: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer"))
+    let mut child = hermetic(dir)
         .args(args)
         .arg("--settings")
         .arg(dir.join("settings.json"))
@@ -169,6 +183,117 @@ fn the_uninstaller_asks_explains_and_waits() {
     assert!(!out.status.success());
 }
 
+/// `uninstall-hooks --uninstalling` with no file given: Claude Code's
+/// settings, then Codex's hooks, each with its diff and its own yes; with a
+/// file given, only that file (never the user's own). All inside `dir`.
+#[test]
+fn the_uninstaller_removes_both_agents_hooks_and_a_given_file_only() {
+    let dir = temp_dir("uninstall-both");
+    let relay = dir.join("bouncer-hook.exe");
+    let claude = dir.join("claude-config").join("settings.json");
+    let codex = dir.join("codex-home").join("hooks.json");
+    fs::create_dir_all(claude.parent().unwrap()).unwrap();
+    fs::create_dir_all(codex.parent().unwrap()).unwrap();
+    fs::write(&claude, ORIGINAL).unwrap();
+    let codex_original = "{}\n";
+    fs::write(&codex, codex_original).unwrap();
+    let run = |args: &[&str], answer: &str| {
+        let mut child = hermetic(&dir)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(answer.as_bytes());
+        child.wait_with_output().unwrap()
+    };
+    let relay = relay.to_str().unwrap();
+    assert!(
+        run(&["install-hooks", "--relay", relay], "y\n")
+            .status
+            .success()
+    );
+    let out = run(&["install-hooks", "--codex", "--relay", relay], "y\n");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Trust all and continue"));
+    let (claude_in, codex_in) = (
+        fs::read_to_string(&claude).unwrap(),
+        fs::read_to_string(&codex).unwrap(),
+    );
+    assert!(claude_in.contains("bouncer-hook.exe") && codex_in.contains("--agent codex"));
+
+    // A file given: only that one is offered; Codex's stays.
+    let other = dir.join("settings.json");
+    fs::write(&other, &claude_in).unwrap();
+    let out = run(
+        &[
+            "uninstall-hooks",
+            "--uninstalling",
+            "--settings",
+            other.to_str().unwrap(),
+        ],
+        "y\n\n",
+    );
+    assert!(out.status.success());
+    assert!(!fs::read_to_string(&other).unwrap().contains("bouncer-hook"));
+    assert_eq!(
+        fs::read_to_string(&claude).unwrap(),
+        claude_in,
+        "the user's own file untouched"
+    );
+    assert_eq!(fs::read_to_string(&codex).unwrap(), codex_in);
+
+    // None given: both, each asked; no for Codex keeps it.
+    let out = run(&["uninstall-hooks", "--uninstalling"], "y\nn\n\n");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Remove its hooks from Codex?"), "{text}");
+    assert_eq!(fs::read_to_string(&claude).unwrap(), ORIGINAL);
+    assert_eq!(fs::read_to_string(&codex).unwrap(), codex_in);
+    let out = run(&["uninstall-hooks", "--uninstalling"], "y\n\n");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing to change"));
+    assert_eq!(fs::read_to_string(&codex).unwrap(), codex_original);
+    assert!(text.trim_end().ends_with("Press Enter to close."), "{text}");
+}
+
+/// With the test marker set, a CLI that would resolve a file outside the
+/// temp folder (here a home in cargo's own target folder, nothing set for
+/// Claude Code or Codex) refuses before reading or writing anything. No
+/// answer is given, so even a broken guard couldn't write.
+#[test]
+fn the_cli_refuses_a_real_profile_path_under_test() {
+    let home =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("fake-home-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    fs::create_dir_all(&home).unwrap();
+    assert!(
+        !home.starts_with(std::env::temp_dir()),
+        "the fake home must be outside the temp folder"
+    );
+    let relay = temp_dir("guard");
+    let relay = relay.join("bouncer-hook.exe");
+    for extra in [&[][..], &["--codex"][..]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_bouncer"))
+            .args(["install-hooks", "--relay", relay.to_str().unwrap()])
+            .args(extra)
+            .env(bouncer_core::hooks::TEST_GUARD_ENV, "1")
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CODEX_HOME")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{extra:?}: {out:?}");
+        assert!(
+            err.contains("a test reached a real profile file"),
+            "{extra:?}: {err}"
+        );
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("Changes to"));
+    }
+    assert!(!home.join(".claude").exists() && !home.join(".codex").exists());
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[test]
 fn nothing_is_written_without_yes() {
     for answer in ["", "n\n", "no\n", "maybe\n", "\n"] {
@@ -227,7 +352,7 @@ fn bad_arguments_fail() {
         &["install-hooks", "--settings"],
         &["uninstall-hooks", "--relay", "x"],
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_bouncer"))
+        let out = hermetic(&dir)
             .args(args)
             .current_dir(&dir)
             .output()
@@ -264,12 +389,9 @@ fn claude_config_dir_is_the_default_target() {
     fs::create_dir_all(&config).unwrap();
     fs::write(config.join("settings.json"), ORIGINAL).unwrap();
     let relay = dir.join("bouncer-hook.exe");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer"))
+    let mut child = hermetic(&dir)
         .args(["install-hooks", "--relay", relay.to_str().unwrap()])
         .env("CLAUDE_CONFIG_DIR", &config)
-        // If CLAUDE_CONFIG_DIR were ignored, this keeps the real home safe.
-        .env("HOME", &dir)
-        .env("USERPROFILE", &dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
