@@ -1442,18 +1442,13 @@ pre.cmd {
   font-weight: 500;
 }
 
+/* Every Settings hint wraps: what it says is needed, so it is never cut
+   (Charan, 2026-10-21; the Codex hooks hint lost its minimum version). */
 .setrow .hint {
   grid-column: 1 / -1;
   font-size: 12px;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* A hint that must be read whole (Guard every mode says all it changes). */
-.setrow .hint.wrap {
-  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .setrow .ctl {
