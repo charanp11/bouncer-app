@@ -987,10 +987,7 @@ function guardRow(view: View): HTMLElement {
   });
   sw.disabled = broken;
   sw.dataset.key = "guard";
-  const row = setRow("Guard every mode", [on ? "On" : "Off", sw], broken ? "Fix the rules file first." : GUARD_HINT);
-  // Read whole: it says everything the switch changes.
-  row.querySelector(".hint")?.classList.add("wrap");
-  return row;
+  return setRow("Guard every mode", [on ? "On" : "Off", sw], broken ? "Fix the rules file first." : GUARD_HINT);
 }
 
 /** Observe / auto. Turning auto on asks first (focus on Cancel, Esc cancels,
@@ -2270,10 +2267,7 @@ function updatesRow(on: boolean): HTMLElement {
       });
   });
   sw.dataset.key = "updates";
-  const row = setRow("Check for updates", [el("span", "", on ? "On" : "Off"), sw], UPDATES_HINT);
-  // Read whole: it says exactly what goes over the network.
-  row.querySelector(".hint")?.classList.add("wrap");
-  return row;
+  return setRow("Check for updates", [el("span", "", on ? "On" : "Off"), sw], UPDATES_HINT);
 }
 
 const UPDATES_HINT = "Once a day Bouncer reads the latest release file from GitHub; GitHub sees your IP address, nothing else about you is sent. Updates install only when you click Update. Off: no network at all.";
