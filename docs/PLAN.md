@@ -4396,9 +4396,22 @@ continue"). Clicks on the card were page clicks over CDP.
   `/hooks` trust step explained; `CODEX_HOME` respected
 - [x] the island labels Codex sessions and cards; PowerShell rules for
   Codex's commands on Windows
-- [ ] TESTS rows for each; CI green on Windows and macOS
+- [x] TESTS rows for each; CI green on Windows and macOS (#53, all 7 checks
+  incl. the installer test)
 - [x] end-to-end in scratch: real Codex 0.163.0 + fake model through the
   test instance (no real-model check: no Codex subscription)
+
+**v0.10.0 drafted** (tag on #53's merge; release workflow green; draft not
+published). Charan found in it: the Codex hooks hint was cut with "…"
+("Needs Codex 0.14…").
+
+### v0.10.1: Settings hints show in full (2026-10-21)
+
+Every Settings hint wraps (`.setrow .hint`, app and prototype alike; the
+per-row `.hint.wrap` opt-in is gone, so no row can forget it). Checked with
+real clicks on a test instance at Small, Medium and Large (island 400 /
+448 / 500 px): all 12 hints shown whole; the Codex hint takes 2–3 lines.
+TESTS UI20.
 
 ## Phase 8 — Music (~1 week)
 
