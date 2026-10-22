@@ -4413,6 +4413,14 @@ real clicks on a test instance at Small, Medium and Large (island 400 /
 448 / 500 px): all 12 hints shown whole; the Codex hint takes 2–3 lines.
 TESTS UI20.
 
+**v0.10.0 and v0.10.1 published (Charan).** #54 merged, tag `v0.10.1`,
+release workflow green. Manual checks (Charan, 2026-10-22, his own desktop,
+the installed build): the update 0.10.0 → 0.10.1 came through the updater
+(TESTS UP8); Settings shows "Bouncer 0.10.1" (U11); at Large the Codex
+hooks hint reads in full and no hint is cut (UI20); Claude Code hooks
+Installed. Roadmap h1 (Codex) is done; next: GitHub Copilot CLI (roadmap
+h2) in a new session, when Charan says.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
