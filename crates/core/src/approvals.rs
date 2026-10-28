@@ -22,7 +22,7 @@ use crate::activity::{self, Entry, Log};
 use crate::away::{self, Summary};
 use crate::check::{self, Context, sentence};
 use crate::code::{code_view, line_counts};
-use crate::event::{CLAUDE_CODE, Event};
+use crate::event::{CLAUDE_CODE, COPILOT, Event};
 use crate::ipc::Decision;
 use crate::rules::{self, Loaded, Mode, Rule, Rules};
 use bouncer_relay::questions::{self, ASK, PLAN};
@@ -63,6 +63,9 @@ const QUESTIONS: &[&str] = &[ASK, PLAN];
 const GUARDED_MODES: &[&str] = &["auto", "acceptEdits", "bypassPermissions"];
 /// What a session waiting on one of those shows.
 const QUESTION_STEP: &str = "question in the terminal";
+/// A Copilot request Bouncer said nothing about: Copilot's own rules, its
+/// prompt or its allow-all decide (Bouncer never allows for Copilot).
+const LEFT_TO_COPILOT: &str = "left to Copilot";
 /// A tool call that failed (its error text never reaches Bouncer).
 pub const FAILED: &str = "failed";
 /// A session with no event for this long is dropped (it may never send
@@ -243,6 +246,7 @@ impl State {
                 session.lines = line_counts(event.tool.as_deref(), event.input.as_ref());
                 let how = match event.kind.as_str() {
                     "PreToolUse" => "",
+                    _ if event.agent == COPILOT => LEFT_TO_COPILOT,
                     _ if paused => "asked in terminal",
                     _ => "waiting for you",
                 };
@@ -288,7 +292,33 @@ impl State {
             }
             _ => {}
         }
+        // Copilot's own prompt (or question) shows only through its
+        // notification: watch-only, the terminal answers.
+        match event.notification() {
+            Some("permission_prompt") => {
+                session.status = IN_TERMINAL;
+                if let Some(last) = session.history.back_mut()
+                    && last.1 == LEFT_TO_COPILOT
+                {
+                    last.1 = "asked in terminal";
+                }
+                return;
+            }
+            Some("elicitation_dialog") => {
+                session.status = "needs you";
+                session.step = QUESTION_STEP.into();
+                return;
+            }
+            Some("agent_idle" | "agent_completed") => {
+                session.status = "idle";
+                session.step = "Idle".into();
+                session.lines = None;
+                return;
+            }
+            _ => {}
+        }
         session.status = match event.kind.as_str() {
+            "PermissionRequest" if event.agent == COPILOT => "working",
             "PermissionRequest" if paused => IN_TERMINAL,
             "PermissionRequest" => "needs you",
             "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => "working",
@@ -737,6 +767,7 @@ impl Desk {
     pub fn handle_until(&self, event: Event, gone: &dyn Fn() -> bool) -> Option<Decision> {
         let (tx, rx) = mpsc::channel();
         let mut guard = false;
+        let copilot = event.agent == COPILOT;
         let id = {
             let mut state = self.lock();
             state.track(&event);
@@ -763,6 +794,28 @@ impl Desk {
             } else if !event.is_permission_request() {
                 guard = state.guards(&event);
                 None
+            } else if copilot {
+                // Copilot gets Deny or nothing: never a rule, an offer or an
+                // allow (a hook's allow beats its own deny rules). A card
+                // only for a risky request with the guard on.
+                let risk = sentence(&state.check(&event).reasons);
+                match risk {
+                    Some(risk) if state.rules.loaded.rules.guard && !state.paused => {
+                        let session = event.session.clone();
+                        let id = state.enqueue(event, Kind::Permission, tx, Some(risk), None, None);
+                        if let Some(s) = state.sessions.iter_mut().find(|s| s.id == session) {
+                            s.status = "needs you";
+                            if let Some(last) = s.history.back_mut() {
+                                last.1 = "waiting for you";
+                            }
+                        }
+                        id
+                    }
+                    _ => {
+                        state.answered(&event, LEFT_TO_COPILOT);
+                        None
+                    }
+                }
             } else if state.paused {
                 state.answered(&event, "asked in terminal");
                 None
@@ -807,30 +860,46 @@ impl Desk {
                 return None;
             }
         };
-        if answer.is_none()
-            && self
-                .lock()
-                .take(&id, IN_TERMINAL, "asked in terminal")
-                .is_some()
-        {
+        // Unanswered: the card goes and the agent decides (for Copilot this
+        // is "Let Copilot decide"; the wait is shorter than its hook timeout).
+        let (status, how) = match copilot {
+            true => ("working", LEFT_TO_COPILOT),
+            false => (IN_TERMINAL, "asked in terminal"),
+        };
+        if answer.is_none() && self.lock().take(&id, status, how).is_some() {
             self.publish();
         }
         answer
     }
 
     /// Answers the request with this ID, once. Allow is refused within `ARM`
-    /// of the request arriving.
+    /// of the request arriving. For Copilot, "allow" is the card's "Let
+    /// Copilot decide": the card goes with no answer sent, so the relay
+    /// prints nothing and Copilot's own rules and prompt decide.
     pub fn decide(&self, id: &str, allow: bool) -> Result<(), &'static str> {
         let pending = {
             let mut state = self.lock();
-            let early = state.pending(id, Kind::Permission)?.issued.elapsed() < ARM;
+            let pending = state.pending(id, Kind::Permission)?;
+            let early = pending.issued.elapsed() < ARM;
+            let copilot = pending.event.agent == COPILOT;
             if allow && early {
                 return Err("too soon to allow");
             }
-            let how = if allow { "you allowed" } else { "you denied" };
-            state
+            let how = match (allow, copilot) {
+                (true, true) => LEFT_TO_COPILOT,
+                (true, false) => "you allowed",
+                (false, _) => "you denied",
+            };
+            let pending = state
                 .take(id, "working", how)
-                .ok_or("unknown or already answered request")?
+                .ok_or("unknown or already answered request")?;
+            if allow && copilot {
+                drop(state);
+                drop(pending);
+                self.publish();
+                return Ok(());
+            }
+            pending
         };
         let _ = pending.answer.send(if allow {
             Decision::Allow
@@ -2195,6 +2264,128 @@ mod tests {
             desk.decide(&id, false).unwrap();
             assert_eq!(waiting.join().unwrap(), Some(Decision::Deny));
         }
+    }
+
+    /// A Copilot request for `command` (PowerShell, as on Windows).
+    fn copilot(kind: &str, command: &str) -> Event {
+        Event {
+            agent: COPILOT,
+            tool: Some("PowerShell".into()),
+            ..event("cp", kind, command)
+        }
+    }
+
+    /// A Copilot notification of `kind` for session `cp`.
+    fn copilot_note(kind: &str) -> Event {
+        Event {
+            agent: COPILOT,
+            kind: "Notification".into(),
+            tool: None,
+            input: Some(json!({ "notification_type": kind })),
+            ..event("cp", "Notification", "")
+        }
+    }
+
+    /// Copilot gets Deny or nothing: a rule that matches (auto mode), a safe
+    /// request, or a risky one with the guard off all return no answer at
+    /// once and leave no card. Copilot's own rules and prompt decide.
+    #[test]
+    fn copilot_is_never_allowed_and_carded_only_when_risky_under_the_guard() {
+        let (desk, _, _dir) = desk_with_rules("copilot-auto", &format!("guard = true\n{AUTO}"));
+        let start = Instant::now();
+        assert_eq!(
+            desk.handle(copilot("PermissionRequest", "ls")),
+            None,
+            "a rule never answers"
+        );
+        let (off, _, _dir2) = desk_with_rules("copilot-off", AUTO);
+        assert_eq!(
+            off.handle(copilot("PermissionRequest", RISKY)),
+            None,
+            "guard off"
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+        for d in [&desk, &off] {
+            assert!(d.view()["queue"].as_array().unwrap().is_empty());
+            assert_eq!(d.view()["sessions"][0]["agent"], "copilot");
+            assert_eq!(d.view()["sessions"][0]["status"], "working");
+        }
+        desk.set_paused(true);
+        assert_eq!(
+            desk.handle(copilot("PermissionRequest", RISKY)),
+            None,
+            "paused"
+        );
+        assert!(desk.view()["queue"].as_array().unwrap().is_empty());
+    }
+
+    /// The guard's card for a risky Copilot request: Deny reaches Copilot;
+    /// the other button ("Let Copilot decide") sends nothing; it never
+    /// offers a rule or says what rules would do.
+    #[test]
+    fn a_risky_copilot_card_denies_or_lets_copilot_decide() {
+        let (desk, _, _dir) = desk_with_rules("copilot-guard", &format!("guard = true\n{AUTO}"));
+        for (allow, want) in [(false, Some(Decision::Deny)), (true, None)] {
+            let d = desk.clone();
+            let waiting = std::thread::spawn(move || d.handle(copilot("PermissionRequest", RISKY)));
+            let id = queued(&desk, 1).remove(0);
+            let card = desk.view()["queue"][0].clone();
+            assert_eq!(card["agent"], "copilot");
+            assert!(card["risk"].is_string());
+            assert_eq!(card["would"], Value::Null);
+            assert_eq!(card["offer"], Value::Null);
+            assert!(desk.always(&id).is_err(), "no rule for Copilot");
+            assert_eq!(desk.view()["sessions"][0]["status"], "needs you");
+            std::thread::sleep(ARM);
+            desk.decide(&id, allow).unwrap();
+            assert_eq!(waiting.join().unwrap(), want, "allow = {allow}");
+            assert!(desk.view()["queue"].as_array().unwrap().is_empty());
+        }
+    }
+
+    /// Condition 1 (Charan, 2026-10-28): an unanswered risky Copilot card
+    /// times out to "Let Copilot decide" (no answer), and the card's limit
+    /// is shorter than the relay's budget, which is shorter than Copilot's
+    /// installed hook timeout.
+    #[test]
+    fn an_unanswered_copilot_card_times_out_to_let_copilot_decide() {
+        let dir = temp_dir("desk-copilot-timeout");
+        let path = dir.join("rules.toml");
+        std::fs::write(&path, "guard = true\n").unwrap();
+        let desk = Desk::new(Duration::from_millis(300), Some(path), |_| {});
+        assert_eq!(desk.handle(copilot("PermissionRequest", RISKY)), None);
+        assert!(desk.view()["queue"].as_array().unwrap().is_empty());
+        assert_eq!(desk.view()["sessions"][0]["status"], "working");
+        let hook = crate::hooks::COPILOT_EVENTS
+            .iter()
+            .find(|(e, _)| *e == "permissionRequest")
+            .unwrap()
+            .1;
+        assert!(WAIT < bouncer_relay::DECISION_BUDGET);
+        assert!(bouncer_relay::DECISION_BUDGET < Duration::from_secs(hook));
+    }
+
+    /// Copilot's own prompt and questions show only as watch-only states:
+    /// asks in terminal, a question in the terminal, then idle.
+    #[test]
+    fn copilot_notifications_show_where_copilot_waits() {
+        let desk = desk(WAIT);
+        assert_eq!(
+            desk.handle(copilot("PermissionRequest", "Set-Content x 1")),
+            None
+        );
+        desk.handle(copilot_note("permission_prompt"));
+        let s = desk.view()["sessions"][0].clone();
+        assert_eq!(s["status"], IN_TERMINAL);
+        desk.handle(copilot_note("elicitation_dialog"));
+        let s = desk.view()["sessions"][0].clone();
+        assert_eq!(
+            (s["status"].as_str(), s["step"].as_str()),
+            (Some("needs you"), Some(QUESTION_STEP))
+        );
+        desk.handle(copilot_note("agent_idle"));
+        assert_eq!(desk.view()["sessions"][0]["status"], "idle");
+        assert!(desk.view()["queue"].as_array().unwrap().is_empty());
     }
 
     #[test]
