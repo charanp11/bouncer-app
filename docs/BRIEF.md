@@ -151,6 +151,8 @@ In the order they appear:
   run; you confirm the path once, and again if it changes.
 - **Rules file**: where `rules.toml` lives (`%APPDATA%\Bouncer`).
 - **Claude Code hooks**: status, and Install… / Remove… with the diff.
+  Hooks written by a Bouncer before v0.11.1 show "Update needed": they
+  work, and Re-install… adds `--agent claude-code` (shown in the diff first).
 - **Codex hooks**: shown when a Codex folder exists; same as above; needs
   Codex 0.145+.
 - **Copilot CLI hooks**: shown when a Copilot folder exists (`~/.copilot`
@@ -189,8 +191,9 @@ In the order they appear:
 
 - `crates/relay/`: the `bouncer-hook` relay (std + serde_json only).
   - `src/main.rs`: reads one event, talks to the app, prints the answer
-    or nothing; the `--agent codex` and `--agent copilot --event <name>`
-    flags (Copilot's camelCase input becomes the same line; deny only).
+    or nothing; the `--agent claude-code`, `--agent codex` and `--agent
+    copilot --event <name>` flags (Copilot's camelCase input becomes the
+    same line; deny only). No flag is an older Claude Code install.
   - `src/lib.rs`: shared pipe / socket naming and limits.
   - `src/win.rs`, `src/unix.rs`: the named pipe (Windows) and Unix socket
     (macOS), with same-user checks.
@@ -241,7 +244,7 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
-- **v0.11.0** (2026-10-28): GitHub Copilot CLI support: watch-only plus
+- **v0.11.0** (2026-10-28, published 2026-10-28): GitHub Copilot CLI support: watch-only plus
   Deny on risky commands (Guard every mode), no Allow from Bouncer, nothing
   inside Copilot's sandbox; needs Copilot CLI 1.0.67+.
 - **v0.10.1** (2026-10-21, published 2026-10-22): every Settings hint
@@ -285,7 +288,11 @@ published.
 - **One feature per release**, each audited first, its own PR, Charan's OK
   to merge; a tag means a release.
 - **Agents one per release, told apart by an explicit flag**
-  (`--agent codex`): the relay never guesses from the input's shape.
+  (`--agent codex`, `--agent copilot`, and since v0.11.1 `--agent
+  claude-code`): the relay never guesses from the input's shape. Older
+  Claude Code installs have no flag; for them only, input with a
+  `timestamp` (Copilot's) is refused, so a field Claude Code may add one
+  day can't hide a flagged install.
   Codex went first: its hook answers like Claude Code's and fails open.
 - **Copilot: Deny only** (Charan, 2026-10-28, after step 1): its hooks can
   override its own deny rules and block on failure; anything more would let
