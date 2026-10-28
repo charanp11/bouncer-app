@@ -1,0 +1,1 @@
+{"hook_event_name":"PreToolUse","session_id":"dde4fe7d-0e3e-4086-9079-cc8d75e04a00","timestamp":"2026-10-28T07:40:06.872Z","cwd":"C:\\Users\\dev\\repo","tool_name":"Bash","tool_input":{"command":"Get-Date","description":"Probe date"}}
