@@ -774,11 +774,13 @@ fn unknown_hook_payloads_print_nothing() {
 }
 
 /// Copilot CLI's VS Code-compatible input (PascalCase names, snake_case
-/// fields, an ISO `timestamp`) has Claude Code's own shape. With the app
-/// closed, or an app that doesn't answer, the relay prints nothing and
-/// exits 0 for every event.
+/// fields, an ISO `timestamp`) has Claude Code's own shape; Copilot runs it
+/// from a repository's `.claude/settings.json`. With no flag the relay
+/// refuses input with a `timestamp` (Claude Code never sends one): nothing
+/// printed, exit 0, nothing reaches the app, even one that says allow, for
+/// every event and for Copilot 1.0.105's real inputs.
 #[test]
-fn copilot_vs_code_style_events_print_nothing_unless_answered() {
+fn copilot_vs_code_style_events_print_nothing_even_if_answered() {
     let input = |kind: &str| {
         serde_json::json!({
             "hook_event_name": kind, "session_id": "v", "timestamp": "2026-10-20T12:00:00.000Z",
@@ -796,11 +798,233 @@ fn copilot_vs_code_style_events_print_nothing_unless_answered() {
             .collect::<String>()
     });
     let closed = endpoint("copilot-vs-closed");
-    let quiet = serve("copilot-vs-quiet", always(None));
+    let (seen, answers) = recording("copilot-vs-allow", Decision::Allow);
     for kind in kinds {
         assert_silent(&relay(&closed, &input(&kind)));
-        assert_silent(&relay(&quiet, &input(&kind)));
+        assert_silent(&relay(&answers, &input(&kind)));
     }
+    for (name, raw) in copilot_fixtures() {
+        if name.contains("-vscode-") {
+            assert_silent(&relay(&answers, &raw));
+        }
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
+}
+
+fn copilot_fixtures() -> Vec<(String, Vec<u8>)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/copilot-fixtures");
+    let mut all: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| {
+            let file = e.unwrap().path();
+            let name = file.file_name().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read(&file).unwrap())
+        })
+        .collect();
+    all.sort();
+    all
+}
+
+/// The installed event of a camelCase fixture (`copilot-1.0.105-<event>...`).
+fn copilot_event(name: &str) -> &str {
+    let rest = name.strip_prefix("copilot-1.0.105-").unwrap();
+    rest.split(['-', '.']).next().unwrap()
+}
+
+fn copilot_args(event: &str) -> [&str; 4] {
+    ["--agent", "copilot", "--event", event]
+}
+
+/// Copilot CLI 1.0.105's recorded inputs through the real relay with
+/// `--agent copilot --event <its event>`: each reaches the app as Copilot's
+/// (PowerShell for `powershell`); only the permission request prints, and
+/// only for deny. Allow, ask and everything else print nothing.
+#[test]
+fn copilot_fixtures_reach_the_app_as_copilot_and_only_deny_prints() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "copilot-fixtures",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock().unwrap().push((e.agent, e.kind, e.tool));
+            Some(Decision::Deny)
+        }),
+    );
+    let camel: Vec<_> = copilot_fixtures()
+        .into_iter()
+        .filter(|(n, _)| !n.contains("-vscode-"))
+        .collect();
+    assert_eq!(camel.len(), 5);
+    for (name, raw) in &camel {
+        let out = spawn_relay_with(&path, raw, &copilot_args(copilot_event(name)))
+            .wait_with_output()
+            .unwrap();
+        if name.contains("permissionRequest") {
+            assert_eq!(
+                stdout_json(&out),
+                serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" })
+            );
+        } else {
+            assert_silent(&out);
+        }
+    }
+    wait_for(&seen, camel.len());
+    let mut got = seen.lock().unwrap().clone();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("copilot", "Notification".to_owned(), None),
+            ("copilot", "Notification".to_owned(), None),
+            (
+                "copilot",
+                "PermissionRequest".to_owned(),
+                Some("PowerShell".to_owned())
+            ),
+            ("copilot", "SessionEnd".to_owned(), None),
+            ("copilot", "SessionStart".to_owned(), None),
+        ]
+    );
+    let request = &camel
+        .iter()
+        .find(|(n, _)| n.contains("permissionRequest"))
+        .unwrap()
+        .1;
+    for (i, decision) in [
+        Some(Decision::Allow),
+        Some(Decision::Ask),
+        Some(Decision::Plan(true)),
+        Some(Decision::Answer(vec![vec![0]])),
+        None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = serve(&format!("copilot-answer-{i}"), always(decision));
+        assert_silent(
+            &spawn_relay_with(&path, request, &copilot_args("permissionRequest"))
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    // The wrong event for its input, or no event: nothing reaches the app.
+    let (seen, path) = recording("copilot-args", Decision::Deny);
+    for args in [
+        &copilot_args("sessionStart")[..],
+        &copilot_args("notification"),
+        &copilot_args("preToolUse"),
+        &["--agent", "copilot"],
+    ] {
+        assert_silent(
+            &spawn_relay_with(&path, request, args)
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    // sessionStart's input has no event name: a request's input passes as
+    // a session start (nothing in it is read), never as a request.
+    assert!(seen.lock().unwrap().iter().all(|k| k == "SessionStart"));
+}
+
+/// Condition 5 (Charan, 2026-10-28): Copilot hands its hooks its whole
+/// environment. A secret in it never reaches the app (nor anything the
+/// relay prints): the relay reads no variable but its endpoint.
+#[test]
+fn the_relay_never_forwards_the_environment() {
+    let secret = format!("s3cr3t-{}", std::process::id());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "copilot-env",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock().unwrap().push(format!("{e:?}"));
+            Some(Decision::Deny)
+        }),
+    );
+    let mut runs = 0;
+    for (name, raw) in copilot_fixtures() {
+        let args: Vec<&str> = if name.contains("-vscode-") {
+            vec![]
+        } else {
+            copilot_args(copilot_event(&name)).to_vec()
+        };
+        let mut child = Command::new(env!("CARGO_BIN_EXE_bouncer-hook"))
+            .args(&args)
+            .env(bouncer_relay::ENDPOINT_ENV, &path)
+            .env("GITHUB_TOKEN", &secret)
+            .env("COPILOT_PROVIDER_API_KEY", &secret)
+            .env("BOUNCER_SECRET_PROBE", &secret)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(&raw).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(!String::from_utf8_lossy(&out.stdout).contains(&secret));
+        assert!(!String::from_utf8_lossy(&out.stderr).contains(&secret));
+        runs += usize::from(!args.is_empty());
+    }
+    wait_for(&seen, runs);
+    for e in seen.lock().unwrap().iter() {
+        assert!(!e.contains(&secret), "{e}");
+    }
+}
+
+/// The installed Copilot command, run as Copilot runs it (`powershell` on
+/// Windows, `bash` elsewhere): it answers through the real relay; with the
+/// relay gone it still exits 0 and prints nothing, so Copilot carries on (a
+/// failing hook would deny the tool). Nothing in an odd path runs.
+#[test]
+fn the_copilot_command_exits_0_even_with_the_relay_gone() {
+    let base = std::env::temp_dir().join(format!("bouncer-copilot-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let odd = base.join("O'Brien $(touch canary) ; a");
+    std::fs::create_dir_all(&odd).unwrap();
+    let exe = std::env::consts::EXE_SUFFIX;
+    let relay = odd.join(format!("bouncer-hook{exe}"));
+    std::fs::copy(env!("CARGO_BIN_EXE_bouncer-hook"), &relay).unwrap();
+    let request = copilot_fixtures()
+        .into_iter()
+        .find(|(n, _)| n.contains("permissionRequest"))
+        .unwrap()
+        .1;
+    let path = serve("copilot-command", always(Some(Decision::Deny)));
+    let run = |relay: &Path| {
+        let command = bouncer_core::hooks::copilot_command(
+            relay.to_str().unwrap(),
+            "permissionRequest",
+            cfg!(windows),
+        );
+        let mut shell = if cfg!(windows) {
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoProfile", "-Command", &command]);
+            c
+        } else {
+            let mut c = Command::new("bash");
+            c.args(["-c", &command]);
+            c
+        };
+        let mut child = shell
+            .current_dir(&base)
+            .env(bouncer_relay::ENDPOINT_ENV, &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(&request).unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let out = run(&relay);
+    assert_eq!(stdout_json(&out)["behavior"], "deny", "{out:?}");
+    let out = run(&odd.join(format!("missing{exe}")));
+    assert!(out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty(), "{out:?}");
+    assert!(!base.join("canary").exists() && !odd.join("canary").exists());
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 const CODEX: &[&str] = &["--agent", "codex"];

@@ -1,0 +1,1 @@
+{"hookName":"permissionRequest","sessionId":"bb6b9489-2a7b-4f63-8bf5-d5ecb833d4ba","timestamp":1793172086927,"cwd":"C:\\Users\\dev\\bouncer-playground","toolName":"powershell","toolInput":{"command":"Set-Content -Path probe-out.txt -Value 1"},"permissionSuggestions":[]}

@@ -1,8 +1,12 @@
-//! Claude Code (and Codex) hook relay.
+//! Claude Code (and Codex, and Copilot CLI) hook relay.
 //!
 //! Reads one hook event on stdin and forwards it to the Bouncer app. No
 //! arguments: Claude Code. `--agent codex`: Codex (its line is marked so,
-//! and it only ever gets allow / deny). Any other arguments: nothing at all.
+//! and it only ever gets allow / deny). `--agent copilot --event <name>`:
+//! GitHub Copilot CLI (its camelCase input becomes the same line, marked
+//! so, and it only ever gets deny). Any other arguments: nothing at all.
+//! The only environment variable read is the debug endpoint override; the
+//! environment is never logged or forwarded.
 //!
 //! Fail safe: on any error, timeout or unknown input it prints nothing and exits
 //! 0, so Claude Code falls back to its normal terminal prompt. The main thread
@@ -28,20 +32,38 @@ const CODEX_DROPPED: &[&str] = &["model", "prompt", "last_assistant_message"];
 /// Marks the line for the app as Codex's (`bouncer_core::event::AGENT_FIELD`).
 const AGENT_FIELD: &str = "bouncer_agent";
 
+/// Copilot CLI's events Bouncer installs, by their camelCase names (the
+/// installed command names the event: Copilot's `sessionStart` input
+/// doesn't), with the name Bouncer's line gets.
+const COPILOT_EVENTS: &[(&str, &str)] = &[
+    ("sessionStart", "SessionStart"),
+    ("sessionEnd", "SessionEnd"),
+    ("permissionRequest", "PermissionRequest"),
+    ("notification", "Notification"),
+];
+
 /// Which agent's hook ran this relay, from its command line.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Agent {
     ClaudeCode,
     Codex,
+    /// Copilot CLI, with the event its hook was installed for (an entry of
+    /// `COPILOT_EVENTS`).
+    Copilot(&'static str, &'static str),
 }
 
 impl Agent {
-    /// No arguments: Claude Code; exactly `--agent codex`: Codex; anything
+    /// No arguments: Claude Code; exactly `--agent codex`: Codex; exactly
+    /// `--agent copilot --event <one of COPILOT_EVENTS>`: Copilot; anything
     /// else: `None` (the relay then does nothing).
     fn from_args(args: &[String]) -> Option<Agent> {
         match args {
             [] => Some(Agent::ClaudeCode),
             [flag, name] if flag == "--agent" && name == "codex" => Some(Agent::Codex),
+            [flag, name, e, event] if flag == "--agent" && name == "copilot" && e == "--event" => {
+                let &(camel, kind) = COPILOT_EVENTS.iter().find(|(c, _)| c == event)?;
+                Some(Agent::Copilot(camel, kind))
+            }
             _ => None,
         }
     }
@@ -97,10 +119,14 @@ fn run() -> Option<String> {
 
 /// Reads the event, forwards it, and for a permission request (or a
 /// PreToolUse the app guards) turns the app's answer into output. `waiting`
-/// is called only for permission requests. Codex gets only allow / deny.
+/// is called only for permission requests. Codex gets only allow / deny;
+/// Copilot only deny.
 fn work(agent: Agent, waiting: impl FnOnce()) -> Option<String> {
     let (line, payload) = read_event(std::io::stdin().lock(), agent)?;
     match payload["hook_event_name"].as_str()? {
+        "PermissionRequest" if matches!(agent, Agent::Copilot(..)) => {
+            copilot_json(&talk(&line, true, waiting)?)
+        }
         "PermissionRequest" if agent == Agent::Codex => {
             decision_json(&talk(&line, true, waiting)?, None, &Value::Null)
         }
@@ -140,6 +166,15 @@ fn guard_json(answer: &str) -> Option<String> {
     })
 }
 
+/// Copilot CLI's `permissionRequest` output, for exactly `deny`; anything
+/// else is `None`. Never `allow`: Copilot's hooks run before its own rules,
+/// and a hook's allow overrides its deny rules (PLAN, roadmap h2 step 1).
+fn copilot_json(answer: &str) -> Option<String> {
+    (answer == "deny").then(|| {
+        serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" }).to_string()
+    })
+}
+
 /// The documented `PermissionRequest` output for the app's answer, each only
 /// for its own tool: a question's `answer <picks>` (allow, with `updatedInput`
 /// built from Claude Code's own `input` plus the chosen labels), a plan's
@@ -171,6 +206,9 @@ fn decision_json(answer: &str, tool: Option<&str>, input: &Value) -> Option<Stri
 /// event (a question's answer is built from its `tool_input`); `None` if
 /// it's too big, not a JSON object, or has no event name. The agent's mark
 /// comes only from the relay's own command line: any copy in the input goes.
+/// With no flag, input carrying a `timestamp` is refused: Claude Code never
+/// sends one and every Copilot input does (Copilot runs a repository's
+/// `.claude/settings.json` hooks with input in Claude Code's shape).
 fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     let mut raw = Vec::new();
     input.take(MAX_INPUT + 1).read_to_end(&mut raw).ok()?;
@@ -179,8 +217,14 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     }
     let raw = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&raw);
     let mut payload: Value = serde_json::from_slice(raw).ok()?;
+    if let Agent::Copilot(camel, kind) = agent {
+        payload = from_copilot(&payload, camel, kind)?;
+    }
     let map = payload.as_object_mut()?;
     map.get("hook_event_name")?.as_str()?;
+    if agent == Agent::ClaudeCode && map.contains_key("timestamp") {
+        return None;
+    }
     map.remove(AGENT_FIELD);
     for field in DROPPED_FIELDS {
         map.remove(*field);
@@ -191,9 +235,51 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
         }
         map.insert(AGENT_FIELD.into(), "codex".into());
     }
+    if let Agent::Copilot(..) = agent {
+        map.insert(AGENT_FIELD.into(), "copilot".into());
+    }
     let mut line = payload.to_string();
     line.push('\n');
     Some((line, payload))
+}
+
+/// Copilot CLI's camelCase input (1.0.105's fields) as Bouncer's line, with
+/// only what Bouncer uses: the session and its folder; for a permission
+/// request the tool (`bash` / `powershell` as Bash / PowerShell) and its
+/// input; for a notification its type. The input must be the event the hook
+/// was installed for (its `hookName` / `hook_event_name`, where Copilot
+/// sends one), else `None`. The prompt, the notification's text and the
+/// rest stay behind.
+fn from_copilot(input: &Value, camel: &str, kind: &str) -> Option<Value> {
+    let text = |key| input.get(key)?.as_str();
+    let mut line = serde_json::json!({
+        "hook_event_name": kind,
+        "session_id": text("sessionId")?,
+        "cwd": text("cwd")?,
+    });
+    match camel {
+        "permissionRequest" => {
+            if text("hookName")? != camel {
+                return None;
+            }
+            line["tool_name"] = match text("toolName")? {
+                "bash" => "Bash",
+                "powershell" => "PowerShell",
+                other => other,
+            }
+            .into();
+            line["tool_input"] = Value::Object(input.get("toolInput")?.as_object()?.clone());
+        }
+        "notification" => {
+            if text("hook_event_name")? != kind {
+                return None;
+            }
+            line["tool_input"] =
+                serde_json::json!({ "notification_type": text("notification_type")? });
+        }
+        _ => {}
+    }
+    Some(line)
 }
 
 /// Sends the event line; if `asks`, calls `waiting` first. Then reads the
@@ -414,6 +500,112 @@ mod tests {
         for answer in ["", "Ask", "ask ", " ask", "allow", "deny", "ask\nask", "{}"] {
             assert!(guard_json(answer).is_none(), "{answer:?}");
         }
+    }
+
+    fn copilot(event: &str) -> Agent {
+        Agent::from_args(&["--agent", "copilot", "--event", event].map(String::from)).unwrap()
+    }
+
+    #[test]
+    fn copilot_runs_only_with_exactly_its_flag_and_an_installed_event() {
+        let args =
+            |a: &[&str]| Agent::from_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        for &(camel, kind) in COPILOT_EVENTS {
+            assert_eq!(copilot(camel), Agent::Copilot(camel, kind));
+        }
+        for bad in [
+            &["--agent", "copilot"][..],
+            &["--agent", "copilot", "--event"],
+            &["--agent", "copilot", "--event", "preToolUse"],
+            &["--agent", "copilot", "--event", "PermissionRequest"],
+            &["--agent", "copilot", "--event", "permissionRequest", "x"],
+            &["--agent", "Copilot", "--event", "permissionRequest"],
+            &["--agent", "copilot", "--events", "permissionRequest"],
+            &["--event", "permissionRequest", "--agent", "copilot"],
+        ] {
+            assert_eq!(args(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Copilot CLI 1.0.105's inputs (recorded in step 1, paths as `dev`)
+    /// become Bouncer's line with only the session, folder, tool and input
+    /// (or the notification's type); the prompt and text stay behind.
+    #[test]
+    fn copilot_input_becomes_a_marked_line_with_only_what_bouncer_uses() {
+        let read = |event: &str, input: Value| {
+            read_event(input.to_string().as_bytes(), copilot(event)).map(|(_, v)| v)
+        };
+        let start = serde_json::json!({ "sessionId": "s1", "timestamp": 1_793_172_083_696_u64,
+            "cwd": r"C:\Users\dev\p", "source": "new", "initialPrompt": "secret plan" });
+        assert_eq!(
+            read("sessionStart", start.clone()).unwrap(),
+            serde_json::json!({ "hook_event_name": "SessionStart", "session_id": "s1",
+                "cwd": r"C:\Users\dev\p", AGENT_FIELD: "copilot" })
+        );
+        let request = serde_json::json!({ "hookName": "permissionRequest", "sessionId": "s1",
+            "timestamp": 1_793_172_086_927_u64, "cwd": r"C:\Users\dev\p", "toolName": "powershell",
+            "toolInput": { "command": "Get-Date" }, "permissionSuggestions": [] });
+        assert_eq!(
+            read("permissionRequest", request.clone()).unwrap(),
+            serde_json::json!({ "hook_event_name": "PermissionRequest", "session_id": "s1",
+                "cwd": r"C:\Users\dev\p", "tool_name": "PowerShell",
+                "tool_input": { "command": "Get-Date" }, AGENT_FIELD: "copilot" })
+        );
+        let mut bash = request.clone();
+        bash["toolName"] = "bash".into();
+        assert_eq!(
+            read("permissionRequest", bash).unwrap()["tool_name"],
+            "Bash"
+        );
+        let note = serde_json::json!({ "sessionId": "s1", "timestamp": 1_793_172_088_150_u64,
+            "cwd": r"C:\Users\dev\p", "message": "Run command: Get-Date", "title": "Permission needed",
+            "hook_event_name": "Notification", "notification_type": "permission_prompt" });
+        assert_eq!(
+            read("notification", note.clone()).unwrap()["tool_input"],
+            serde_json::json!({ "notification_type": "permission_prompt" })
+        );
+        // Another event's input, a missing or mistyped field, or a spoofed
+        // mark: refused, or the mark comes from the command line.
+        assert!(read("notification", request.clone()).is_none());
+        assert!(read("permissionRequest", note.clone()).is_none());
+        for key in ["sessionId", "cwd", "hookName", "toolName", "toolInput"] {
+            let mut bad = request.clone();
+            bad.as_object_mut().unwrap().remove(key);
+            assert!(read("permissionRequest", bad).is_none(), "{key}");
+        }
+        let mut bad = request.clone();
+        bad["toolInput"] = r#"{"command":"ls"}"#.into();
+        assert!(read("permissionRequest", bad).is_none());
+        let mut spoof = start;
+        spoof[AGENT_FIELD] = "claude-code".into();
+        assert_eq!(read("sessionStart", spoof).unwrap()[AGENT_FIELD], "copilot");
+    }
+
+    #[test]
+    fn copilot_gets_exactly_deny_and_nothing_else() {
+        assert_eq!(
+            serde_json::from_str::<Value>(&copilot_json("deny").unwrap()).unwrap(),
+            serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" })
+        );
+        for answer in [
+            "allow", "ask", "", "Deny", "deny ", "approve", "answer 0", "{}",
+        ] {
+            assert!(copilot_json(answer).is_none(), "{answer:?}");
+        }
+    }
+
+    /// Claude Code never sends `timestamp`; Copilot always does, also in its
+    /// VS Code-style input from a repository's `.claude/settings.json`.
+    #[test]
+    fn with_no_flag_input_with_a_timestamp_is_refused() {
+        let vs = br#"{"hook_event_name":"PreToolUse","session_id":"v","timestamp":"2026-10-28T07:40:06.872Z","cwd":"/p","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
+        assert!(read_event_claude(&vs[..]).is_none());
+        assert!(
+            read_event(&vs[..], Agent::Codex).is_some(),
+            "Codex: flag decides"
+        );
+        let claude = br#"{"hook_event_name":"PreToolUse","session_id":"v","cwd":"/p","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
+        assert!(read_event_claude(&claude[..]).is_some());
     }
 
     #[test]
