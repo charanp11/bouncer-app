@@ -73,7 +73,8 @@ fn hermetic(dir: &Path) -> Command {
         .env("HOME", dir)
         .env("USERPROFILE", dir)
         .env("CLAUDE_CONFIG_DIR", dir.join("claude-config"))
-        .env("CODEX_HOME", dir.join("codex-home"));
+        .env("CODEX_HOME", dir.join("codex-home"))
+        .env("COPILOT_HOME", dir.join("copilot-home"));
     command
 }
 
@@ -254,6 +255,61 @@ fn the_uninstaller_removes_both_agents_hooks_and_a_given_file_only() {
     assert!(text.trim_end().ends_with("Press Enter to close."), "{text}");
 }
 
+/// Copilot CLI: `install-hooks --copilot` writes Bouncer's own
+/// `$COPILOT_HOME/hooks/bouncer.json` (the folder made if needed) after the
+/// diff and a yes; the uninstaller then offers it third, and a yes leaves an
+/// empty object behind (a dated backup beside it).
+#[test]
+fn copilot_hooks_install_and_the_uninstaller_removes_them() {
+    let dir = temp_dir("copilot");
+    let relay = dir.join("bouncer-hook.exe");
+    fs::write(&relay, "").unwrap();
+    let file = dir.join("copilot-home").join("hooks").join("bouncer.json");
+    let run = |args: &[&str], answer: &str| {
+        let mut child = hermetic(&dir)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(answer.as_bytes());
+        child.wait_with_output().unwrap()
+    };
+    let relay = relay.to_str().unwrap();
+    let out = run(&["install-hooks", "--copilot", "--relay", relay], "n\n");
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .contains("--agent copilot --event permissionRequest; exit 0")
+    );
+    assert!(!file.exists(), "nothing without a yes");
+    assert!(
+        run(&["install-hooks", "--copilot", "--relay", relay], "y\n")
+            .status
+            .success()
+    );
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("\"version\": 1") && text.contains("timeoutSec"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("preToolUse") && !text.contains("matcher"),
+        "{text}"
+    );
+    let out = run(&["uninstall-hooks", "--uninstalling"], "y\n");
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        shown.contains("Remove its hooks from Copilot CLI?"),
+        "{shown}"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), "{}\n");
+    assert_eq!(
+        fs::read_dir(file.parent().unwrap()).unwrap().count(),
+        2,
+        "the file and its backup"
+    );
+}
+
 /// With the test marker set, a CLI that would resolve a file outside the
 /// temp folder (here a home in cargo's own target folder, nothing set for
 /// Claude Code or Codex) refuses before reading or writing anything. No
@@ -270,7 +326,7 @@ fn the_cli_refuses_a_real_profile_path_under_test() {
     );
     let relay = temp_dir("guard");
     let relay = relay.join("bouncer-hook.exe");
-    for extra in [&[][..], &["--codex"][..]] {
+    for extra in [&[][..], &["--codex"][..], &["--copilot"][..]] {
         let out = Command::new(env!("CARGO_BIN_EXE_bouncer"))
             .args(["install-hooks", "--relay", relay.to_str().unwrap()])
             .args(extra)
@@ -279,6 +335,7 @@ fn the_cli_refuses_a_real_profile_path_under_test() {
             .env("USERPROFILE", &home)
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CODEX_HOME")
+            .env_remove("COPILOT_HOME")
             .stdin(Stdio::null())
             .output()
             .unwrap();
@@ -290,7 +347,11 @@ fn the_cli_refuses_a_real_profile_path_under_test() {
         );
         assert!(!String::from_utf8_lossy(&out.stdout).contains("Changes to"));
     }
-    assert!(!home.join(".claude").exists() && !home.join(".codex").exists());
+    assert!(
+        !home.join(".claude").exists()
+            && !home.join(".codex").exists()
+            && !home.join(".copilot").exists()
+    );
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -351,6 +412,8 @@ fn bad_arguments_fail() {
         &["frobnicate"][..],
         &["install-hooks", "--settings"],
         &["uninstall-hooks", "--relay", "x"],
+        &["install-hooks", "--codex", "--copilot"],
+        &["install-hooks", "--copilot", "--copilot"],
     ] {
         let out = hermetic(&dir)
             .args(args)

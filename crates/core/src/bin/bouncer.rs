@@ -1,5 +1,5 @@
-//! `bouncer install-hooks` / `bouncer uninstall-hooks`, for Claude Code or
-//! (`--codex`) Codex.
+//! `bouncer install-hooks` / `bouncer uninstall-hooks`, for Claude Code,
+//! (`--codex`) Codex or (`--copilot`) GitHub Copilot CLI.
 //!
 //! Never writes silently: shows the diff, asks, writes a dated backup, then
 //! replaces the file atomically. Refuses files that aren't valid JSON, and
@@ -12,20 +12,26 @@ use std::process::ExitCode;
 
 use bouncer_core::hooks::{self, Agent};
 
-const USAGE: &str = "usage: bouncer install-hooks [--codex] [--settings FILE] [--relay PATH]
-       bouncer uninstall-hooks [--codex] [--settings FILE]
+const USAGE: &str =
+    "usage: bouncer install-hooks [--codex | --copilot] [--settings FILE] [--relay PATH]
+       bouncer uninstall-hooks [--codex | --copilot] [--settings FILE]
 
 FILE defaults to ~/.claude/settings.json ($CLAUDE_CONFIG_DIR/settings.json if set);
-with --codex, to ~/.codex/hooks.json ($CODEX_HOME/hooks.json if set).
+with --codex, to ~/.codex/hooks.json ($CODEX_HOME/hooks.json if set);
+with --copilot, to ~/.copilot/hooks/bouncer.json ($COPILOT_HOME/hooks/bouncer.json if set).
 PATH defaults to bouncer-hook next to this program.";
 
 /// The uninstaller runs `uninstall-hooks --uninstalling` in its own console:
-/// Claude Code's file, then Codex's.
+/// Claude Code's file, then Codex's, then Copilot's.
 const UNINSTALLING: &str =
     "Bouncer is being uninstalled. Remove its hooks from Claude Code's settings?
 Installing Bouncer again next? Answer N to keep them.
 ";
 const UNINSTALLING_CODEX: &str = "Bouncer is being uninstalled. Remove its hooks from Codex?
+Installing Bouncer again next? Answer N to keep them.
+";
+const UNINSTALLING_COPILOT: &str =
+    "Bouncer is being uninstalled. Remove its hooks from Copilot CLI?
 Installing Bouncer again next? Answer N to keep them.
 ";
 /// Codex runs a new or changed hook only once the user trusts it.
@@ -64,8 +70,15 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     let (mut settings, mut relay, mut agent) = (None, None, Agent::ClaudeCode);
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
-        if flag == "--codex" {
-            agent = Agent::Codex;
+        if flag == "--codex" || flag == "--copilot" {
+            if agent != Agent::ClaudeCode {
+                return Err(USAGE.into());
+            }
+            agent = if flag == "--codex" {
+                Agent::Codex
+            } else {
+                Agent::Copilot
+            };
             continue;
         }
         let value = it.next().ok_or(USAGE)?;
@@ -76,15 +89,17 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
         }
     }
     if uninstalling {
-        // A file given: only that one. Else both agents' user files, Codex's
-        // even if Claude Code's step fails.
+        // A file given: only that one. Else every agent's user file, each
+        // even if an earlier step fails.
         if settings.is_some() {
             return one(agent, settings, false, None, true);
         }
         let claude = one(Agent::ClaudeCode, None, false, None, true);
         println!();
         let codex = one(Agent::Codex, None, false, None, true);
-        return claude.and(codex);
+        println!();
+        let copilot = one(Agent::Copilot, None, false, None, true);
+        return claude.and(codex).and(copilot);
     }
     let relay = match (installing, relay) {
         (false, _) => None,
@@ -109,6 +124,7 @@ fn one(
     let what = match agent {
         Agent::ClaudeCode => "settings file",
         Agent::Codex => "Codex hooks file",
+        Agent::Copilot => "Copilot CLI hooks file",
     };
     if !installing && !path.exists() {
         return done(&format!("No {what}; nothing to remove."));
@@ -126,6 +142,7 @@ fn one(
             match agent {
                 Agent::ClaudeCode => UNINSTALLING,
                 Agent::Codex => UNINSTALLING_CODEX,
+                Agent::Copilot => UNINSTALLING_COPILOT,
             }
         );
     }
@@ -137,13 +154,21 @@ fn one(
         .read_line(&mut answer)
         .map_err(|e| e.to_string())?;
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-        if uninstalling {
+        if uninstalling && agent == Agent::Copilot {
+            // Every Copilot hook command ends in `exit 0`: a missing relay
+            // is no hook failure, so Copilot carries on.
+            println!(
+                "Kept. Without Bouncer, Copilot CLI carries on as usual; the file\n\
+                 {} stays until you remove it.",
+                path.display()
+            );
+        } else if uninstalling {
             println!(
                 "Kept. Without Bouncer, {} will report a missing hook until\n\
                  the entries running bouncer-hook.exe are removed from {}.",
                 match agent {
-                    Agent::ClaudeCode => "Claude Code",
                     Agent::Codex => "Codex",
+                    _ => "Claude Code",
                 },
                 path.display()
             );

@@ -48,11 +48,22 @@ pub const CODEX_EVENTS: &[(&str, u64)] = &[
     ("Stop", 5),
 ];
 
+/// Copilot CLI's events (camelCase: the input Bouncer reads), with the hook
+/// timeout in seconds. Never `preToolUse`: a failing one denies the tool.
+/// The permission request's stays above the relay's 110 s budget.
+pub const COPILOT_EVENTS: &[(&str, u64)] = &[
+    ("sessionStart", 10),
+    ("sessionEnd", 10),
+    ("permissionRequest", 120),
+    ("notification", 10),
+];
+
 /// Whose hooks file it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
     ClaudeCode,
     Codex,
+    Copilot,
 }
 
 impl Agent {
@@ -60,6 +71,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => EVENTS,
             Agent::Codex => CODEX_EVENTS,
+            Agent::Copilot => COPILOT_EVENTS,
         }
     }
 
@@ -67,11 +79,20 @@ impl Agent {
         match self {
             Agent::ClaudeCode => is_ours(hook),
             Agent::Codex => is_ours_codex(hook),
+            Agent::Copilot => is_ours_copilot(hook),
         }
     }
 
-    /// Our hook entry running `relay` with `timeout`.
-    fn entry(self, relay: &str, timeout: u64) -> Value {
+    /// The entry's field holding the command `status` compares.
+    fn command_key(self) -> &'static str {
+        match self {
+            Agent::Copilot => COPILOT_SHELL,
+            _ => "command",
+        }
+    }
+
+    /// Our hook entry for `event` running `relay` with `timeout`.
+    fn entry(self, relay: &str, event: &str, timeout: u64) -> Value {
         match self {
             Agent::ClaudeCode => {
                 json!({ "type": "command", "command": relay, "args": [], "timeout": timeout })
@@ -85,9 +106,18 @@ impl Agent {
                 }
                 entry
             }
+            Agent::Copilot => json!({
+                "type": "command",
+                COPILOT_SHELL: copilot_command(relay, event, cfg!(windows)),
+                "timeoutSec": timeout,
+            }),
         }
     }
 }
+
+/// The field Copilot runs on this OS: `powershell` on Windows, `bash`
+/// elsewhere.
+const COPILOT_SHELL: &str = if cfg!(windows) { "powershell" } else { "bash" };
 
 fn is_relay_name(path: &str) -> bool {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
@@ -110,6 +140,11 @@ const PS_QUOTES: &[char] = &['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}
 /// `PS_QUOTES`, each doubled inside; sh at `'`, written `'\''`. Then
 /// `--agent codex`. Nothing in the path can end the quotes or run.
 pub fn codex_command(relay: &str, windows: bool) -> String {
+    shell_command(relay, " --agent codex", windows)
+}
+
+/// The relay in single quotes (as `codex_command` says), then `rest`.
+fn shell_command(relay: &str, rest: &str, windows: bool) -> String {
     if windows {
         let mut quoted = String::new();
         for c in relay.chars() {
@@ -118,18 +153,35 @@ pub fn codex_command(relay: &str, windows: bool) -> String {
                 quoted.push(c);
             }
         }
-        format!("& '{quoted}' --agent codex")
+        format!("& '{quoted}'{rest}")
     } else {
-        format!("'{}' --agent codex", relay.replace('\'', r"'\''"))
+        format!("'{}'{rest}", relay.replace('\'', r"'\''"))
     }
+}
+
+/// Copilot CLI runs a hook's `powershell` (Windows) or `bash` command, and
+/// denies the tool if a deciding hook fails. So the command always ends in
+/// `exit 0`: a missing relay, a crash or exit 2 still means "nothing"
+/// (step 1, PLAN roadmap h2). The relay is quoted as for Codex.
+pub fn copilot_command(relay: &str, event: &str, windows: bool) -> String {
+    shell_command(relay, &copilot_rest(event), windows)
+}
+
+fn copilot_rest(event: &str) -> String {
+    format!(" --agent copilot --event {event}; exit 0")
 }
 
 /// The relay path in a command `codex_command` wrote, in either form; `None`
 /// for anything else (it must come back out exactly).
 fn codex_relay(command: &str) -> Option<String> {
+    shell_relay(command, " --agent codex")
+}
+
+/// The relay path in a command `shell_command` wrote with `rest`.
+fn shell_relay(command: &str, rest: &str) -> Option<String> {
     let ps = command
         .strip_prefix("& '")
-        .and_then(|c| c.strip_suffix("' --agent codex"))
+        .and_then(|c| c.strip_suffix(&format!("'{rest}")))
         .map(|inner| {
             let mut path = String::new();
             let mut chars = inner.chars().peekable();
@@ -143,10 +195,10 @@ fn codex_relay(command: &str) -> Option<String> {
         });
     let sh = command
         .strip_prefix('\'')
-        .and_then(|c| c.strip_suffix("' --agent codex"))
+        .and_then(|c| c.strip_suffix(&format!("'{rest}")))
         .map(|inner| (inner.replace(r"'\''", "'"), false));
     let (path, windows) = ps.or(sh)?;
-    (codex_command(&path, windows) == command).then_some(path)
+    (shell_command(&path, rest, windows) == command).then_some(path)
 }
 
 fn is_ours_codex(hook: &Value) -> bool {
@@ -155,6 +207,17 @@ fn is_ours_codex(hook: &Value) -> bool {
             .and_then(Value::as_str)
             .and_then(codex_relay)
             .is_some_and(|path| is_relay_name(&path))
+    })
+}
+
+/// A command `copilot_command` wrote for any of our events, in either field.
+fn is_ours_copilot(hook: &Value) -> bool {
+    ["powershell", "bash"].iter().any(|key| {
+        hook.get(*key).and_then(Value::as_str).is_some_and(|c| {
+            COPILOT_EVENTS.iter().any(|(event, _)| {
+                shell_relay(c, &copilot_rest(event)).is_some_and(|p| is_relay_name(&p))
+            })
+        })
     })
 }
 
@@ -189,6 +252,24 @@ pub fn codex_hooks_path(
     Ok(PathBuf::from(home).join(".codex").join("hooks.json"))
 }
 
+/// `$COPILOT_HOME/hooks/bouncer.json` (Copilot CLI's user hooks folder),
+/// else `~/.copilot/hooks/bouncer.json`: a file of Bouncer's own. Empty
+/// values count as unset.
+pub fn copilot_hooks_path(
+    copilot_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    let dir = match copilot_home.filter(|d| !d.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(
+            home.filter(|h| !h.is_empty())
+                .ok_or("can't find your home folder; pass --settings")?,
+        )
+        .join(".copilot"),
+    };
+    Ok(dir.join("hooks").join("bouncer.json"))
+}
+
 /// Set (to anything) by tests that run Bouncer's programs: every real
 /// profile file `user_file` resolves must then be inside the temp folder.
 pub const TEST_GUARD_ENV: &str = "BOUNCER_TEST_GUARD";
@@ -204,6 +285,7 @@ pub fn user_file(agent: Agent) -> Result<PathBuf, String> {
     let path = match agent {
         Agent::ClaudeCode => settings_path(std::env::var_os("CLAUDE_CONFIG_DIR"), home)?,
         Agent::Codex => codex_hooks_path(std::env::var_os("CODEX_HOME"), home)?,
+        Agent::Copilot => copilot_hooks_path(std::env::var_os("COPILOT_HOME"), home)?,
     };
     if cfg!(test) || std::env::var_os(TEST_GUARD_ENV).is_some() {
         guard_test_path(&path, &std::env::temp_dir());
@@ -269,6 +351,9 @@ pub fn install_for(agent: Agent, settings: &mut Value, relay: &str) -> Result<()
     let root = settings
         .as_object_mut()
         .ok_or("the settings file is not a JSON object")?;
+    if agent == Agent::Copilot {
+        root.entry("version").or_insert(json!(1));
+    }
     let hooks = root
         .entry("hooks")
         .or_insert_with(|| json!({}))
@@ -280,7 +365,7 @@ pub fn install_for(agent: Agent, settings: &mut Value, relay: &str) -> Result<()
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .ok_or(format!("\"hooks.{event}\" is not a list"))?
-            .push(json!({ "hooks": [agent.entry(relay, timeout)] }));
+            .push(json!({ "hooks": [agent.entry(relay, event, timeout)] }));
     }
     Ok(())
 }
@@ -320,6 +405,10 @@ fn uninstall_for(agent: Agent, settings: &mut Value) {
         settings
             .as_object_mut()
             .map(|root| root.shift_remove("hooks"));
+    }
+    // Copilot's file is ours: with our hooks gone, our `version` goes too.
+    if agent == Agent::Copilot && *settings == json!({ "version": 1 }) {
+        *settings = json!({});
     }
 }
 
@@ -389,8 +478,9 @@ pub fn status_for(agent: Agent, settings: &Value, relay: &str) -> Status {
             .flatten()
             .filter(|hook| agent.is_ours(hook))
             .collect();
-        let want = agent.entry(relay, timeout);
-        let same_relay = |h: &&Value| want["command"] == h["command"];
+        let want = agent.entry(relay, event, timeout);
+        let key = agent.command_key();
+        let same_relay = |h: &&Value| want[key] == h[key];
         let exact = |h: &&Value| {
             want.as_object()
                 .is_some_and(|w| w.iter().all(|(k, v)| h[k] == *v))
@@ -938,6 +1028,111 @@ mod tests {
         assert_eq!(claude, before);
     }
 
+    /// Copilot's own file: version 1, one entry per event, each command the
+    /// quoted relay with its event and `; exit 0`, in the shell field Copilot
+    /// runs here; uninstall gives back an empty object. Never `preToolUse`.
+    #[test]
+    fn copilot_install_status_and_uninstall() {
+        let mut s = json!({});
+        assert_eq!(status_for(Agent::Copilot, &s, ODD), Status::Missing);
+        install_for(Agent::Copilot, &mut s, ODD).unwrap();
+        install_for(Agent::Copilot, &mut s, ODD).unwrap();
+        assert_eq!(s["version"], 1);
+        assert!(!installed(&s), "Claude Code's check doesn't see Copilot's");
+        assert_eq!(
+            s["hooks"].as_object().unwrap().keys().collect::<Vec<_>>(),
+            [
+                "sessionStart",
+                "sessionEnd",
+                "permissionRequest",
+                "notification"
+            ]
+        );
+        for &(event, timeout) in COPILOT_EVENTS {
+            let groups = s["hooks"][event].as_array().unwrap();
+            assert_eq!(groups.len(), 1, "{event}");
+            let entry = &groups[0]["hooks"][0];
+            assert_eq!(entry["timeoutSec"], timeout);
+            let command = entry[COPILOT_SHELL].as_str().unwrap();
+            assert_eq!(command, copilot_command(ODD, event, cfg!(windows)));
+            assert!(command.ends_with(&format!("--agent copilot --event {event}; exit 0")));
+            assert!(groups[0].get("matcher").is_none(), "no matcher at all");
+        }
+        assert_eq!(status_for(Agent::Copilot, &s, ODD), Status::Installed);
+        assert_eq!(
+            status_for(Agent::Copilot, &s, r"D:\other\bouncer-hook.exe"),
+            Status::Moved
+        );
+        let mut old = s.clone();
+        old["hooks"]["permissionRequest"][0]["hooks"][0]["timeoutSec"] = json!(30);
+        assert_eq!(status_for(Agent::Copilot, &old, ODD), Status::Incomplete);
+        uninstall_for(Agent::Copilot, &mut s);
+        assert_eq!(s, json!({}));
+        // A user's own entries in our file stay, with its version.
+        let mut mine = json!({ "version": 1, "hooks": { "sessionStart": [{ "type": "command", "bash": "echo hi" }] } });
+        let before = mine.clone();
+        install_for(Agent::Copilot, &mut mine, ODD).unwrap();
+        uninstall_for(Agent::Copilot, &mut mine);
+        assert_eq!(mine, before);
+    }
+
+    /// Copilot's command, run the way Copilot reads it back: odd paths come
+    /// out exactly; lookalikes (no `exit 0`, another agent, an unknown event)
+    /// aren't ours.
+    #[test]
+    fn copilot_commands_quote_the_path_and_lookalikes_are_not_ours() {
+        for windows in [true, false] {
+            for event in ["sessionStart", "permissionRequest"] {
+                let c = copilot_command(ODD, event, windows);
+                assert_eq!(shell_relay(&c, &copilot_rest(event)).as_deref(), Some(ODD));
+            }
+        }
+        let w = copilot_command(RELAY, "permissionRequest", true);
+        assert_eq!(
+            w,
+            r"& 'C:\Program Files\Bouncer\bouncer-hook.exe' --agent copilot --event permissionRequest; exit 0"
+        );
+        for fake in [
+            w.replace("; exit 0", ""),
+            w.replace("copilot", "codex"),
+            w.replace("permissionRequest", "preToolUse"),
+            w.replace("bouncer-hook.exe", "other.exe"),
+            format!("{w}; Remove-Item x"),
+        ] {
+            assert!(!is_ours_copilot(&json!({ "powershell": fake })), "{fake}");
+        }
+        assert!(is_ours_copilot(&json!({ "powershell": w })));
+    }
+
+    /// Condition 4 (Charan, 2026-10-28): Copilot rejects a whole settings
+    /// file over one empty `matcher`, so no group Bouncer writes, for any
+    /// agent, carries a `matcher`.
+    #[test]
+    fn bouncer_never_writes_a_matcher() {
+        for agent in [Agent::ClaudeCode, Agent::Codex, Agent::Copilot] {
+            let mut s = json!({});
+            install_for(agent, &mut s, RELAY).unwrap();
+            let text = serde_json::to_string(&s).unwrap();
+            assert!(!text.contains("matcher"), "{agent:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn copilot_hooks_path_follows_copilot_home() {
+        let path = |dir: Option<&str>, home: Option<&str>| {
+            copilot_hooks_path(dir.map(Into::into), home.map(Into::into))
+        };
+        let file = |base: &str| Path::new(base).join("hooks").join("bouncer.json");
+        assert_eq!(path(Some("c"), Some("h")), Ok(file("c")));
+        let home = Path::new("h")
+            .join(".copilot")
+            .join("hooks")
+            .join("bouncer.json");
+        assert_eq!(path(None, Some("h")), Ok(home.clone()));
+        assert_eq!(path(Some(""), Some("h")), Ok(home));
+        assert!(path(None, None).is_err());
+    }
+
     /// Under test only temp paths pass: a home-folder file, the temp folder
     /// itself, a `..` escape or a relative path panic.
     #[test]
@@ -948,6 +1143,7 @@ mod tests {
         for bad in [
             home.join(".claude").join("settings.json"),
             home.join(".codex").join("hooks.json"),
+            home.join(".copilot").join("hooks").join("bouncer.json"),
             temp.clone(),
             temp.join("..").join("settings.json"),
             PathBuf::from("settings.json"),
@@ -962,7 +1158,7 @@ mod tests {
     /// the temp folder.
     #[test]
     fn user_file_refuses_real_profile_paths_under_test() {
-        for agent in [Agent::ClaudeCode, Agent::Codex] {
+        for agent in [Agent::ClaudeCode, Agent::Codex, Agent::Copilot] {
             let resolved = std::panic::catch_unwind(|| user_file(agent));
             if let Ok(Ok(path)) = &resolved {
                 assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());
