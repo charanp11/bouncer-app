@@ -14,6 +14,10 @@ isn't ready until every automated row passes in CI (Windows and macOS).
   a named test doesn't exist (each OS checks its own).
 - **Status:** CI = runs on every PR on Windows and macOS. A date = the last
   real-click pass. Hand N = hand check N below.
+- **Brief:** `docs/BRIEF.md` is the plain-English picture of Bouncer. A PR
+  that changes behaviour, settings, safety, agents, releases or the roadmap
+  updates it in the same docs commit as this file; each release adds its
+  line to its Version history.
 
 ## Relay and hooks
 
