@@ -9,7 +9,7 @@ const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const body = (name: string) => main.slice(main.indexOf(`function ${name}(`), main.indexOf("\n}\n", main.indexOf(`function ${name}(`)));
 
 test("sessions and cards name Codex", () => {
-  assert.match(main, /const AGENTS: Record<string, string> = \{ "claude-code": "Claude Code", codex: "Codex" \};/);
+  assert.match(main, /const AGENTS: Record<string, string> = \{ "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot" \};/);
   assert.match(main, /AGENTS\[request\.agent\] \?\? request\.agent/, "the card");
   assert.match(main, /AGENTS\[agent\] \?\? agent/, "the session rail");
 });
@@ -30,7 +30,8 @@ test("Codex's hooks: offered only where Codex is, previewed by agent, trusted on
   assert.match(main, /const CODEX_TRUST = "Codex asks you to trust these hooks once/);
   // The minimum version, the same as the README's.
   assert.match(main, /const CODEX_MIN = "Needs Codex 0\.145 or newer; older versions ignore these hooks\.";/);
-  assert.match(row, /\$\{CODEX_MIN\}/);
+  assert.match(main, /codex: \{ name: "Codex hooks", [^}]*min: CODEX_MIN,/);
+  assert.match(row, /\$\{info\.min\}/);
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.match(readme, /It needs Codex 0\.145 or newer/);
   assert.deepEqual([...row.matchAll(/invoke(?:<[^>]+>)?\("([a-z_]+)"/g)].map((m) => m[1]), ["hooks_write", "hooks_preview"]);
