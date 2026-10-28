@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.11.0, 2026-10-28
+Last updated: v0.11.1, 2026-10-28
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -244,6 +244,9 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
+- **v0.11.1** (2026-10-28): hardening: Claude Code's hooks name
+  themselves (`--agent claude-code`); older hooks keep working and
+  Settings shows "Update needed" with Re-install.
 - **v0.11.0** (2026-10-28, published 2026-10-28): GitHub Copilot CLI support: watch-only plus
   Deny on risky commands (Guard every mode), no Allow from Bouncer, nothing
   inside Copilot's sandbox; needs Copilot CLI 1.0.67+.
