@@ -4247,7 +4247,7 @@ signature in the file" and its SHA-256 (F11); a question card answered with
 one click (Q9). v0.9.0 is done; the next roadmap item (h, other agents, one
 per release) starts in a new session when Charan says.
 
-## Roadmap h1 — Codex CLI (current)
+## Roadmap h1 — Codex CLI
 
 First of roadmap h (Charan, 2026-10-20). Picked over Copilot CLI, Cursor
 CLI and Antigravity CLI: Codex's `PermissionRequest` hook fires only where
@@ -4420,6 +4420,319 @@ the installed build): the update 0.10.0 → 0.10.1 came through the updater
 hooks hint reads in full and no hint is cut (UI20); Claude Code hooks
 Installed. Roadmap h1 (Codex) is done; next: GitHub Copilot CLI (roadmap
 h2) in a new session, when Charan says.
+
+## Roadmap h2 — GitHub Copilot CLI (current)
+
+Second of roadmap h (Charan, 2026-10-28). Goal: as close to Claude Code as
+Copilot's hooks allow (cards, risky flags, the guard through `ask` if it
+works). Audit from GitHub's CLI hooks reference
+(docs.github.com, "CLI hooks reference") and Copilot CLI's
+`changelog.md` (latest 1.0.105, 2026-10-27). Items marked
+**(step 1)** are not in the docs and must be confirmed in scratch first.
+
+### What the docs say
+
+1. **Two hooks can decide.** `preToolUse` (before every tool;
+   `permissionDecision` `allow` / `deny` / `ask`, `permissionDecisionReason`,
+   `modifiedArgs`) and `permissionRequest` (CLI only; `behavior` `allow` /
+   `deny`, `message`, `interrupt`). Empty output or `{}` = Copilot's normal
+   handling. Several hooks merge, later ones win.
+2. **`permissionRequest` runs for every request,** "before the permission
+   service runs—before rule checks, session approvals", auto-allow / deny
+   and the prompt; `read` and `hook` permission kinds skip it. So it can't
+   tell by itself whether Copilot would have asked. Its input fields are
+   not documented **(step 1)**. A sandbox-escape request
+   (`requestSandboxBypass: true`) always prompts: our `allow` is ignored,
+   only `deny` counts.
+3. **`notification`** (CLI only, async, fire-and-forget) has
+   `notification_type` `permission_prompt` (since 1.0.26 only "when a
+   prompt is actually shown") and `elicitation_dialog`. It can't answer,
+   but it is the one signal that Copilot really is asking.
+4. **Failures.** No output / unparseable output = no output. Timeout
+   (default 30 s, `timeoutSec`): killed, the event continues, fail-open for
+   every event (since 1.0.67). Crash or non-zero exit: logged and skipped,
+   **except `preToolUse`: it denies** ("Denied by preToolUse hook (hook
+   errored)", since 1.0.57). **Exit 2 = deny** for `preToolUse` and
+   `permissionRequest`, even with `allow` on stdout (since 1.0.70).
+5. **`ask`.** `preToolUse` `ask` shows Copilot's own prompt (since 1.0.4).
+   In autopilot no prompt is shown and **`ask` is denied** (1.0.97). Under
+   `--allow-all` / `--yolo`: not documented **(step 1)**.
+6. **Questions and plans.** `ask_user` is a tool (Claude name
+   `AskUserQuestion`); no hook output can answer it (only `modifiedArgs`
+   or a deny). Plans aren't covered. So no question or plan cards.
+7. **Two input formats,** picked by the event name's case in the config:
+   camelCase (`preToolUse`) gets `sessionId`, epoch-ms `timestamp`, `cwd`,
+   `toolName` (`bash`, `powershell`, `edit`, `create`, …), `toolArgs`;
+   PascalCase (`PreToolUse`, the "VS Code" format) gets `hook_event_name`,
+   `session_id`, ISO `timestamp`, `cwd`, `tool_name` with Claude's names
+   (`bash` and `powershell` both become `Bash`), `tool_input`, and Claude
+   matcher rules (since 1.0.21 / 1.0.62).
+8. **Files.** User hooks: `~/.copilot/hooks/*.json`
+   (`%USERPROFILE%\.copilot\hooks\`), or `$COPILOT_HOME/hooks/`; also an
+   inline `hooks` key in `~/.copilot/settings.json`. Repo: `.github/hooks/`,
+   `.github/copilot/settings*.json`, and a repo's `.claude/settings*.json`
+   (never `~/.claude`). Format `{"version": 1, "hooks": {event: [entry]}}`;
+   entry `bash` / `powershell` / `command`, or `exec` + `args` (no shell,
+   CLI only), `cwd`, `env`, `timeoutSec`. A malformed item in a hooks
+   directory file is dropped; a malformed inline `settings.json` hooks key
+   is rejected whole (so we use our own file in `hooks/`).
+9. **Sandbox.** With the session sandbox on, user hooks run inside it
+   (`env` widens nothing); whether the relay can reach our pipe from there
+   **(step 1)**.
+10. **Testing without a subscription.** BYOK (GitHub changelog
+    2026-04-07): `COPILOT_PROVIDER_BASE_URL` + `COPILOT_MODEL` and
+    `COPILOT_OFFLINE=true` run with no GitHub login, no telemetry, network
+    only to the provider: a fake OpenAI-compatible model on 127.0.0.1,
+    like Codex's.
+
+Step 1 below corrects items 4 and 7: `permissionRequest` fails closed
+too, and the PascalCase `PermissionRequest` gets the camelCase input.
+
+### Step 1: confirmed in scratch (2026-10-28, Copilot 1.0.105)
+
+Audit approved (Charan, 2026-10-28). `@github/copilot@1.0.105` installed
+with `npm install --prefix` into a scratch folder; scratch `COPILOT_HOME`;
+BYOK to a fake OpenAI-compatible model on 127.0.0.1
+(`COPILOT_PROVIDER_BASE_URL`, `COPILOT_OFFLINE=true`); `OPENAI_*`,
+`ANTHROPIC_*`, `GH_*`, `GITHUB_*`, `COPILOT_*` and `CLAUDE*` variables
+cleared first. **No GitHub login was asked for.** The interactive TUI was
+driven through ConPTY; a logging hook recorded every input. Hooks lived in
+the playground's `.github/hooks/` (removed afterwards) and in the scratch
+`COPILOT_HOME/hooks/`. 74 runs.
+
+1. **`permissionRequest` doesn't say what Copilot would do.** Its input is
+   the same for a command Copilot runs without asking (`Get-Date`), one it
+   prompts for (`Set-Content`) and one its own `--deny-tool` rule refuses:
+   `hookName`, `sessionId`, `timestamp` (epoch ms), `cwd`, `toolName`
+   (`powershell`), `toolInput` (`command` only), `permissionSuggestions`
+   (always `[]`). No mode either. So Bouncer's rules print nothing for
+   Copilot (Charan's rule 1).
+2. **Any hook decision beats Copilot's own deny rules.** With
+   `--deny-tool=shell(Set-Content)` the command was refused with no hook
+   answer, but **ran** after `permissionRequest` `allow`, after
+   `preToolUse` `allow`, and after `preToolUse` `ask` answered "Yes" (a
+   "Hook permission request" dialog; `permissionRequest` then never runs).
+   Only `deny` is safe.
+3. **`ask`.** Default and `--allow-all`: the "Hook permission request"
+   dialog. `--autopilot`: "Denied by preToolUse hook (unable to ask user for
+   confirmation)". The hook can't tell which mode it is in, so `ask` can
+   cause a deny Bouncer can't predict.
+4. **Both deciding hooks fail closed** (the docs say only `preToolUse`):
+
+   | Hook output | `preToolUse` | `permissionRequest` |
+   | --- | --- | --- |
+   | nothing, `{}` | normal flow | normal flow |
+   | not JSON | normal flow | **deny** ("Permission request hook failed") |
+   | crash, exit 1 | **deny** ("hook errored") | **deny** |
+   | exit 2 (even with `allow`) | **deny** | **deny** |
+   | timeout (`timeoutSec`) | normal flow | normal flow |
+   | relay missing, `powershell` or `exec` | **deny** | **deny** |
+   | relay missing / crash / exit 2, command ends `; exit 0` | normal flow | normal flow |
+
+5. **`permissionRequest` runs in every mode** (default, `--allow-all`,
+   `--autopilot`) and its `deny` (with `message`) blocks in each:
+   "denied by a PermissionRequest hook: Denied in Bouncer".
+6. **`notification` `permission_prompt`** arrives about 1.2 s after
+   `permissionRequest`, only when Copilot really shows its prompt (not for
+   `Get-Date`, not under `--allow-all`): `message` "Run command: …",
+   `title` "Permission needed". `ask_user` gives `preToolUse` (no
+   `permissionRequest`) and `notification` `elicitation_dialog`
+   ("Information requested"); no hook output answers it.
+7. **Formats.** camelCase events get camelCase input. PascalCase
+   `PreToolUse` / `SessionStart` get the VS Code shape (`hook_event_name`,
+   `session_id`, ISO `timestamp`, `tool_name` `Bash` for PowerShell,
+   `tool_input`). PascalCase `PermissionRequest` and `Notification` get the
+   camelCase input (with `hookName` / `hook_event_name`). One file with
+   both `preToolUse` and `PreToolUse` keys keeps only one of them.
+8. **`.claude` files.** A scratch repo's `.claude/settings.json` hooks ran
+   (VS Code shape, ISO `timestamp`); the same file in a scratch home's
+   `~/.claude/settings.json` and `settings.local.json` did **not** run
+   (Copilot used that home: it made `AppData\Roaming` there). The
+   playground's `.claude/settings.local.json` (Bouncer's Claude Code
+   entries, `matcher: ""`) is rejected whole: "matcher cannot be empty".
+   **Timestamp check on real input:** every Copilot input has `timestamp`;
+   none of the 970 real Claude Code inputs in `bouncer-playground/recorded`
+   has one (nor Codex's fields in step 1 of h1).
+9. **Environment.** Hooks get the full environment (Codex strips it), so
+   `BOUNCER_ENDPOINT` reaches a debug relay; Copilot adds `COPILOT_HOOK_DIR`,
+   `COPILOT_PROJECT_DIR`, `COPILOT_CLI_BINARY_VERSION`.
+10. **Sandbox (`--sandbox`).** The hook ran inside it and its connect to a
+    named pipe failed with `EPERM`: Bouncer sees nothing from a sandboxed
+    session (the relay prints nothing, Copilot goes on as usual). The first
+    `--sandbox` run offers to install a machine-wide root certificate;
+    declined, both Root stores checked: nothing added.
+11. **User-level hooks** in `COPILOT_HOME/hooks/*.json` load with no
+    trust step (repo hooks wait for folder trust).
+12. **Lowest version.** The npm loader runs the newest build in its package
+    cache (`%LOCALAPPDATA%\copilot\pkg`) unless `COPILOT_PKG_CACHE_HOME`
+    points elsewhere; pinned per version in scratch. The suite (deny, no
+    answer → Copilot's prompt + `permission_prompt`, wrapped crash, timeout)
+    passes on 1.0.105, 1.0.97 and 1.0.67; on **1.0.66 a hook timeout is a
+    deny**. Minimum: **1.0.67** (not 1.0.98; 1.0.98's hook fix only avoids a
+    wait that 1.0.67 already turns into a timeout).
+13. **Outside scratch:** the first run unpacked 1.0.105 into the real
+    `%LOCALAPPDATA%\copilot\pkg\win32-x64\1.0.105` and the `--sandbox` run
+    made `%LOCALAPPDATA%\copilot\sandbox\packages` (the folder itself and
+    its cache file predate the test). Left in place for Charan (no deletes
+    near the real profile). Real `~/.copilot`: unchanged, file by file.
+    Real `~/.claude`: only this Claude Code session's own transcript files
+    and Claude Code's rotating `.claude.json` backups; `settings.json`
+    unchanged.
+
+### Design (revised after step 1, for Charan's OK)
+
+- **Bouncer only ever denies Copilot, or says nothing.** No `allow` (it
+  beats Copilot's deny rules), no `ask` (Yes beats them too; autopilot turns
+  it into a deny). Bouncer's rules print nothing for Copilot.
+- **Hooks installed:** `sessionStart`, `sessionEnd`, `permissionRequest`,
+  `notification`, camelCase, in our own `COPILOT_HOME/hooks/bouncer.json`.
+  No `preToolUse` (it can only add deny risk). Every command is
+  `& '<relay>' --agent copilot; exit 0` (`powershell`) /
+  `'<relay>' --agent copilot; exit 0` (`bash`), never `exec`.
+  `permissionRequest` `timeoutSec` above the relay's 110 s.
+- **What the island shows:**
+  - Risky (Bouncer's checks), guard switch on: a card with **Deny** and
+    **Let Copilot decide** (prints nothing: Copilot asks, allows or refuses
+    as it would have). In any mode, since the hook runs in all of them.
+  - `permission_prompt`: a watch-only "Copilot is asking in the terminal"
+    with the command (and Bouncer's risky line if any); no buttons.
+  - `elicitation_dialog`: watch-only "Copilot has a question in the
+    terminal". No question or plan cards.
+  - Guard off: no cards; risky requests are flagged on the watch line.
+- **Relay output:** one valid JSON line (`{"behavior":"deny","message":…}`)
+  or nothing; exit 0 always.
+- **Format:** `--agent copilot` reads camelCase only. No flag (Claude Code)
+  + a `timestamp` field → nothing.
+- **Install:** rule 6 for `COPILOT_HOME/hooks/bouncer.json`; uninstall and
+  the uninstaller remove only it; the test guard covers it.
+- **Settings / README:** "Needs Copilot CLI 1.0.67 or newer"; "Copilot
+  gets Deny only; its own rules decide the rest"; "Not seen in Copilot's
+  sandbox".
+
+### Threats
+
+1. **Bouncer causes a deny.** Fix: the `; exit 0` wrapper on every hook;
+   only valid JSON or nothing; no `preToolUse`; no `ask`. Tests: missing
+   relay, crash, exit 2, timeout, garbage → Copilot's normal flow.
+2. **Bouncer overrides Copilot's deny rules.** Fix: never `allow` / `ask`.
+   Test: a `--deny-tool` rule still refuses with Bouncer installed.
+3. **Copilot taken for Claude Code (or the reverse).** Fix: the flag; the
+   `timestamp` check; the real fixtures from step 1.
+4. **Cards Copilot would never show.** Fix: cards only for risky requests
+   under the opt-in guard; everything else watch-only.
+5. **Hostile text** (commands, `message`): `textContent`, labelled as
+   Copilot's.
+6. **Writing Copilot's settings:** rule 6; never `settings.json`,
+   `config.json`, policy folders.
+7. **Tests touching the real profile:** `COPILOT_HOME` and
+   `COPILOT_PKG_CACHE_HOME` in `hermetic()` and every real run; real
+   `~/.copilot` compared before and after; never `--sandbox` again without
+   asking (it writes `%LOCALAPPDATA%\copilot\sandbox`).
+8. **Budgets:** measure PowerShell start-up on each hook.
+
+### Done when
+
+- [x] step 1 recorded here
+- [x] design confirmed with Charan (2026-10-28, five conditions below)
+- [x] relay `--agent copilot --event <name>`: `permissionRequest` deny or
+  nothing; `notification` / session events watched; every failure prints
+  nothing, exit 0
+- [x] Claude Code's no-flag path ignores input with `timestamp`
+- [x] install / uninstall of `hooks/bouncer.json` under rule 6;
+  `COPILOT_HOME` respected; uninstaller step
+- [x] the island labels Copilot; watch-only lines; PowerShell rules for
+  `powershell`
+- [x] Settings and README name the minimum version (1.0.67) in full
+- [ ] TESTS rows; CI green on Windows and macOS (installer test too)
+- [x] end-to-end in scratch: real Copilot + fake model through the test
+  instance, incl. a `--deny-tool` rule (no real-model check: no Copilot
+  subscription)
+
+### Design approved, with conditions (Charan, 2026-10-28)
+
+Deny or nothing only; minimum 1.0.67; hooks `sessionStart`, `sessionEnd`,
+`permissionRequest`, `notification`; no `preToolUse`; every hook command
+ends in `exit 0`; the relay prints valid JSON or nothing. Conditions:
+
+1. An unanswered risky card times out to "Let Copilot decide" (nothing
+   printed), the card's limit shorter than the hook timeout: 100 s card <
+   110 s relay < 120 s `timeoutSec` (TESTS CP6).
+2. Settings, the README and BRIEF say plainly what Copilot gets (TESTS
+   CP12).
+3. **Logged: step 1 wrote outside scratch.** Run 1 unpacked Copilot 1.0.105
+   into the real `%LOCALAPPDATA%\copilot\pkg\win32-x64\1.0.105` (its npm
+   loader's package cache), and the `--sandbox` run created
+   `%LOCALAPPDATA%\copilot\sandbox` (`packages`). Charan cleans them up
+   himself. New standing rules (CLAUDE.md): package caches always in
+   scratch (`COPILOT_PKG_CACHE_HOME`, `COPILOT_CACHE_HOME`); never accept a
+   system-wide install or certificate prompt. The build's runs set both
+   caches to scratch: the real `pkg` folder still holds only 1.0.105.
+4. Bouncer never writes a `matcher` (Copilot rejects a whole settings file
+   over one empty matcher; TESTS CP10). Bouncer's Claude Code entries never
+   had one; the playground's rejected file has a hand-made `record.js`
+   group with `matcher: ""`, not Bouncer's.
+5. The relay never logs or stores hook environment variables (TESTS CP11).
+
+### Build (2026-10-28)
+
+- **Relay.** `--agent copilot --event <name>` (Copilot's `sessionStart`
+  input names no event, so the installed command does). Copilot's
+  camelCase input becomes Bouncer's line with only the session, folder,
+  tool (`powershell` → PowerShell, `bash` → Bash) and its input, or a
+  notification's type; the input must match its event (`hookName`,
+  `hook_event_name`). Output: exactly `{"behavior":"deny","message":"Denied
+  in Bouncer"}` or nothing. With no flag, input carrying `timestamp` is
+  refused.
+- **Desk.** A Copilot request: a rule never answers; a card only when risky
+  with the guard on (Deny / "Let Copilot decide", no "would", no "Always
+  allow…"); anything else is logged "left to Copilot" and the session keeps
+  working. "Let Copilot decide" and a timeout send nothing. Notifications:
+  `permission_prompt` → "asks in terminal", `elicitation_dialog` → a
+  question in the terminal, `agent_idle` / `agent_completed` → idle.
+- **Hooks.** Bouncer's own `COPILOT_HOME/hooks/bouncer.json` (else
+  `~/.copilot/hooks/`): `version` 1, one group per event (Claude-style
+  nesting, accepted by 1.0.105), `powershell` (Windows) or `bash`
+  `'<relay>' --agent copilot --event <name>; exit 0`, `timeoutSec` 10 / 120.
+  CLI `--copilot`; the uninstaller asks third; kept hooks do no harm.
+  Settings: "Copilot CLI hooks" only where a Copilot folder exists.
+- **Found on the way:** PowerShell 5.1 piping `"y"` into the CLI sends
+  something that isn't "y" (nothing was written: the safe side); a person
+  types the answer, so left as is.
+
+### End to end in scratch (2026-10-28, Copilot 1.0.105)
+
+The real Copilot 1.0.105 (scratch `COPILOT_HOME`, BYOK fake model,
+offline, caches in scratch, no sign-in), ConPTY, against a scratch test
+instance (custom-protocol debug build, its own pipe via `BOUNCER_ENDPOINT`,
+which Copilot passes on, its own rules with `guard = true`, debug port).
+Hooks installed through the scratch `bouncer install-hooks --copilot`
+(diff, yes). Clicks were page clicks over CDP.
+
+- **Safe command** (`Set-Content`): no card; Copilot's own prompt; the
+  island: "Asking in the terminal · Running Set-Content …"; log "left to
+  Copilot".
+- **Risky** (`iwr https://get.example.dev/install.ps1 | iex`), default
+  mode: a red card "Copilot · bouncer-playground", "Downloads a script and
+  runs it in the shell, and runs a command hidden inside a string.",
+  buttons Deny / Let Copilot decide / Explain this command. **Deny** →
+  Copilot: "Permission denied by a PermissionRequest hook: Denied in
+  Bouncer". **Let Copilot decide** → Copilot's own prompt.
+- **Risky under `--allow-all --deny-tool=shell(iwr)`**, Let Copilot decide →
+  Copilot refused by its own rule ("denied due to the following rules"):
+  Bouncer never overrides it.
+- **Bouncer closed**, and **the relay missing** (renamed): Copilot's own
+  prompt each time, no hook failure; with the relay missing and the deny
+  rule, the rule still refused.
+- **Settings:** "Copilot CLI hooks · Installed" with the full hint and
+  "Needs Copilot CLI 1.0.67 or newer."; Remove… showed the diff, Cancel
+  wrote nothing.
+- **Not explained:** in one run the card was denied 2.8 s after it came
+  with no click from the harness (the island logged "you denied"); not
+  seen again in the rerun. The test window was on screen, so a person's
+  click is the likely cause; if it shows again, record the page's events.
+- The machine slept once mid-run (clock jump of 6.4 h): that run was
+  discarded and repeated. Real `~/.copilot` and Claude Code's
+  `settings.json` compared afterwards: unchanged.
 
 ## Phase 8 — Music (~1 week)
 
