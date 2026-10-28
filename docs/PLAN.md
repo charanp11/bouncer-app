@@ -4652,7 +4652,8 @@ the playground's `.github/hooks/` (removed afterwards) and in the scratch
 tag on main, release workflow, draft for Charan to publish.
 
 **v0.11.0 published (Charan, 2026-10-28).** Manual checks (Charan, his own
-desktop, the installed build; Claude Code version not reported): the update
+desktop, the installed build; Claude Code 2.1.301, read with
+`claude --version` on his machine after the check): the update
 0.10.1 → 0.11.0 came through the updater (TESTS UP8); Settings shows
 0.11.0 (U11); a Claude Code session in auto mode showed in the island, its
 safe steps ran with no card (as expected in auto), and reading
@@ -4682,6 +4683,9 @@ the chat folder stayed empty).
   Bouncer only ever writes the user-level file, which Copilot never reads
   (step 1). Unflagged copies stay covered by the `timestamp` refusal.
 - TESTS R16, I8.
+
+**#62 merged (Charan, 2026-10-28); v0.11.1** (notes `docs/releases/v0.11.1.md`):
+tag on main, release workflow, draft for Charan to publish.
 
 ### Design approved, with conditions (Charan, 2026-10-28)
 
