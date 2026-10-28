@@ -8,6 +8,7 @@ use serde_json::Value;
 
 pub const CLAUDE_CODE: &str = "claude-code";
 pub const CODEX: &str = "codex";
+pub const COPILOT: &str = "copilot";
 
 /// Set by the relay (`--agent codex`) on the line it sends; any copy in the
 /// agent's own JSON is removed first.
@@ -46,6 +47,7 @@ impl Event {
         match hook.get(AGENT_FIELD) {
             None => Event::from_claude_code(hook),
             Some(v) if v == CODEX => Event::from_codex(hook, cfg!(windows)),
+            Some(v) if v == COPILOT => Event::from_copilot(hook),
             Some(_) => None,
         }
     }
@@ -94,6 +96,24 @@ impl Event {
             event.tool = Some("PowerShell".into());
         }
         Some(event)
+    }
+
+    /// Builds an event from the relay's line for Copilot CLI (already in
+    /// Claude Code's field names; a notification's type in `input`). `None`
+    /// as above.
+    pub fn from_copilot(hook: &Value) -> Option<Event> {
+        let mut event = Event::from_claude_code(hook)?;
+        event.agent = COPILOT;
+        event.mode = None;
+        event.interrupted = false;
+        Some(event)
+    }
+
+    /// A Copilot notification's type (`permission_prompt`,
+    /// `elicitation_dialog`, `agent_idle`, ...).
+    pub fn notification(&self) -> Option<&str> {
+        (self.agent == COPILOT && self.kind == "Notification")
+            .then(|| self.input.as_ref()?["notification_type"].as_str())?
     }
 
     pub fn is_permission_request(&self) -> bool {
