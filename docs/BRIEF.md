@@ -47,15 +47,16 @@ Bouncer never blocks the agent and never allows anything by default.
 
 ## 3. Features by agent
 
-| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (planned, h2) |
+| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (h2, built, not released) |
 | --- | --- | --- | --- |
-| Sessions in the island | Yes | Yes, labelled Codex | Planned |
-| Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | Deny only (see below) |
-| Rules auto-allow | Yes (auto mode) | Yes | No |
-| Risky flags | Yes | Yes (PowerShell rules on Windows) | Planned |
-| Questions and plans in the island | Yes | No | No (watch-only note) |
-| Guard every mode | Yes (opt-in) | No | Planned, Deny only |
-| Explain this command | Yes | Yes | Planned |
+| Sessions in the island | Yes | Yes, labelled Codex | Yes, labelled Copilot |
+| Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | No Allow ever; Deny on risky commands (guard on) |
+| Rules auto-allow | Yes (auto mode) | Yes | No: Copilot's own rules decide |
+| Risky flags | Yes | Yes (PowerShell rules on Windows) | Yes, on the guard's card |
+| "Asking in the terminal" | Yes | Yes | Yes (watch-only) |
+| Questions and plans in the island | Yes | No | No (watch-only "question in the terminal") |
+| Guard every mode | Yes (opt-in) | No | Yes (opt-in), Deny / "Let Copilot decide" only |
+| Explain this command | Yes | Yes | Yes, on the guard's card |
 
 Why the differences:
 
@@ -68,14 +69,18 @@ Why the differences:
   Codex strips the hook's environment and trusts each hook once in
   `/hooks`. The card shows Codex's own reason as "Codex says …", never as
   Bouncer's verdict.
-- **Copilot** (audit and step 1 done 2026-10-28, not built): its hook runs
-  for every request before Copilot's own rules, can't say whether Copilot
-  would ask, and any `allow` or `ask` from a hook overrides Copilot's own
-  deny rules. Its hooks also block the tool if they crash or print
-  rubbish. So the plan is: Bouncer only ever says Deny or nothing, every
-  hook command ends in "exit 0", risky requests get a Deny / "Let Copilot
-  decide" card under the guard, and everything else is a watch-only note.
-  Needs Copilot CLI 1.0.67+. Not seen inside Copilot's sandbox.
+- **Copilot** (roadmap h2, built 2026-10-28, waiting for Charan's OK): its
+  hook runs for every request before Copilot's own rules, can't say whether
+  Copilot would ask, and any `allow` or `ask` from a hook overrides the deny
+  rules you set in Copilot. Its hooks also block the tool if they crash or
+  print rubbish. So Bouncer only ever says Deny or nothing: watch-only, plus
+  a Deny / "Let Copilot decide" card for risky requests when Guard every
+  mode is on (unanswered, it goes after 100 s and Copilot decides). Every
+  hook command ends in "exit 0", so a missing Bouncer never blocks Copilot.
+  Bouncer installs its own file, `hooks/bouncer.json` in Copilot's folder.
+  Needs Copilot CLI 1.0.67 or newer (1.0.66 treats a slow hook as a
+  refusal). Nothing is visible inside Copilot's sandbox (`--sandbox`): its
+  hooks can't reach Bouncer there.
 
 Where Claude Code runs: the terminal, the VS Code extension and the Claude
 desktop app's Code tab all work; Claude Code on the web can't (its hooks run
@@ -84,7 +89,7 @@ in the cloud).
 ## 4. Safety model
 
 **How risk is decided.** Bouncer parses shell commands (Bash, and PowerShell
-for Codex on Windows) with its own parser. A request is flagged risky when
+for Codex and Copilot on Windows) with its own parser. A request is flagged risky when
 it: downloads a script and runs it; builds part of the command while it
 runs; hides a command inside a string; deletes outside the project; touches
 secrets (.env, keys, credentials); force-pushes; runs as administrator;
@@ -136,9 +141,10 @@ In the order they appear:
 - **Sounds**: each sound on or off.
 - **Auto-allow**: off = observe (cards say what rules would do); on = rules
   answer for you, risky still asks. Turning it on asks first.
-- **Guard every mode** (Claude Code): off by default. On: risky requests in
-  auto, accept-edits and bypass modes stop for a card; in a `claude -p` run
-  they're refused.
+- **Guard every mode**: off by default. On: Claude Code's risky requests in
+  auto, accept-edits and bypass modes stop for a card (in a `claude -p` run
+  they're refused); Copilot's risky requests get a Deny / "Let Copilot
+  decide" card in any mode.
 - **Activity history**: 30 days, local, redacted; "Delete history" (armed,
   with a confirm) is the only way to wipe it.
 - **Claude Code for chat**: shows which `claude.exe` the chat and Explain
@@ -147,6 +153,11 @@ In the order they appear:
 - **Claude Code hooks**: status, and Install… / Remove… with the diff.
 - **Codex hooks**: shown when a Codex folder exists; same as above; needs
   Codex 0.145+.
+- **Copilot CLI hooks**: shown when a Copilot folder exists (`~/.copilot`
+  or `$COPILOT_HOME`); writes Bouncer's own `hooks/bouncer.json` there with
+  the diff; says what Copilot gets (watch-only plus Deny on risky commands,
+  no Allow from Bouncer, nothing inside its sandbox); needs Copilot CLI
+  1.0.67+.
 - **Start with Windows**: off by default.
 - **Shortcut Ctrl+Alt+B**: opens Bouncer from anywhere; never approves.
 - **Check for updates**: on by default; off = no network at all.
@@ -178,12 +189,14 @@ In the order they appear:
 
 - `crates/relay/`: the `bouncer-hook` relay (std + serde_json only).
   - `src/main.rs`: reads one event, talks to the app, prints the answer
-    or nothing; the `--agent codex` flag.
+    or nothing; the `--agent codex` and `--agent copilot --event <name>`
+    flags (Copilot's camelCase input becomes the same line; deny only).
   - `src/lib.rs`: shared pipe / socket naming and limits.
   - `src/win.rs`, `src/unix.rs`: the named pipe (Windows) and Unix socket
     (macOS), with same-user checks.
   - `src/questions.rs`: Claude Code question / plan answers.
-  - `tests/`: fail-safe and end-to-end relay tests, recorded fixtures.
+  - `tests/`: fail-safe and end-to-end relay tests, recorded fixtures
+    (Claude Code's, `codex-fixtures/`, `copilot-fixtures/`).
 - `crates/core/`: everything that isn't UI.
   - `event.rs`: the events the app understands.
   - `ipc.rs`: the app's side of the pipe.
@@ -271,9 +284,13 @@ published.
 - **Agents one per release, told apart by an explicit flag**
   (`--agent codex`): the relay never guesses from the input's shape.
   Codex went first: its hook answers like Claude Code's and fails open.
-- **Copilot: Deny only** (2026-10-28 step 1): its hooks can override its
-  own deny rules and block on failure; anything more would let Bouncer
-  weaken Copilot's own safety.
+- **Copilot: Deny only** (Charan, 2026-10-28, after step 1): its hooks can
+  override its own deny rules and block on failure; anything more would let
+  Bouncer weaken Copilot's own safety. Rejected: Allow cards and rules
+  (an allow beats Copilot's deny rules), the guard through `preToolUse`
+  "ask" (a Yes beats them too, and autopilot turns it into a refusal), any
+  `preToolUse` hook (it refuses the tool when the hook fails), and cards
+  for every request (the hook can't tell whether Copilot would have asked).
 - **Character and sounds drawn in code**: nothing copied from Coucou.
 - **Repo name `bouncer-app`**: "bouncer" was taken on crates.io and npm.
 
@@ -283,9 +300,9 @@ published.
   auto modes that's rarely, unless Guard every mode is on.
 - Some questions stay in the terminal (typed answers, ambiguous options,
   while paused); approving a plan keeps the earlier permission mode.
-- Codex: allow / deny only; tested with a local test model, never a live
-  one. Copilot: not built; no Copilot subscription, so a live model can't be
-  checked.
+- Codex: allow / deny only. Copilot: watch-only plus Deny; nothing inside
+  its sandbox; rules never answer for it. Both tested with the real CLI and
+  a local test model, never a live one (no subscriptions).
 - Not code-signed: SmartScreen warns; Smart App Control blocks it.
 - No Mac release (the code is checked on macOS in CI); no Linux.
 - Explain and chat answers can be wrong; Explain costs CPU while it streams.
@@ -298,8 +315,8 @@ published.
 
 In order, one per release, each audited first:
 
-1. **h2: GitHub Copilot CLI** (current; step 1 done, design waiting for
-   Charan's OK).
+1. **h2: GitHub Copilot CLI** (current; built and tested in scratch, PR
+   waiting for Charan's OK, then a release).
 2. **More agents (h)**, one per release, each audited for whether its hooks
    can block a tool call (yes: approvals; no: watch-and-flag, labelled).
 3. **f: Ask about this session**: a read-only question about a running
