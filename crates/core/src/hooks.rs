@@ -94,9 +94,12 @@ impl Agent {
     /// Our hook entry for `event` running `relay` with `timeout`.
     fn entry(self, relay: &str, event: &str, timeout: u64) -> Value {
         match self {
-            Agent::ClaudeCode => {
-                json!({ "type": "command", "command": relay, "args": [], "timeout": timeout })
-            }
+            Agent::ClaudeCode => json!({
+                "type": "command",
+                "command": relay,
+                "args": CLAUDE_CODE_ARGS,
+                "timeout": timeout,
+            }),
             Agent::Codex => {
                 let command = codex_command(relay, cfg!(windows));
                 let mut entry =
@@ -114,6 +117,11 @@ impl Agent {
         }
     }
 }
+
+/// What Claude Code's entry passes the relay (since v0.11.1), so the relay
+/// never has to tell Claude Code apart by the input's shape. Entries with no
+/// arguments (older installs) still run, and show as `Status::Outdated`.
+pub const CLAUDE_CODE_ARGS: [&str; 2] = ["--agent", "claude-code"];
 
 /// The field Copilot runs on this OS: `powershell` on Windows, `bash`
 /// elsewhere.
@@ -443,6 +451,10 @@ pub enum Status {
     Incomplete,
     /// Every event has ours, but some point at another relay (a moved app).
     Moved,
+    /// Every event runs this relay, but some as an older Bouncer wrote them
+    /// (Claude Code's with no `--agent claude-code`): they work; a
+    /// re-install brings them up to date.
+    Outdated,
     /// None of ours.
     Missing,
 }
@@ -453,6 +465,7 @@ impl Status {
             Status::Installed => "installed",
             Status::Incomplete => "incomplete",
             Status::Moved => "moved",
+            Status::Outdated => "outdated",
             Status::Missing => "missing",
         }
     }
@@ -468,7 +481,7 @@ pub fn status_for(agent: Agent, settings: &Value, relay: &str) -> Status {
     if !installed_for(agent, settings) {
         return Status::Missing;
     }
-    let mut moved = false;
+    let (mut moved, mut outdated) = (false, false);
     for &(event, timeout) in agent.events() {
         let ours: Vec<&Value> = settings["hooks"][event]
             .as_array()
@@ -485,19 +498,29 @@ pub fn status_for(agent: Agent, settings: &Value, relay: &str) -> Status {
             want.as_object()
                 .is_some_and(|w| w.iter().all(|(k, v)| h[k] == *v))
         };
+        // An older install's entry: the same but for its (empty) arguments.
+        let old = |h: &&Value| {
+            agent == Agent::ClaudeCode
+                && h["args"] == json!([])
+                && want
+                    .as_object()
+                    .is_some_and(|w| w.iter().all(|(k, v)| k == "args" || h[k] == *v))
+        };
         if ours.is_empty() {
             return Status::Incomplete;
-        } else if !ours.iter().any(exact) {
-            if ours.iter().all(same_relay) {
-                return Status::Incomplete;
-            }
+        } else if ours.iter().any(exact) {
+        } else if ours.iter().any(old) {
+            outdated = true;
+        } else if ours.iter().all(same_relay) {
+            return Status::Incomplete;
+        } else {
             moved = true;
         }
     }
-    if moved {
-        Status::Moved
-    } else {
-        Status::Installed
+    match (moved, outdated) {
+        (true, _) => Status::Moved,
+        (false, true) => Status::Outdated,
+        (false, false) => Status::Installed,
     }
 }
 
@@ -732,7 +755,7 @@ mod tests {
                 .collect();
             assert_eq!(ours.len(), 1, "{event}");
             assert_eq!(ours[0]["command"], RELAY);
-            assert_eq!(ours[0]["args"], json!([]));
+            assert_eq!(ours[0]["args"], json!(CLAUDE_CODE_ARGS));
             assert_eq!(ours[0]["timeout"], timeout);
         }
         assert_eq!(
@@ -900,6 +923,25 @@ mod tests {
             }
         }
         assert_eq!(status(&old, RELAY), Status::Incomplete);
+        // An older Bouncer's entries (no `--agent claude-code`): outdated,
+        // and a re-install makes them current.
+        let mut before = s.clone();
+        for groups in before["hooks"].as_object_mut().unwrap().values_mut() {
+            for group in groups.as_array_mut().unwrap() {
+                for hook in group["hooks"].as_array_mut().unwrap() {
+                    if is_ours(hook) {
+                        hook["args"] = json!([]);
+                    }
+                }
+            }
+        }
+        assert_eq!(status(&before, RELAY), Status::Outdated);
+        assert_eq!(
+            status(&before, r"D:\elsewhere\bouncer-hook.exe"),
+            Status::Moved
+        );
+        install(&mut before, RELAY).unwrap();
+        assert_eq!(status(&before, RELAY), Status::Installed);
         // Only a lookalike: missing.
         let fake =
             json!({ "hooks": { "Stop": [{ "hooks": [{ "command": "bouncer-hook-extra" }] }] } });
