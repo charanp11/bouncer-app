@@ -4651,6 +4651,38 @@ the playground's `.github/hooks/` (removed afterwards) and in the scratch
 **#60 merged (Charan, 2026-10-28); v0.11.0** (notes `docs/releases/v0.11.0.md`):
 tag on main, release workflow, draft for Charan to publish.
 
+**v0.11.0 published (Charan, 2026-10-28).** Manual checks (Charan, his own
+desktop, the installed build; Claude Code version not reported): the update
+0.10.1 → 0.11.0 came through the updater (TESTS UP8); Settings shows
+0.11.0 (U11); a Claude Code session in auto mode showed in the island, its
+safe steps ran with no card (as expected in auto), and reading
+`~/.claude/settings.json` got a risky card ("Touches Claude Code's own
+settings"), which he denied (G4).
+
+### Claude Code flag (v0.11.1, Charan 2026-10-28)
+
+Hardening after h2: the no-flag `timestamp` refusal would silently hide
+Claude Code if it ever added a `timestamp` field. So installs now write
+Claude Code's entry with `"args": ["--agent", "claude-code"]`; the relay
+treats flagged input as Claude Code's whatever it carries, and refuses
+only no-flag input with a `timestamp` (older installs keep working).
+Claude Code 2.1.301 passes the entry's `args` (checked: a `claude -p` run
+in the playground's empty chat folder, `CLAUDE_CONFIG_DIR` the test
+config, `--strict-mcp-config`, no tools, a scratch logging hook through
+`--settings`: SessionStart and UserPromptSubmit saw `--agent claude-code`;
+the chat folder stayed empty).
+
+- **Settings:** older entries (no arguments) show as **"Update needed"**
+  with Re-install…, not rewritten in place: an update writing
+  `~/.claude/settings.json` without the diff and a yes would break rule 6.
+  Re-install shows the one-line change per event.
+- **Trade-off (known):** a flagged Claude Code entry copied by hand into a
+  repository's `.claude/settings.json` would be run by Copilot CLI and read
+  as Claude Code (Copilot's VS Code-style input has Claude Code's shape).
+  Bouncer only ever writes the user-level file, which Copilot never reads
+  (step 1). Unflagged copies stay covered by the `timestamp` refusal.
+- TESTS R16, I8.
+
 ### Design approved, with conditions (Charan, 2026-10-28)
 
 Deny or nothing only; minimum 1.0.67; hooks `sessionStart`, `sessionEnd`,
