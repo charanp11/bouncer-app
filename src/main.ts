@@ -82,7 +82,7 @@ type Prefs = { size: string; sound: boolean; style: Style; volume: number; sound
 /** Read-only facts for the settings screen (asked for when it opens). */
 type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown" | "absent";
 /** `autostart`: null where it isn't offered (macOS for now). */
-type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
+type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; copilotHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
 type HooksChange = { id: string; path: string; diff: string; install?: boolean };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
@@ -130,7 +130,10 @@ const GREET_MS = 2500;
 const DONE_MS = 2800;
 const OPEN_MS = 320;
 const CLOSE_MS = 200;
-const AGENTS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const AGENTS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot" };
+/** Copilot's card never allows (a hook's allow beats Copilot's own deny
+ * rules): its second button sends nothing, and Copilot decides. */
+const LET_COPILOT = "Let Copilot decide";
 /** Requests approved with the diff in view (the wide "Approve an edit"). */
 const EDITS = new Set(["Edit", "MultiEdit"]);
 const ORDER: Record<string, number> = {
@@ -673,7 +676,10 @@ function cardText(request: Request): string {
 function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const c = el("section", request.risk ? "card risky" : "card");
   if (done !== undefined) {
-    const text = toast?.text ?? (done ? "Allowed. Back to work." : "Denied. Claude Code was told no.");
+    const name = AGENTS[request.agent] ?? request.agent;
+    const copilot = request.agent === "copilot";
+    const text =
+      toast?.text ?? (done ? (copilot ? "Left to Copilot: its own rules decide." : "Allowed. Back to work.") : `Denied. ${name} was told no.`);
     c.append(el("div", `toast ${done ? "ok" : "no"}`, text));
     return c;
   }
@@ -707,7 +713,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
     c.append(alwaysPreview(request, offer, current?.rules.mode ?? "observe"));
   } else {
     const actions = el("div", "actions");
-    actions.append(...answerButtons(request, "Allow once"));
+    actions.append(...answerButtons(request, request.agent === "copilot" ? LET_COPILOT : "Allow once"));
     if (offer) actions.append(alwaysButton(request));
     c.append(actions);
   }
@@ -1198,6 +1204,7 @@ function renderSettings(view: View, state: BallState) {
 
   list.append(hooksRow(about?.hooks, "claude-code"));
   if (about?.codexHooks && about.codexHooks !== "absent") list.append(hooksRow(about.codexHooks, "codex"));
+  if (about?.copilotHooks && about.copilotHooks !== "absent") list.append(hooksRow(about.copilotHooks, "copilot"));
   if (typeof about?.autostart === "boolean") list.append(autostartRow(about.autostart));
   list.append(shortcutRow(prefs.shortcut, !!about?.shortcutTaken));
   list.append(updatesRow(prefs.updates));
@@ -2317,7 +2324,7 @@ function autostartRow(on: boolean): HTMLElement {
   return setRow("Start with Windows", [el("span", "", on ? "On" : "Off"), sw], "Off by default. Opens Bouncer when you sign in.");
 }
 
-type HookAgent = "claude-code" | "codex";
+type HookAgent = "claude-code" | "codex" | "copilot";
 
 const HOOK_LABEL: Record<HookStatus, string> = {
   installed: "Installed",
@@ -2345,16 +2352,32 @@ const CODEX_HINT: Partial<Record<HookStatus, string>> = {
 const CODEX_MIN = "Needs Codex 0.145 or newer; older versions ignore these hooks.";
 /** Codex runs a new hook only after the user trusts it, once. */
 const CODEX_TRUST = "Codex asks you to trust these hooks once: open Codex and choose “Trust all and continue” (or review them in /hooks).";
+/** What Copilot CLI gets (PLAN roadmap h2; the README says the same). */
+const COPILOT_HINT: Partial<Record<HookStatus, string>> = {
+  installed:
+    "Watch-only, plus Deny on risky commands with Guard every mode on. Bouncer never allows for Copilot: its own rules and prompt decide. Nothing shows from inside Copilot's sandbox.",
+  missing: "Until they're in, Bouncer doesn't see Copilot CLI.",
+  unknown: "Couldn't read Bouncer's Copilot hooks file.",
+};
+/** Hook timeouts fail open from 1.0.67 (1.0.66 denies; PLAN, step 1). */
+const COPILOT_MIN = "Needs Copilot CLI 1.0.67 or newer.";
+/** Each agent's Settings name, diff title, extra hints and key prefix. */
+const HOOK_AGENT: Record<HookAgent, { name: string; title: string; hint?: Partial<Record<HookStatus, string>>; min?: string; prefix: string }> = {
+  "claude-code": { name: "Claude Code hooks", title: "Changes to Claude Code's settings", prefix: "" },
+  codex: { name: "Codex hooks", title: "Changes to Codex's hooks", hint: CODEX_HINT, min: CODEX_MIN, prefix: "codex-" },
+  copilot: { name: "Copilot CLI hooks", title: "Changes to Bouncer's Copilot hooks file", hint: COPILOT_HINT, min: COPILOT_MIN, prefix: "copilot-" },
+};
 
 /** Settings' "Claude Code hooks" (or "Codex hooks"): status, then install /
  * re-install / remove. Nothing is written until the diff has been shown and
  * its armed Confirm clicked (rule 6); the backend keeps a dated backup. */
 function hooksRow(status: HookStatus | undefined, agent: HookAgent): HTMLElement {
   const codex = agent === "codex";
-  const prefix = codex ? "codex-" : "";
-  const hint = status ? (codex ? `${CODEX_HINT[status] ?? HOOK_HINT[status]} ${CODEX_MIN}` : HOOK_HINT[status]) : undefined;
+  const info = HOOK_AGENT[agent];
+  const prefix = info.prefix;
+  const hint = status ? (info.min ? `${info.hint?.[status] ?? HOOK_HINT[status]} ${info.min}` : HOOK_HINT[status]) : undefined;
   const row = setRow(
-    codex ? "Codex hooks" : "Claude Code hooks",
+    info.name,
     [el("span", `status${status === "installed" ? "" : " off"}`, status ? HOOK_LABEL[status] : "…")],
     hint,
   );
@@ -2362,7 +2385,7 @@ function hooksRow(status: HookStatus | undefined, agent: HookAgent): HTMLElement
   if (hooksShown && mine) {
     const shown = hooksShown;
     const box = el("div", "confirm");
-    box.append(el("b", "", codex ? "Changes to Codex's hooks" : "Changes to Claude Code's settings"));
+    box.append(el("b", "", info.title));
     const path = el("pre", "cmd");
     agentText(path, shown.path);
     const diff = el("pre", "cmd diff");

@@ -1,7 +1,7 @@
 # Bouncer
 
 **The security guard for coding agents.** A free, open-source desktop
-companion for Claude Code and Codex: it watches your sessions, lets safe actions
+companion for Claude Code, Codex and GitHub Copilot CLI: it watches your sessions, lets safe actions
 through under rules you control, stops risky ones at the door with a plain
 reason, and never blocks the agent.
 
@@ -113,8 +113,9 @@ Settings → Apps → Installed apps → Bouncer → Uninstall.
   you're installing Bouncer again next. Kept hooks point at a program that's
   gone, so Claude Code shows a hook error on each event and carries on,
   asking in its own prompt; remove them later from a reinstalled Bouncer, or
-  by hand. Then the same for Codex's `hooks.json`, if it has Bouncer's
-  entries.
+  by hand. Then the same for Codex's `hooks.json` and Copilot's
+  `hooks/bouncer.json`, if they have Bouncer's entries (kept Copilot hooks
+  do no harm: Copilot carries on as usual).
 - **"Delete the application data".** Unticked by default: your rules,
   settings and history (`%APPDATA%\Bouncer`) stay for next time. Ticked, that
   folder and Bouncer's WebView2 data folder are deleted. Nothing else is.
@@ -164,6 +165,37 @@ backup, as for Claude Code. The command line also works:
 - **Tested without a live model.** Bouncer was tested with the real Codex
   0.163.0 and a local test model; not yet with a live model.
 
+## GitHub Copilot CLI
+
+Bouncer also watches the [GitHub Copilot CLI](https://github.com/github/copilot-cli).
+**It needs Copilot CLI 1.0.67 or newer** (older versions treat a slow hook
+as a refusal). Settings shows **Copilot CLI hooks** when there's a Copilot
+folder (`~/.copilot`, or `$COPILOT_HOME`): **Install…** shows the exact
+file it writes, `hooks/bouncer.json` in that folder, and **Write changes**
+saves it. The command line also works: `bouncer install-hooks --copilot`.
+
+What Copilot gets is less than Claude Code, on purpose:
+
+- **Watch-only, plus Deny.** Copilot's sessions show in the island, and when
+  Copilot asks in its terminal the island says so. Bouncer never allows
+  anything for Copilot and its rules never answer for it: Copilot's hooks
+  run before its own rules, and an "allow" from a hook would override the
+  deny rules you set in Copilot. So Copilot's own rules and prompt decide.
+- **Deny on risky commands.** With Settings → **Guard every mode** on, a
+  risky request gets a card with **Deny** and **Let Copilot decide** (which
+  sends nothing). Unanswered, the card goes after 100 seconds and Copilot
+  decides.
+- **No questions or plans** in the island: Copilot's hooks can't answer
+  them. The island shows that Copilot has a question in the terminal.
+- **Nothing visible inside Copilot's sandbox.** In a `--sandbox` session the
+  hooks can't reach Bouncer, so Bouncer sees nothing and Copilot carries on
+  as usual.
+- **Fail-safe.** Every hook command ends in `exit 0`, so a closed, missing
+  or broken Bouncer never makes Copilot refuse a tool.
+- **Tested without a live model.** Tested with the real Copilot CLI 1.0.105
+  (and 1.0.97, 1.0.67) and a local test model, with no GitHub sign-in; not
+  yet with a live model.
+
 ## What it can't do
 
 - **It can only approve or deny when Claude Code asks.** In
@@ -178,8 +210,10 @@ backup, as for Claude Code. The command line also works:
   instead. Safe requests in those modes still run unasked, and Bouncer never
   allows or denies anything on its own. Guard every mode is Claude Code only:
   Codex's hooks can't make it ask.
-- **Claude Code and Codex for now.** Other agents come one per release. For
-  Codex, Bouncer only allows or denies (see [Codex](#codex)).
+- **Claude Code, Codex and Copilot CLI for now.** Other agents come one per
+  release. For Codex, Bouncer only allows or denies (see [Codex](#codex));
+  for Copilot it is watch-only, plus Deny (see
+  [GitHub Copilot CLI](#github-copilot-cli)).
 - **Some questions stay in the terminal.** Typing your own answer ("Type
   something"), questions Bouncer can't show unambiguously (for example a
   multi-select option whose label contains ", "), and any question while
