@@ -132,6 +132,37 @@ fn malformed_or_huge_input_exits_silent() {
     }
 }
 
+/// What `install-hooks` writes for Claude Code since v0.11.1 runs the relay
+/// as Claude Code (Claude Code 2.1.301 passes the entry's `args`, checked by
+/// hand: PLAN, roadmap h2, "Claude Code flag").
+#[test]
+fn flagged_claude_code_hooks_work_like_unflagged_ones_and_keep_a_timestamp() {
+    let flag = ["--agent", "claude-code"];
+    let (seen, path) = recording("claude-code-flag", Decision::Allow);
+    for args in [&flag[..], &[]] {
+        let out = spawn_relay_with(&path, &event("f", "PermissionRequest"), args)
+            .wait_with_output()
+            .unwrap();
+        assert_eq!(
+            stdout_json(&out)["hookSpecificOutput"]["decision"]["behavior"],
+            "allow",
+            "{args:?}"
+        );
+    }
+    // A `timestamp` (if Claude Code ever sends one): flagged, still Claude
+    // Code's and answered; unflagged, refused (Copilot's VS Code style).
+    let stamped = br#"{"session_id":"f","cwd":"/p","hook_event_name":"PermissionRequest","timestamp":"2026-11-01T00:00:00.000Z","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
+    let out = spawn_relay_with(&path, stamped, &flag)
+        .wait_with_output()
+        .unwrap();
+    assert_eq!(
+        stdout_json(&out)["hookSpecificOutput"]["decision"]["behavior"],
+        "allow"
+    );
+    assert_silent(&relay(&path, stamped));
+    wait_for(&seen, 3);
+}
+
 #[test]
 fn permission_answers_print_the_documented_json() {
     let cases = [

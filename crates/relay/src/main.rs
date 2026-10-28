@@ -1,7 +1,8 @@
 //! Claude Code (and Codex, and Copilot CLI) hook relay.
 //!
 //! Reads one hook event on stdin and forwards it to the Bouncer app. No
-//! arguments: Claude Code. `--agent codex`: Codex (its line is marked so,
+//! arguments, or `--agent claude-code` (what installs write since v0.11.1):
+//! Claude Code. `--agent codex`: Codex (its line is marked so,
 //! and it only ever gets allow / deny). `--agent copilot --event <name>`:
 //! GitHub Copilot CLI (its camelCase input becomes the same line, marked
 //! so, and it only ever gets deny). Any other arguments: nothing at all.
@@ -45,7 +46,10 @@ const COPILOT_EVENTS: &[(&str, &str)] = &[
 /// Which agent's hook ran this relay, from its command line.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Agent {
+    /// Claude Code, named on the command line (`--agent claude-code`).
     ClaudeCode,
+    /// No arguments: a Claude Code hook installed before v0.11.1.
+    Unflagged,
     Codex,
     /// Copilot CLI, with the event its hook was installed for (an entry of
     /// `COPILOT_EVENTS`).
@@ -53,12 +57,14 @@ enum Agent {
 }
 
 impl Agent {
-    /// No arguments: Claude Code; exactly `--agent codex`: Codex; exactly
+    /// No arguments: Claude Code (an older install); exactly `--agent
+    /// claude-code`: Claude Code; exactly `--agent codex`: Codex; exactly
     /// `--agent copilot --event <one of COPILOT_EVENTS>`: Copilot; anything
     /// else: `None` (the relay then does nothing).
     fn from_args(args: &[String]) -> Option<Agent> {
         match args {
-            [] => Some(Agent::ClaudeCode),
+            [] => Some(Agent::Unflagged),
+            [flag, name] if flag == "--agent" && name == "claude-code" => Some(Agent::ClaudeCode),
             [flag, name] if flag == "--agent" && name == "codex" => Some(Agent::Codex),
             [flag, name, e, event] if flag == "--agent" && name == "copilot" && e == "--event" => {
                 let &(camel, kind) = COPILOT_EVENTS.iter().find(|(c, _)| c == event)?;
@@ -207,8 +213,10 @@ fn decision_json(answer: &str, tool: Option<&str>, input: &Value) -> Option<Stri
 /// it's too big, not a JSON object, or has no event name. The agent's mark
 /// comes only from the relay's own command line: any copy in the input goes.
 /// With no flag, input carrying a `timestamp` is refused: Claude Code never
-/// sends one and every Copilot input does (Copilot runs a repository's
-/// `.claude/settings.json` hooks with input in Claude Code's shape).
+/// sent one and every Copilot input does (Copilot runs a repository's
+/// `.claude/settings.json` hooks with input in Claude Code's shape). With
+/// `--agent claude-code` the input is Claude Code's whatever it carries, so
+/// a `timestamp` Claude Code may add one day never hides it.
 fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     let mut raw = Vec::new();
     input.take(MAX_INPUT + 1).read_to_end(&mut raw).ok()?;
@@ -222,7 +230,7 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     }
     let map = payload.as_object_mut()?;
     map.get("hook_event_name")?.as_str()?;
-    if agent == Agent::ClaudeCode && map.contains_key("timestamp") {
+    if agent == Agent::Unflagged && map.contains_key("timestamp") {
         return None;
     }
     map.remove(AGENT_FIELD);
@@ -307,19 +315,22 @@ mod tests {
     use super::*;
 
     fn read_event_claude(input: &[u8]) -> Option<(String, Value)> {
-        read_event(input, Agent::ClaudeCode)
+        read_event(input, Agent::Unflagged)
     }
 
     #[test]
     fn only_no_arguments_or_exactly_agent_codex_run() {
         let args =
             |a: &[&str]| Agent::from_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
-        assert_eq!(args(&[]), Some(Agent::ClaudeCode));
+        assert_eq!(args(&[]), Some(Agent::Unflagged));
+        assert_eq!(args(&["--agent", "claude-code"]), Some(Agent::ClaudeCode));
         assert_eq!(args(&["--agent", "codex"]), Some(Agent::Codex));
         for bad in [
             &["--agent"][..],
             &["--agent", "Codex"],
-            &["--agent", "claude-code"],
+            &["--agent", "claude-code", "x"],
+            &["--agent", "Claude-Code"],
+            &["--agent", "claude"],
             &["--agent", "codex", "x"],
             &["--agent=codex"],
             &["codex"],
@@ -606,6 +617,23 @@ mod tests {
         );
         let claude = br#"{"hook_event_name":"PreToolUse","session_id":"v","cwd":"/p","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
         assert!(read_event_claude(&claude[..]).is_some());
+    }
+
+    /// `--agent claude-code` (installs since v0.11.1): always Claude Code's,
+    /// a `timestamp` included, unmarked like an older install's line.
+    #[test]
+    fn flagged_claude_code_input_is_claude_codes_even_with_a_timestamp() {
+        let vs = br#"{"hook_event_name":"PreToolUse","session_id":"v","timestamp":"2026-10-28T07:40:06.872Z","cwd":"/p","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
+        let (line, event) = read_event(&vs[..], Agent::ClaudeCode).unwrap();
+        assert_eq!(event.get(AGENT_FIELD), None);
+        assert_eq!(event["timestamp"], "2026-10-28T07:40:06.872Z");
+        let plain = br#"{"hook_event_name":"PreToolUse","session_id":"v","cwd":"/p"}"#;
+        assert_eq!(
+            read_event(&plain[..], Agent::ClaudeCode).unwrap().0,
+            read_event(&plain[..], Agent::Unflagged).unwrap().0,
+            "the same line as before"
+        );
+        assert!(line.ends_with('\n'));
     }
 
     #[test]
