@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.10.1, 2026-10-28
+Last updated: v0.11.0, 2026-10-28
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -47,7 +47,7 @@ Bouncer never blocks the agent and never allows anything by default.
 
 ## 3. Features by agent
 
-| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (h2, built, not released) |
+| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (v0.11.0) |
 | --- | --- | --- | --- |
 | Sessions in the island | Yes | Yes, labelled Codex | Yes, labelled Copilot |
 | Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | No Allow ever; Deny on risky commands (guard on) |
@@ -69,7 +69,7 @@ Why the differences:
   Codex strips the hook's environment and trusts each hook once in
   `/hooks`. The card shows Codex's own reason as "Codex says …", never as
   Bouncer's verdict.
-- **Copilot** (roadmap h2, built 2026-10-28, waiting for Charan's OK): its
+- **Copilot** (v0.11.0, roadmap h2): its
   hook runs for every request before Copilot's own rules, can't say whether
   Copilot would ask, and any `allow` or `ask` from a hook overrides the deny
   rules you set in Copilot. Its hooks also block the tool if they crash or
@@ -241,6 +241,9 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
+- **v0.11.0** (2026-10-28): GitHub Copilot CLI support: watch-only plus
+  Deny on risky commands (Guard every mode), no Allow from Bouncer, nothing
+  inside Copilot's sandbox; needs Copilot CLI 1.0.67+.
 - **v0.10.1** (2026-10-21, published 2026-10-22): every Settings hint
   wraps (the Codex hint was cut).
 - **v0.10.0** (2026-10-21): Codex CLI support (cards, rules, risk checks,
@@ -315,12 +318,10 @@ published.
 
 In order, one per release, each audited first:
 
-1. **h2: GitHub Copilot CLI** (current; built and tested in scratch, PR
-   waiting for Charan's OK, then a release).
-2. **More agents (h)**, one per release, each audited for whether its hooks
+1. **More agents (h)**, one per release, each audited for whether its hooks
    can block a tool call (yes: approvals; no: watch-and-flag, labelled).
-3. **f: Ask about this session**: a read-only question about a running
+2. **f: Ask about this session**: a read-only question about a running
    session.
-4. **g: Mac release** (needs a real Mac).
-5. **e: Music**, within the motion and CPU budget.
-6. **i: Linux** (optional).
+3. **g: Mac release** (needs a real Mac).
+4. **e: Music**, within the motion and CPU budget.
+5. **i: Linux** (optional).

@@ -4643,10 +4643,13 @@ the playground's `.github/hooks/` (removed afterwards) and in the scratch
 - [x] the island labels Copilot; watch-only lines; PowerShell rules for
   `powershell`
 - [x] Settings and README name the minimum version (1.0.67) in full
-- [ ] TESTS rows; CI green on Windows and macOS (installer test too)
+- [x] TESTS rows; CI green on Windows and macOS (#60, all 7 checks incl. the installer test)
 - [x] end-to-end in scratch: real Copilot + fake model through the test
   instance, incl. a `--deny-tool` rule (no real-model check: no Copilot
   subscription)
+
+**#60 merged (Charan, 2026-10-28); v0.11.0** (notes `docs/releases/v0.11.0.md`):
+tag on main, release workflow, draft for Charan to publish.
 
 ### Design approved, with conditions (Charan, 2026-10-28)
 
@@ -4726,10 +4729,9 @@ Hooks installed through the scratch `bouncer install-hooks --copilot`
 - **Settings:** "Copilot CLI hooks · Installed" with the full hint and
   "Needs Copilot CLI 1.0.67 or newer."; Remove… showed the diff, Cancel
   wrote nothing.
-- **Not explained:** in one run the card was denied 2.8 s after it came
-  with no click from the harness (the island logged "you denied"); not
-  seen again in the rerun. The test window was on screen, so a person's
-  click is the likely cause; if it shows again, record the page's events.
+- In one run the card was denied 2.8 s after it came with no click from
+  the harness (the island logged "you denied"): Charan's own click, he was
+  using the PC (Charan, 2026-10-28). Not a bug.
 - The machine slept once mid-run (clock jump of 6.4 h): that run was
   discarded and repeated. Real `~/.copilot` and Claude Code's
   `settings.json` compared afterwards: unchanged.
