@@ -4687,6 +4687,15 @@ the chat folder stayed empty).
 **#62 merged (Charan, 2026-10-28); v0.11.1** (notes `docs/releases/v0.11.1.md`):
 tag on main, release workflow, draft for Charan to publish.
 
+**v0.11.1 published (Charan, 2026-10-28).** Manual checks (Charan, his own
+desktop, the installed build; Claude Code 2.1.301): the update 0.11.0 →
+0.11.1 came through the updater (TESTS UP8); Settings shows 0.11.1 (U11);
+Claude Code hooks showed "Update needed", Re-install showed only the
+`args` change per event, and after Write changes the row shows Installed,
+with the backup written (I8); a fresh Claude Code session with the flagged
+hook showed in the island (R16), and reading `~/.claude/settings.json` got
+the risky card, which he denied (G4).
+
 ### Design approved, with conditions (Charan, 2026-10-28)
 
 Deny or nothing only; minimum 1.0.67; hooks `sessionStart`, `sessionEnd`,
