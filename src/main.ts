@@ -80,7 +80,7 @@ type Away = {
 type Flash = { n: number; at_ms: number; strong: string; rest: string; badge: string; risk: boolean };
 type Prefs = { size: string; sound: boolean; style: Style; volume: number; sounds: Partial<Record<Cue, boolean>>; shortcut: boolean; updates: boolean };
 /** Read-only facts for the settings screen (asked for when it opens). */
-type HookStatus = "installed" | "incomplete" | "moved" | "missing" | "unknown" | "absent";
+type HookStatus = "installed" | "incomplete" | "moved" | "outdated" | "missing" | "unknown" | "absent";
 /** `autostart`: null where it isn't offered (macOS for now). */
 type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; copilotHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
@@ -2330,6 +2330,7 @@ const HOOK_LABEL: Record<HookStatus, string> = {
   installed: "Installed",
   incomplete: "Incomplete",
   moved: "Another copy",
+  outdated: "Update needed",
   missing: "Not installed",
   unknown: "Unknown",
   absent: "No Codex",
@@ -2338,6 +2339,7 @@ const HOOK_HINT: Record<HookStatus, string> = {
   installed: "Claude Code sends every event to Bouncer.",
   incomplete: "Some events don't reach Bouncer: re-install to fix.",
   moved: "They run a Bouncer from another folder: re-install to fix.",
+  outdated: "They work, but as an older Bouncer wrote them: re-install so Bouncer always knows they're Claude Code's.",
   missing: "Until they're in, Claude Code asks in its terminal.",
   unknown: "Couldn't read Claude Code's settings.",
   absent: "",
@@ -2447,7 +2449,7 @@ function hooksRow(status: HookStatus | undefined, agent: HookAgent): HTMLElement
   };
   const buttons: HTMLElement[] = [];
   if (status === "missing") buttons.push(offer("Install…", true, `${prefix}hooks`));
-  if (status === "incomplete" || status === "moved") buttons.push(offer("Re-install…", true, `${prefix}hooks`));
+  if (status === "incomplete" || status === "moved" || status === "outdated") buttons.push(offer("Re-install…", true, `${prefix}hooks`));
   if (status && status !== "missing" && status !== "unknown" && status !== "absent") buttons.push(offer("Remove…", false, `${prefix}hooks-remove`));
   if (buttons.length) {
     const actions = el("div", "actions");
