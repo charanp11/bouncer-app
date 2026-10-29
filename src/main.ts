@@ -82,7 +82,7 @@ type Prefs = { size: string; sound: boolean; style: Style; volume: number; sound
 /** Read-only facts for the settings screen (asked for when it opens). */
 type HookStatus = "installed" | "incomplete" | "moved" | "outdated" | "missing" | "unknown" | "absent";
 /** `autostart`: null where it isn't offered (macOS for now). */
-type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; copilotHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
+type About = { version?: string; rules: string | null; hooks: HookStatus; codexHooks?: HookStatus; copilotHooks?: HookStatus; cursorHooks?: HookStatus; autostart: boolean | null; shortcutTaken: boolean };
 /** A hooks change the backend offers: written only by its id, after Confirm. */
 type HooksChange = { id: string; path: string; diff: string; install?: boolean };
 /** Which claude chat would run (asked for when the panel or Settings opens). */
@@ -130,10 +130,11 @@ const GREET_MS = 2500;
 const DONE_MS = 2800;
 const OPEN_MS = 320;
 const CLOSE_MS = 200;
-const AGENTS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot" };
-/** Copilot's card never allows (a hook's allow beats Copilot's own deny
- * rules): its second button sends nothing, and Copilot decides. */
-const LET_COPILOT = "Let Copilot decide";
+const AGENTS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot", cursor: "Cursor" };
+/** Copilot's and Cursor's cards never allow (their hooks run for every
+ * request; for Copilot an allow even beats its own deny rules): the second
+ * button sends nothing, and the agent decides. */
+const LET_DECIDE: Record<string, string> = { copilot: "Let Copilot decide", cursor: "Let Cursor decide" };
 /** Requests approved with the diff in view (the wide "Approve an edit"). */
 const EDITS = new Set(["Edit", "MultiEdit"]);
 const ORDER: Record<string, number> = {
@@ -677,9 +678,9 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const c = el("section", request.risk ? "card risky" : "card");
   if (done !== undefined) {
     const name = AGENTS[request.agent] ?? request.agent;
-    const copilot = request.agent === "copilot";
+    const left = request.agent in LET_DECIDE;
     const text =
-      toast?.text ?? (done ? (copilot ? "Left to Copilot: its own rules decide." : "Allowed. Back to work.") : `Denied. ${name} was told no.`);
+      toast?.text ?? (done ? (left ? `Left to ${name}: its own rules decide.` : "Allowed. Back to work.") : `Denied. ${name} was told no.`);
     c.append(el("div", `toast ${done ? "ok" : "no"}`, text));
     return c;
   }
@@ -713,7 +714,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
     c.append(alwaysPreview(request, offer, current?.rules.mode ?? "observe"));
   } else {
     const actions = el("div", "actions");
-    actions.append(...answerButtons(request, request.agent === "copilot" ? LET_COPILOT : "Allow once"));
+    actions.append(...answerButtons(request, LET_DECIDE[request.agent] ?? "Allow once"));
     if (offer) actions.append(alwaysButton(request));
     c.append(actions);
   }
@@ -1205,6 +1206,7 @@ function renderSettings(view: View, state: BallState) {
   list.append(hooksRow(about?.hooks, "claude-code"));
   if (about?.codexHooks && about.codexHooks !== "absent") list.append(hooksRow(about.codexHooks, "codex"));
   if (about?.copilotHooks && about.copilotHooks !== "absent") list.append(hooksRow(about.copilotHooks, "copilot"));
+  if (about?.cursorHooks && about.cursorHooks !== "absent") list.append(hooksRow(about.cursorHooks, "cursor"));
   if (typeof about?.autostart === "boolean") list.append(autostartRow(about.autostart));
   list.append(shortcutRow(prefs.shortcut, !!about?.shortcutTaken));
   list.append(updatesRow(prefs.updates));
@@ -2324,7 +2326,7 @@ function autostartRow(on: boolean): HTMLElement {
   return setRow("Start with Windows", [el("span", "", on ? "On" : "Off"), sw], "Off by default. Opens Bouncer when you sign in.");
 }
 
-type HookAgent = "claude-code" | "codex" | "copilot";
+type HookAgent = "claude-code" | "codex" | "copilot" | "cursor";
 
 const HOOK_LABEL: Record<HookStatus, string> = {
   installed: "Installed",
@@ -2363,11 +2365,21 @@ const COPILOT_HINT: Partial<Record<HookStatus, string>> = {
 };
 /** Hook timeouts fail open from 1.0.67 (1.0.66 denies; PLAN, step 1). */
 const COPILOT_MIN = "Needs Copilot CLI 1.0.67 or newer.";
+/** What Cursor CLI gets (PLAN roadmap h3; the README says the same). */
+const CURSOR_HINT: Partial<Record<HookStatus, string>> = {
+  installed:
+    "Watch-only, plus Deny on risky shell commands with Guard every mode on. Bouncer never allows for Cursor: its own rules and prompt decide. Your own Cursor hooks stay as they are.",
+  missing: "Until they're in, Bouncer doesn't see Cursor CLI.",
+  unknown: "Couldn't read Cursor's hooks file.",
+};
+/** The version tested in scratch (PLAN roadmap h3). */
+const CURSOR_MIN = "Tested with Cursor CLI 2026.10.22.";
 /** Each agent's Settings name, diff title, extra hints and key prefix. */
 const HOOK_AGENT: Record<HookAgent, { name: string; title: string; hint?: Partial<Record<HookStatus, string>>; min?: string; prefix: string }> = {
   "claude-code": { name: "Claude Code hooks", title: "Changes to Claude Code's settings", prefix: "" },
   codex: { name: "Codex hooks", title: "Changes to Codex's hooks", hint: CODEX_HINT, min: CODEX_MIN, prefix: "codex-" },
   copilot: { name: "Copilot CLI hooks", title: "Changes to Bouncer's Copilot hooks file", hint: COPILOT_HINT, min: COPILOT_MIN, prefix: "copilot-" },
+  cursor: { name: "Cursor CLI hooks", title: "Changes to Cursor's hooks file", hint: CURSOR_HINT, min: CURSOR_MIN, prefix: "cursor-" },
 };
 
 /** Settings' "Claude Code hooks" (or "Codex hooks"): status, then install /

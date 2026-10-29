@@ -9,7 +9,7 @@ const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const body = (name: string) => main.slice(main.indexOf(`function ${name}(`), main.indexOf("\n}\n", main.indexOf(`function ${name}(`)));
 
 test("sessions and cards name Codex", () => {
-  assert.match(main, /const AGENTS: Record<string, string> = \{ "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot" \};/);
+  assert.match(main, /const AGENTS: Record<string, string> = \{ "claude-code": "Claude Code", codex: "Codex", copilot: "Copilot", cursor: "Cursor" \};/);
   assert.match(main, /AGENTS\[request\.agent\] \?\? request\.agent/, "the card");
   assert.match(main, /AGENTS\[agent\] \?\? agent/, "the session rail");
 });

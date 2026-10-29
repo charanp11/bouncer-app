@@ -1,7 +1,7 @@
 # Bouncer
 
 **The security guard for coding agents.** A free, open-source desktop
-companion for Claude Code, Codex and GitHub Copilot CLI: it watches your sessions, lets safe actions
+companion for Claude Code, Codex, GitHub Copilot CLI and Cursor CLI: it watches your sessions, lets safe actions
 through under rules you control, stops risky ones at the door with a plain
 reason, and never blocks the agent.
 
@@ -113,9 +113,10 @@ Settings → Apps → Installed apps → Bouncer → Uninstall.
   you're installing Bouncer again next. Kept hooks point at a program that's
   gone, so Claude Code shows a hook error on each event and carries on,
   asking in its own prompt; remove them later from a reinstalled Bouncer, or
-  by hand. Then the same for Codex's `hooks.json` and Copilot's
-  `hooks/bouncer.json`, if they have Bouncer's entries (kept Copilot hooks
-  do no harm: Copilot carries on as usual).
+  by hand. Then the same for Codex's `hooks.json`, Copilot's
+  `hooks/bouncer.json` and Cursor's `~/.cursor/hooks.json`, if they have
+  Bouncer's entries (kept Copilot or Cursor hooks do no harm: they carry on
+  as usual; your own Cursor hooks are never touched).
 - **"Delete the application data".** Unticked by default: your rules,
   settings and history (`%APPDATA%\Bouncer`) stay for next time. Ticked, that
   folder and Bouncer's WebView2 data folder are deleted. Nothing else is.
@@ -196,6 +197,39 @@ What Copilot gets is less than Claude Code, on purpose:
   (and 1.0.97, 1.0.67) and a local test model, with no GitHub sign-in; not
   yet with a live model.
 
+## Cursor CLI
+
+Bouncer also watches the [Cursor CLI](https://cursor.com/cli) (`cursor-agent`,
+`agent`). **Tested with Cursor CLI 2026.10.22 on Windows.** Settings shows
+**Cursor CLI hooks** when there's a Cursor folder (`~/.cursor`): **Install…**
+shows the exact change to `~/.cursor/hooks.json` (your own Cursor hooks there
+stay as they are) and **Write changes** saves it, with a dated backup. The
+command line also works: `bouncer install-hooks --cursor`.
+
+What Cursor gets is the same as Copilot, on purpose:
+
+- **Watch-only, plus Deny.** Cursor's sessions show in the island. Its hook
+  runs before every shell command, whether or not Cursor would ask, so
+  Bouncer never allows for Cursor and its rules never answer for it:
+  Cursor's own rules and prompt decide.
+- **Deny on risky shell commands.** With Settings → **Guard every mode** on,
+  a risky shell command gets a card with **Deny** and **Let Cursor decide**
+  (which sends nothing). Unanswered, the card goes after 100 seconds and
+  Cursor decides.
+- **Shell commands only.** File edits, reads and MCP tools aren't shown as
+  requests.
+- **Fail-safe.** Every hook command ends in `exit 0`: a closed, missing,
+  crashed or slow Bouncer never makes Cursor refuse a command, and Bouncer
+  only ever prints a valid answer or nothing (Cursor blocks a command on
+  anything else). Each shell command costs about 0.75 s more on Windows
+  (PowerShell starting).
+- **Your Claude Code hooks under Cursor.** Cursor also runs the hooks in
+  `~/.claude/settings.json` when any of them has a matcher, and drops their
+  arguments. Bouncer ignores that input: it never reaches the app, and your
+  email address (which Cursor sends with every hook) never leaves the hook.
+- **Tested with a live model** on a free Cursor account in a test profile,
+  with Privacy Mode on; never your own.
+
 ## What it can't do
 
 - **It can only approve or deny when Claude Code asks.** In
@@ -210,10 +244,10 @@ What Copilot gets is less than Claude Code, on purpose:
   instead. Safe requests in those modes still run unasked, and Bouncer never
   allows or denies anything on its own. Guard every mode is Claude Code only:
   Codex's hooks can't make it ask.
-- **Claude Code, Codex and Copilot CLI for now.** Other agents come one per
-  release. For Codex, Bouncer only allows or denies (see [Codex](#codex));
-  for Copilot it is watch-only, plus Deny (see
-  [GitHub Copilot CLI](#github-copilot-cli)).
+- **Claude Code, Codex, Copilot CLI and Cursor CLI for now.** Other agents
+  come one per release. For Codex, Bouncer only allows or denies (see
+  [Codex](#codex)); for Copilot and Cursor it is watch-only, plus Deny (see
+  [GitHub Copilot CLI](#github-copilot-cli) and [Cursor CLI](#cursor-cli)).
 - **Some questions stay in the terminal.** Typing your own answer ("Type
   something"), questions Bouncer can't show unambiguously (for example a
   multi-select option whose label contains ", "), and any question while
