@@ -4938,6 +4938,101 @@ the scratch profile, when Claude says. Conditions:
   cursor` entry in `~\.cursor\hooks.json` would run **beside** the Claude
   Code one (different command, not deduplicated).
 
+### Step 1: confirmed in scratch (2026-10-29, cursor-agent 2026.10.22-27dcf5f)
+
+Charan's free account (Hobby, "Subscription Tier Free"), signed in only to
+the scratch profile; Privacy Mode on (his word, and the CLI's own cache:
+`privacyCache.privacyMode: 2`, `ghostMode: true`). Workspace: a scratch
+folder with one dummy file. Print mode (`-p --trust --output-format
+stream-json`), model "Auto". **`--force` was not used**: Claude Code's
+auto-mode classifier refused it ("run everything"); instead the scratch
+`cli-config.json` allowlisted only `Shell(echo)` (plus the default
+`Shell(ls)`). Only `echo` / `hostname` probes ran. 3 model requests.
+
+1. **Events on Windows (all fire):** `sessionStart`, `preToolUse` (Read,
+   Shell), `beforeReadFile`, `postToolUse`, `beforeShellExecution`,
+   `afterShellExecution`, `sessionEnd`. Shell input: `command`, `cwd`
+   (empty), `sandbox`, `tool_use_id`, `session_id` = `conversation_id`,
+   `generation_id`, `model`, `hook_event_name`, `cursor_version`,
+   `workspace_roots`, **`user_email`**, `transcript_path` (null). No
+   `timestamp`. Env: `CURSOR_PROJECT_DIR`, `CLAUDE_PROJECT_DIR`,
+   `CURSOR_VERSION`, `CURSOR_USER_EMAIL`, `CURSOR_CONFIG_DIR`,
+   `CURSOR_DATA_DIR`, `CURSOR_RIPGREP_PATH`.
+2. **How a hook runs on Windows** (its code + runs): through Cursor's own
+   shell executor in PowerShell, as `Get-Content '<temp>\payload.json' -Raw
+   | & { $input | <command> }` plus an exit-code check; the answer is read
+   only when that shell exits.
+3. **A hook that ends normally never "exits" on Windows.** It sits until
+   its `timeout`, then counts as a failure → **fail open, its answer
+   ignored**. Run 1 (timeout 5 s) and run 2 (30 s): a valid
+   `{"permission":"deny",…}` printed in 0.5 s was ignored and the command
+   ran; `not json` ran; a crash (exit 1) ran; each tool call waited the
+   full timeout per hook (echo took 85–116 s in run 2). Only **exit 2**
+   blocked ("Command execution was blocked by a hook"), because an explicit
+   `exit` ends the shell. Docs say invalid JSON at exit 0 blocks: on Windows
+   it never gets that far.
+4. **Claude Code's hooks under Cursor.** `~\.claude\settings.json` is
+   read as a Claude config **only if some group has a `matcher` key**
+   (its code, `allowMatcherlessStop` aside). Bouncer writes no matcher, so a
+   file with only Bouncer's entries is ignored (runs 1 and 3: none fired).
+   If the user has any other hook group with a matcher (run 2: `*`,
+   `Bash`), the whole file is converted and **every** group runs, matcher
+   or not. Converted entries keep only `command` and `timeout`: **Claude's
+   `args` are dropped**, so Bouncer's `--agent claude-code` entry runs as
+   the bare relay (no flag). They get Cursor's input (`preToolUse`
+   lowercase, `tool_name` `Shell`, `user_email`, no `timestamp`).
+   `PermissionRequest`, `Notification`, `PostToolUseFailure` are skipped.
+   The project's `.claude\settings.json` hooks didn't fire in run 2 (cause
+   not checked; Bouncer never writes that file).
+   **Today's relay on that input:** no flag, no `timestamp` → accepted;
+   event `preToolUse` / `sessionStart` (lowercase) matches no answer path,
+   so it prints nothing and forwards the line to the app (a phantom "Claude
+   Code" session; the line carries `user_email` and `workspace_roots`;
+   beforeSubmitPrompt's `prompt` too). No approval can happen, and with
+   Windows' hang (3) Cursor ignores output anyway. **Fix in h3:** with no
+   flag, input carrying `cursor_version` is refused like `timestamp`.
+5. **`; exit 0` fixes it (run 3).** With the hook command ending
+   `; exit 0` (as for Copilot), Cursor reads the answer at once:
+   - no output → the command runs (Cursor's normal flow);
+   - `{"permission":"deny",…}` → "Command execution was blocked by a hook:
+     probe deny" (our `user_message`), nothing ran;
+   - `not json` → **blocked** ("returned invalid JSON. The command was
+     blocked for safety"): fail closed, so the relay prints exactly one
+     valid answer or nothing;
+   - `{"permission":"allow"}` on a command in Cursor's **deny** list
+     (`Shell(hostname)`) → still refused ("Command blocked by permissions
+     configuration"): **a hook allow does not beat Cursor's deny list**
+     (unlike Copilot);
+   - `{"permission":"ask"}` in print mode → rejected (no prompt possible).
+     The TUI's `ask` wasn't tried.
+   - `afterShellExecution` fires also for refused commands.
+   Not run here (left for the end-to-end run): crash and missing relay
+   behind `; exit 0` (expected: no output → normal flow, as with Copilot;
+   Cursor's own "not found → exit 127" suffix comes after our `exit 0`).
+
+### Design proposal (for Charan's OK)
+
+Same shape as Copilot's, because the hook can't tell whether Cursor would
+have asked (it runs for every shell command):
+
+- **Hooks:** `sessionStart`, `sessionEnd`, `beforeShellExecution`,
+  `stop` in `~\.cursor\hooks.json` (rule 6; our entries only). Command
+  `& '<relay>' --agent cursor --event <name>; exit 0` (Cursor runs it in
+  PowerShell); `beforeShellExecution` `timeout` 120 (card 100 s < relay
+  110 s < 120 s); never `failClosed`, never a `matcher`. No `preToolUse`
+  (it would only double the shell hook).
+- **Answers:** Deny or nothing. A card only for risky commands with Guard
+  every mode on (Deny / "Let Cursor decide" / Explain); "Let Cursor
+  decide" and the timeout print nothing; Bouncer's rules never answer for
+  Cursor. (Possible later: `allow`, since it can't beat Cursor's deny list
+  — but it would skip Cursor's own prompt; not proposed now.)
+- **Input:** `--agent cursor` reads Cursor's shape; `user_email`,
+  `workspace_roots`, `model`, `generation_id`, `transcript_path` dropped in
+  the relay. With no flag, `cursor_version` → refused (finding 4).
+- **Labels:** "Cursor" on sessions and cards; PowerShell rules for its
+  shell commands on Windows.
+- **Minimum version:** the one tested (2026.10.22); Settings says so.
+
 ### Threats (Cursor, if picked)
 
 1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
