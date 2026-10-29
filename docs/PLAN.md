@@ -5117,7 +5117,30 @@ relay's own deadlines keep it below that.
 - [x] relay `--agent cursor`, install / uninstall, island label, TESTS
   (CU1–CU9) + BRIEF + README
 - [x] end to end in scratch (below)
-- [ ] CI green, reviewer agent, Charan's merge, release, hand checks
+- [x] reviewer agent (below)
+- [ ] CI green, Charan's merge, release, hand checks
+
+### Review (2026-10-29, separate reviewer agent)
+
+No blockers. Acted on:
+
+1. **Non-ASCII commands on Windows** (should-fix). Piping to a program in
+   Windows PowerShell uses `$OutputEncoding` (US-ASCII by default), so text
+   like `José –Recurse 日本` could reach the relay as `?`. Cursor's own
+   wrapper sets `$OutputEncoding` (and `[Console]::InputEncoding`) to UTF-8
+   before its pipe (its code). `the_cursor_command_exits_0_even_with_the_relay_gone`
+   now runs that exact prefix with a non-ASCII command and checks the app
+   gets it byte for byte; without the prefix the same test fails with
+   `Jos?\donn?es ?Recurse # ?? ?`. If a later Cursor drops the prefix, the
+   fix is adding it to our installed command (a change to what Bouncer
+   writes: Charan's call).
+2. `from_cursor` had split `from_copilot` from its doc comment: moved.
+3. `request.agent in LET_DECIDE` → `Object.hasOwn` (inherited keys).
+
+Left as is: uninstall turns a user's own `{"version": 1}` (or with an empty
+`hooks`) into `{}`, and removes an empty event list, as for the other
+agents; Cursor reads an empty file the same. A multi-root workspace with an
+empty `cwd` shows the first root as the project (risk context only).
 
 ### Build (2026-10-29)
 
