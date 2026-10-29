@@ -294,8 +294,13 @@ published.
   (`--agent codex`, `--agent copilot`, and since v0.11.1 `--agent
   claude-code`): the relay never guesses from the input's shape. Older
   Claude Code installs have no flag; for them only, input with a
-  `timestamp` (Copilot's) is refused, so a field Claude Code may add one
-  day can't hide a flagged install.
+  `timestamp` (Copilot's) or a `cursor_version` (Cursor's) is refused, so a
+  field Claude Code may add one day can't hide a flagged install.
+  Why Cursor (Charan, 2026-10-29, a privacy fix): Cursor's CLI also runs
+  the hooks in `~/.claude/settings.json` (when any of them has a matcher),
+  drops their arguments so Bouncer's entry runs with no flag, and sends its
+  own input with your email address. Bouncer now ignores that input: it
+  never reaches the app, nothing is shown, Cursor goes on as usual.
   Codex went first: its hook answers like Claude Code's and fails open.
 - **Copilot: Deny only** (Charan, 2026-10-28, after step 1): its hooks can
   override its own deny rules and block on failure; anything more would let
