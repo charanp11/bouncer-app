@@ -332,6 +332,30 @@ GitHub sign-in (no Copilot subscription; paths as `dev`). PLAN, roadmap h2.
 | CP12 | What Copilot gets, said plainly (condition 2) | Settings' "Copilot CLI hooks" (only where there's a Copilot folder) and the README: watch-only plus Deny on risky commands, no Allow from Bouncer, nothing inside Copilot's sandbox, Copilot CLI 1.0.67 or newer | frontend | `ts: Copilot's hooks: offered only where Copilot is, and say what it gets` `ts: the README says the same` | CI |
 | CP13 | The real Copilot CLI (scratch) | Step 1 (1.0.105, 1.0.97, 1.0.67, 1.0.66): formats, failures, `ask`, deny rules, sandbox, versions; end to end through a test instance: see PLAN | hand (scratch: fake model, ConPTY, page clicks over CDP) | (PLAN, roadmap h2, step 1 and end to end) | Hand (scratch) 2026-10-28 |
 
+## Cursor CLI (roadmap h3)
+
+Cursor CLI hooks (`--agent cursor --event <name>` on the installed command,
+merged into the user's own `~/.cursor/hooks.json`). Deny or nothing, like
+Copilot (Charan, 2026-10-29): the shell hook runs for every command, so
+Bouncer never allows for Cursor and its rules never answer. Every hook
+command ends in `exit 0`: on Windows Cursor reads a hook's answer only when
+its shell exits, and output that isn't valid JSON blocks the command.
+Fixtures recorded from the real Cursor CLI 2026.10.22 in a scratch profile
+(Charan's free account, Privacy Mode on; paths as `dev`, email replaced).
+PLAN, roadmap h3.
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| CU1 | Every event Bouncer installs (recorded) | `sessionStart`, `sessionEnd`, `beforeShellExecution` reach the app as Cursor's, rebuilt: the shell hook as a request (PowerShell on Windows, Bash elsewhere) with its command, the folder from the first workspace root when `cwd` is empty; never the email, the workspace list, the model or the transcript; another event's input is refused | unit, integration, fixture | `cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints` `tests::a_cursor_line_keeps_only_what_bouncer_needs` | CI |
+| CU2 | Which agent | Only exactly `--agent cursor --event <one of the four>` is Cursor; other events (`preToolUse`, `afterShellExecution`), wrong case, missing or extra arguments print nothing and reach nothing | unit, integration | `tests::cursor_runs_only_with_an_event_bouncer_installs` `cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints` | CI |
+| CU3 | Cursor's answers | Only `{"permission":"deny","user_message":"Denied in Bouncer","agent_message":"Denied in Bouncer"}`, one line of valid JSON; allow, ask, picks, a plan, no answer or a closed app print nothing (anything else would block Cursor's command) | unit, integration | `tests::cursor_gets_exactly_deny_or_nothing` `cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints` | CI |
+| CU4 | Deny or nothing in the island | A rule never answers; a card only for a risky request with the guard on: Deny reaches Cursor, "Let Cursor decide" and the timeout send nothing, never a "would" or an "Always allow…"; the history says "left to Cursor" | unit, frontend | `approvals::tests::cursor_gets_deny_or_nothing_like_copilot` `event::tests::the_relay_mark_decides_the_agent` `ts: a Cursor card never says Allow` | CI |
+| CU5 | The installed command | `& '<relay>' --agent cursor --event <name>; exit 0` (Windows) or `'<relay>' … ; exit 0`; run as Cursor runs it, it prints exactly the deny; with the relay gone it exits 0 and prints nothing; an odd path runs only the relay; look-alikes aren't ours | unit, integration | `hooks::tests::cursor_commands_quote_the_path_and_lookalikes_are_not_ours` `the_cursor_command_exits_0_even_with_the_relay_gone` | CI |
+| CU6 | Installing and removing Cursor's hooks | `~/.cursor/hooks.json`, merged with the user's own hooks (kept, in order, byte for byte after a remove); `version` 1; each event's entry directly in its list (Cursor rejects groups), `command` and `timeout` only, no `preToolUse`, no `matcher`, no `failClosed`; status installed / incomplete / moved / missing; the diff, a yes, a dated backup; the uninstaller asks fourth; the test guard covers the file | unit, integration | `hooks::tests::cursor_install_status_and_uninstall` `hooks::tests::cursor_hooks_path_is_in_the_home_folder` `hooks::tests::bouncer_never_writes_a_matcher` `cursor_hooks_install_and_the_uninstaller_removes_them` `hooks::tests::the_test_guard_allows_only_temp_paths` `the_cli_refuses_a_real_profile_path_under_test` | CI |
+| CU7 | Claude Code's hooks under Cursor | Cursor runs `~/.claude/settings.json` hooks (when any group has a matcher) without their `args` and with its own input: with no flag, input carrying `cursor_version`, `user_email` or `workspace_roots` is refused, never reaches the app, prints nothing; none of 970 recorded Claude Code inputs has any of them | unit, integration | `tests::with_no_flag_input_with_cursor_version_is_refused` `tests::with_no_flag_input_with_any_cursor_field_is_refused` `cursor_inputs_without_a_flag_print_nothing_and_never_reach_the_app` | CI |
+| CU8 | What Cursor gets, said plainly | Settings' "Cursor CLI hooks" (only where there's a `~/.cursor` folder) and the README: watch-only plus Deny on risky shell commands, no Allow from Bouncer, the user's own hooks kept, tested with Cursor CLI 2026.10.22 | frontend | `ts: Cursor's hooks: offered only where Cursor is, and say what it gets` `ts: the README says the same` | CI |
+| CU9 | The real Cursor CLI (scratch) | Step 1 (2026.10.22, Windows): events, input, the Windows hang without `exit 0`, deny / garbage / allow vs the deny list / ask; run 4: empty output, Bouncer closed, relay missing, relay crash and hook timeout all fall through; end to end through a test instance: see PLAN | hand (scratch profile, live model, page clicks over CDP) | (PLAN, roadmap h3) | Hand (scratch) 2026-10-29 |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |
