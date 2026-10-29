@@ -5,7 +5,9 @@
 //! Claude Code. `--agent codex`: Codex (its line is marked so,
 //! and it only ever gets allow / deny). `--agent copilot --event <name>`:
 //! GitHub Copilot CLI (its camelCase input becomes the same line, marked
-//! so, and it only ever gets deny). Any other arguments: nothing at all.
+//! so, and it only ever gets deny). `--agent cursor --event <name>`: Cursor
+//! CLI (the same: a line rebuilt from its input, deny or nothing). Any other
+//! arguments: nothing at all.
 //! The only environment variable read is the debug endpoint override; the
 //! environment is never logged or forwarded.
 //!
@@ -33,9 +35,16 @@ const CODEX_DROPPED: &[&str] = &["model", "prompt", "last_assistant_message"];
 /// Marks the line for the app as Codex's (`bouncer_core::event::AGENT_FIELD`).
 const AGENT_FIELD: &str = "bouncer_agent";
 /// Fields Claude Code never sends and another agent always does: with no
-/// flag, input carrying one is refused (Copilot's `timestamp`, Cursor's
-/// `cursor_version`).
-const OTHER_AGENTS_FIELDS: &[&str] = &["timestamp", "cursor_version"];
+/// flag, input carrying one is refused (Copilot's `timestamp`; Cursor's
+/// `cursor_version`, `user_email`, `workspace_roots`, so a Cursor event
+/// without one of them is still refused). None of 970 recorded Claude Code
+/// inputs has any of them (PLAN roadmap h3).
+const OTHER_AGENTS_FIELDS: &[&str] = &[
+    "timestamp",
+    "cursor_version",
+    "user_email",
+    "workspace_roots",
+];
 
 /// Copilot CLI's events Bouncer installs, by their camelCase names (the
 /// installed command names the event: Copilot's `sessionStart` input
@@ -45,6 +54,15 @@ const COPILOT_EVENTS: &[(&str, &str)] = &[
     ("sessionEnd", "SessionEnd"),
     ("permissionRequest", "PermissionRequest"),
     ("notification", "Notification"),
+];
+
+/// Cursor CLI's events Bouncer installs, with the name Bouncer's line gets:
+/// its shell hook is the request.
+const CURSOR_EVENTS: &[(&str, &str)] = &[
+    ("sessionStart", "SessionStart"),
+    ("sessionEnd", "SessionEnd"),
+    ("beforeShellExecution", "PermissionRequest"),
+    ("stop", "Stop"),
 ];
 
 /// Which agent's hook ran this relay, from its command line.
@@ -58,13 +76,17 @@ enum Agent {
     /// Copilot CLI, with the event its hook was installed for (an entry of
     /// `COPILOT_EVENTS`).
     Copilot(&'static str, &'static str),
+    /// Cursor CLI, with the event its hook was installed for (an entry of
+    /// `CURSOR_EVENTS`).
+    Cursor(&'static str, &'static str),
 }
 
 impl Agent {
     /// No arguments: Claude Code (an older install); exactly `--agent
     /// claude-code`: Claude Code; exactly `--agent codex`: Codex; exactly
-    /// `--agent copilot --event <one of COPILOT_EVENTS>`: Copilot; anything
-    /// else: `None` (the relay then does nothing).
+    /// `--agent copilot --event <one of COPILOT_EVENTS>`: Copilot; the same
+    /// for `--agent cursor` and `CURSOR_EVENTS`: Cursor; anything else:
+    /// `None` (the relay then does nothing).
     fn from_args(args: &[String]) -> Option<Agent> {
         match args {
             [] => Some(Agent::Unflagged),
@@ -73,6 +95,10 @@ impl Agent {
             [flag, name, e, event] if flag == "--agent" && name == "copilot" && e == "--event" => {
                 let &(camel, kind) = COPILOT_EVENTS.iter().find(|(c, _)| c == event)?;
                 Some(Agent::Copilot(camel, kind))
+            }
+            [flag, name, e, event] if flag == "--agent" && name == "cursor" && e == "--event" => {
+                let &(camel, kind) = CURSOR_EVENTS.iter().find(|(c, _)| c == event)?;
+                Some(Agent::Cursor(camel, kind))
             }
             _ => None,
         }
@@ -137,6 +163,9 @@ fn work(agent: Agent, waiting: impl FnOnce()) -> Option<String> {
         "PermissionRequest" if matches!(agent, Agent::Copilot(..)) => {
             copilot_json(&talk(&line, true, waiting)?)
         }
+        "PermissionRequest" if matches!(agent, Agent::Cursor(..)) => {
+            cursor_json(&talk(&line, true, waiting)?)
+        }
         "PermissionRequest" if agent == Agent::Codex => {
             decision_json(&talk(&line, true, waiting)?, None, &Value::Null)
         }
@@ -182,6 +211,21 @@ fn guard_json(answer: &str) -> Option<String> {
 fn copilot_json(answer: &str) -> Option<String> {
     (answer == "deny").then(|| {
         serde_json::json!({ "behavior": "deny", "message": "Denied in Bouncer" }).to_string()
+    })
+}
+
+/// Cursor CLI's `beforeShellExecution` output, for exactly `deny`; anything
+/// else is `None`. Never `allow` or `ask` (Deny or nothing, Charan
+/// 2026-10-29). Cursor blocks on output that isn't valid JSON, so this is
+/// the only text the relay ever prints for Cursor.
+fn cursor_json(answer: &str) -> Option<String> {
+    (answer == "deny").then(|| {
+        serde_json::json!({
+            "permission": "deny",
+            "user_message": "Denied in Bouncer",
+            "agent_message": "Denied in Bouncer",
+        })
+        .to_string()
     })
 }
 
@@ -235,6 +279,9 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     if let Agent::Copilot(camel, kind) = agent {
         payload = from_copilot(&payload, camel, kind)?;
     }
+    if let Agent::Cursor(camel, kind) = agent {
+        payload = from_cursor(&payload, camel, kind, cfg!(windows))?;
+    }
     let map = payload.as_object_mut()?;
     map.get("hook_event_name")?.as_str()?;
     if agent == Agent::Unflagged && OTHER_AGENTS_FIELDS.iter().any(|f| map.contains_key(*f)) {
@@ -253,6 +300,9 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     if let Agent::Copilot(..) = agent {
         map.insert(AGENT_FIELD.into(), "copilot".into());
     }
+    if let Agent::Cursor(..) = agent {
+        map.insert(AGENT_FIELD.into(), "cursor".into());
+    }
     let mut line = payload.to_string();
     line.push('\n');
     Some((line, payload))
@@ -265,6 +315,32 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
 /// was installed for (its `hookName` / `hook_event_name`, where Copilot
 /// sends one), else `None`. The prompt, the notification's text and the
 /// rest stay behind.
+/// Cursor CLI's input (its event `camel`, which the input must name) as
+/// Bouncer's line: only the session, the folder (Cursor's `cwd` is often
+/// empty: then its first workspace root) and, for the shell hook, the
+/// command as a PowerShell (Windows) or Bash request. Everything else
+/// (`user_email`, `workspace_roots`, `model`, the transcript) stays here.
+fn from_cursor(input: &Value, camel: &str, kind: &str, windows: bool) -> Option<Value> {
+    let text = |key| input.get(key)?.as_str();
+    if text("hook_event_name")? != camel {
+        return None;
+    }
+    let cwd = match text("cwd") {
+        Some(cwd) if !cwd.is_empty() => cwd,
+        _ => input.get("workspace_roots")?.get(0)?.as_str()?,
+    };
+    let mut line = serde_json::json!({
+        "hook_event_name": kind,
+        "session_id": text("session_id").or_else(|| text("conversation_id"))?,
+        "cwd": cwd,
+    });
+    if camel == "beforeShellExecution" {
+        line["tool_name"] = if windows { "PowerShell" } else { "Bash" }.into();
+        line["tool_input"] = serde_json::json!({ "command": text("command")? });
+    }
+    Some(line)
+}
+
 fn from_copilot(input: &Value, camel: &str, kind: &str) -> Option<Value> {
     let text = |key| input.get(key)?.as_str();
     let mut line = serde_json::json!({
@@ -639,6 +715,133 @@ mod tests {
                 read_event(cursor.as_bytes(), Agent::ClaudeCode).is_some(),
                 "flag decides"
             );
+        }
+    }
+
+    /// Each of Cursor's other fields alone also refuses unflagged input
+    /// (Charan, 2026-10-29), so a Cursor event without `cursor_version`
+    /// can't pass as Claude Code's either; the flag still decides.
+    #[test]
+    fn with_no_flag_input_with_any_cursor_field_is_refused() {
+        for field in [
+            r#""user_email":"dev@example.com""#,
+            r#""workspace_roots":["/home/dev/project"]"#,
+            r#""cursor_version":"2026.10.22-27dcf5f""#,
+            r#""timestamp":"2026-10-28T07:40:06.872Z""#,
+        ] {
+            let input = format!(
+                r#"{{"hook_event_name":"PreToolUse","session_id":"c","cwd":"/p",{field},"tool_name":"Bash","tool_input":{{"command":"ls"}}}}"#
+            );
+            assert!(read_event_claude(input.as_bytes()).is_none(), "{field}");
+            assert!(
+                read_event(input.as_bytes(), Agent::ClaudeCode).is_some(),
+                "{field}: flag decides"
+            );
+        }
+    }
+
+    /// `--agent cursor --event <one of CURSOR_EVENTS>` only, exactly.
+    #[test]
+    fn cursor_runs_only_with_an_event_bouncer_installs() {
+        let args =
+            |a: &[&str]| Agent::from_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        for &(camel, kind) in CURSOR_EVENTS {
+            assert_eq!(
+                args(&["--agent", "cursor", "--event", camel]),
+                Some(Agent::Cursor(camel, kind))
+            );
+        }
+        for bad in [
+            &["--agent", "cursor"][..],
+            &["--agent", "cursor", "--event"],
+            &["--agent", "cursor", "--event", "preToolUse"],
+            &["--agent", "cursor", "--event", "BeforeShellExecution"],
+            &["--agent", "Cursor", "--event", "stop"],
+            &["--agent", "cursor", "--event", "stop", "x"],
+            &["--agent", "cursor", "-e", "stop"],
+        ] {
+            assert_eq!(args(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Only `deny` prints for Cursor, and always the same valid JSON line
+    /// (anything else would make Cursor block the command).
+    #[test]
+    fn cursor_gets_exactly_deny_or_nothing() {
+        let deny = cursor_json("deny").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&deny).unwrap(),
+            serde_json::json!({ "permission": "deny", "user_message": "Denied in Bouncer",
+                "agent_message": "Denied in Bouncer" })
+        );
+        assert!(!deny.contains('\n'));
+        for answer in [
+            "allow", "ask", "", "Deny", "deny ", "approve", "answer 0", "{}",
+        ] {
+            assert!(cursor_json(answer).is_none(), "{answer:?}");
+        }
+    }
+
+    /// Cursor's input becomes a line with only the session, the folder and
+    /// (shell hook) the command; its email, workspace list, model and the
+    /// rest stay in the relay. An input naming another event is refused.
+    #[test]
+    fn a_cursor_line_keeps_only_what_bouncer_needs() {
+        let input = serde_json::json!({ "conversation_id": "c1", "generation_id": "g",
+            "model": "default", "command": "echo hi", "cwd": "", "sandbox": false,
+            "tool_use_id": "t", "session_id": "c1", "hook_event_name": "beforeShellExecution",
+            "cursor_version": "2026.10.22-27dcf5f", "workspace_roots": [r"C:\Users\dev\project"],
+            "user_email": "dev@example.com", "transcript_path": null });
+        for (windows, shell) in [(true, "PowerShell"), (false, "Bash")] {
+            assert_eq!(
+                from_cursor(&input, "beforeShellExecution", "PermissionRequest", windows),
+                Some(serde_json::json!({ "hook_event_name": "PermissionRequest",
+                    "session_id": "c1", "cwd": r"C:\Users\dev\project", "tool_name": shell,
+                    "tool_input": { "command": "echo hi" } }))
+            );
+        }
+        let mut with_cwd = input.clone();
+        with_cwd["cwd"] = "/work".into();
+        assert_eq!(
+            from_cursor(
+                &with_cwd,
+                "beforeShellExecution",
+                "PermissionRequest",
+                false
+            )
+            .unwrap()["cwd"],
+            "/work"
+        );
+        assert_eq!(
+            from_cursor(&input, "stop", "Stop", true),
+            None,
+            "another event"
+        );
+        let mut no_folder = input.clone();
+        no_folder["workspace_roots"] = serde_json::json!([]);
+        assert_eq!(
+            from_cursor(
+                &no_folder,
+                "beforeShellExecution",
+                "PermissionRequest",
+                true
+            ),
+            None
+        );
+        let raw = input.to_string();
+        let (line, event) = read_event(
+            raw.as_bytes(),
+            Agent::Cursor("beforeShellExecution", "PermissionRequest"),
+        )
+        .unwrap();
+        assert_eq!(event[AGENT_FIELD], "cursor");
+        for private in [
+            "dev@example.com",
+            "workspace_roots",
+            "model",
+            "cursor_version",
+        ] {
+            assert!(!line.contains(private), "{private}: {line}");
         }
     }
 

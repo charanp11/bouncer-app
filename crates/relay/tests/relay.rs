@@ -1310,3 +1310,135 @@ fn a_slow_guard_answer_prints_nothing() {
         start.elapsed()
     );
 }
+
+fn cursor_args(event: &str) -> [&str; 4] {
+    ["--agent", "cursor", "--event", event]
+}
+
+/// Cursor CLI 2026.10.22's recorded inputs for the four events Bouncer
+/// installs, through the real relay with `--agent cursor --event <its
+/// event>`: each reaches the app as Cursor's, rebuilt (the shell hook as a
+/// request with its command, the folder from the workspace when `cwd` is
+/// empty; never the email, the workspace list or the model); only the shell
+/// hook prints, exactly Cursor's deny, and only for deny. Allow, ask and
+/// everything else print nothing (Cursor blocks on anything that isn't
+/// valid JSON).
+#[test]
+fn cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "cursor-fixtures",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock()
+                .unwrap()
+                .push((e.agent, e.kind, e.tool, e.project, e.input));
+            Some(Decision::Deny)
+        }),
+    );
+    let ours: Vec<_> = fixtures_in("cursor-fixtures")
+        .into_iter()
+        .filter(|(n, _)| {
+            ["sessionStart", "sessionEnd", "beforeShellExecution"]
+                .iter()
+                .any(|e| n.ends_with(&format!("-{e}.json")))
+        })
+        .collect();
+    assert_eq!(ours.len(), 3);
+    for (name, raw) in &ours {
+        let event = name
+            .strip_prefix("cursor-2026.10.22-")
+            .and_then(|n| n.strip_suffix(".json"))
+            .unwrap();
+        let out = spawn_relay_with(&path, raw, &cursor_args(event))
+            .wait_with_output()
+            .unwrap();
+        if event == "beforeShellExecution" {
+            assert_eq!(
+                stdout_json(&out),
+                serde_json::json!({ "permission": "deny", "user_message": "Denied in Bouncer",
+                    "agent_message": "Denied in Bouncer" })
+            );
+            assert_eq!(
+                out.stdout.iter().filter(|&&b| b == b'\n').count(),
+                1,
+                "one line"
+            );
+        } else {
+            assert_silent(&out);
+        }
+    }
+    wait_for(&seen, ours.len());
+    let mut got = seen.lock().unwrap().clone();
+    got.sort_by(|a, b| a.1.cmp(&b.1));
+    let shell = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    let project = r"C:\Users\dev\project".to_owned();
+    assert_eq!(
+        got,
+        [
+            (
+                "cursor",
+                "PermissionRequest".to_owned(),
+                Some(shell.to_owned()),
+                project.clone(),
+                Some(serde_json::json!({ "command": "echo probe-plain" }))
+            ),
+            (
+                "cursor",
+                "SessionEnd".to_owned(),
+                None,
+                project.clone(),
+                None
+            ),
+            ("cursor", "SessionStart".to_owned(), None, project, None),
+        ]
+    );
+    let request = &ours
+        .iter()
+        .find(|(n, _)| n.contains("beforeShellExecution"))
+        .unwrap()
+        .1;
+    for (i, decision) in [
+        Some(Decision::Allow),
+        Some(Decision::Ask),
+        Some(Decision::Plan(true)),
+        Some(Decision::Answer(vec![vec![0]])),
+        None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = serve(&format!("cursor-answer-{i}"), always(decision));
+        assert_silent(
+            &spawn_relay_with(&path, request, &cursor_args("beforeShellExecution"))
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    // Bouncer closed: nothing printed, exit 0.
+    let closed = endpoint("cursor-closed-flagged");
+    assert_silent(
+        &spawn_relay_with(&closed, request, &cursor_args("beforeShellExecution"))
+            .wait_with_output()
+            .unwrap(),
+    );
+    // The wrong event for its input, an event Bouncer doesn't install, other
+    // spellings: nothing reaches the app.
+    let (seen, path) = recording("cursor-args", Decision::Deny);
+    for args in [
+        &cursor_args("sessionStart")[..],
+        &cursor_args("stop"),
+        &cursor_args("preToolUse"),
+        &cursor_args("afterShellExecution"),
+        &["--agent", "Cursor", "--event", "beforeShellExecution"],
+        &["--agent", "cursor"],
+    ] {
+        assert_silent(
+            &spawn_relay_with(&path, request, args)
+                .wait_with_output()
+                .unwrap(),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
+}
