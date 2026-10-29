@@ -9,6 +9,7 @@ use serde_json::Value;
 pub const CLAUDE_CODE: &str = "claude-code";
 pub const CODEX: &str = "codex";
 pub const COPILOT: &str = "copilot";
+pub const CURSOR: &str = "cursor";
 
 /// Set by the relay (`--agent codex`) on the line it sends; any copy in the
 /// agent's own JSON is removed first.
@@ -47,7 +48,8 @@ impl Event {
         match hook.get(AGENT_FIELD) {
             None => Event::from_claude_code(hook),
             Some(v) if v == CODEX => Event::from_codex(hook, cfg!(windows)),
-            Some(v) if v == COPILOT => Event::from_copilot(hook),
+            Some(v) if v == COPILOT => Event::from_deny_only(hook, COPILOT),
+            Some(v) if v == CURSOR => Event::from_deny_only(hook, CURSOR),
             Some(_) => None,
         }
     }
@@ -98,15 +100,22 @@ impl Event {
         Some(event)
     }
 
-    /// Builds an event from the relay's line for Copilot CLI (already in
-    /// Claude Code's field names; a notification's type in `input`). `None`
-    /// as above.
-    pub fn from_copilot(hook: &Value) -> Option<Event> {
+    /// Builds an event from the relay's line for Copilot CLI or Cursor's
+    /// CLI (the relay rebuilt it in Claude Code's field names; a Copilot
+    /// notification's type in `input`). `None` as above.
+    pub fn from_deny_only(hook: &Value, agent: &'static str) -> Option<Event> {
         let mut event = Event::from_claude_code(hook)?;
-        event.agent = COPILOT;
+        event.agent = agent;
         event.mode = None;
         event.interrupted = false;
         Some(event)
+    }
+
+    /// Copilot and Cursor get Deny or nothing: their hooks run for every
+    /// request (they can't say whether the agent would ask), so Bouncer
+    /// never allows for them and its rules never answer.
+    pub fn deny_only(&self) -> bool {
+        self.agent == COPILOT || self.agent == CURSOR
     }
 
     /// A Copilot notification's type (`permission_prompt`,
@@ -197,9 +206,19 @@ mod tests {
         let mut codex = plain.clone();
         codex[AGENT_FIELD] = json!(CODEX);
         assert_eq!(Event::from_hook(&codex).unwrap().agent, CODEX);
+        for agent in [COPILOT, CURSOR] {
+            let mut marked = plain.clone();
+            marked[AGENT_FIELD] = json!(agent);
+            let event = Event::from_hook(&marked).unwrap();
+            assert_eq!(event.agent, agent);
+            assert!(event.deny_only(), "{agent}");
+        }
+        assert!(!Event::from_hook(&codex).unwrap().deny_only());
+        assert!(!Event::from_hook(&plain).unwrap().deny_only());
         for other in [
             json!("claude-code"),
             json!("Codex"),
+            json!("Cursor"),
             json!(""),
             json!(1),
             json!(null),

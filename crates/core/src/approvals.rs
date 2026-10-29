@@ -22,7 +22,7 @@ use crate::activity::{self, Entry, Log};
 use crate::away::{self, Summary};
 use crate::check::{self, Context, sentence};
 use crate::code::{code_view, line_counts};
-use crate::event::{CLAUDE_CODE, COPILOT, Event};
+use crate::event::{CLAUDE_CODE, CURSOR, Event};
 use crate::ipc::Decision;
 use crate::rules::{self, Loaded, Mode, Rule, Rules};
 use bouncer_relay::questions::{self, ASK, PLAN};
@@ -63,9 +63,19 @@ const QUESTIONS: &[&str] = &[ASK, PLAN];
 const GUARDED_MODES: &[&str] = &["auto", "acceptEdits", "bypassPermissions"];
 /// What a session waiting on one of those shows.
 const QUESTION_STEP: &str = "question in the terminal";
-/// A Copilot request Bouncer said nothing about: Copilot's own rules, its
-/// prompt or its allow-all decide (Bouncer never allows for Copilot).
+/// A Copilot (or Cursor) request Bouncer said nothing about: the agent's own
+/// rules, its prompt or its allow-all decide (Bouncer never allows for them).
 const LEFT_TO_COPILOT: &str = "left to Copilot";
+const LEFT_TO_CURSOR: &str = "left to Cursor";
+
+/// The history line for a deny-only agent's request Bouncer let through.
+fn left_to(agent: &str) -> &'static str {
+    if agent == CURSOR {
+        LEFT_TO_CURSOR
+    } else {
+        LEFT_TO_COPILOT
+    }
+}
 /// A tool call that failed (its error text never reaches Bouncer).
 pub const FAILED: &str = "failed";
 /// A session with no event for this long is dropped (it may never send
@@ -246,7 +256,7 @@ impl State {
                 session.lines = line_counts(event.tool.as_deref(), event.input.as_ref());
                 let how = match event.kind.as_str() {
                     "PreToolUse" => "",
-                    _ if event.agent == COPILOT => LEFT_TO_COPILOT,
+                    _ if event.deny_only() => left_to(event.agent),
                     _ if paused => "asked in terminal",
                     _ => "waiting for you",
                 };
@@ -318,7 +328,7 @@ impl State {
             _ => {}
         }
         session.status = match event.kind.as_str() {
-            "PermissionRequest" if event.agent == COPILOT => "working",
+            "PermissionRequest" if event.deny_only() => "working",
             "PermissionRequest" if paused => IN_TERMINAL,
             "PermissionRequest" => "needs you",
             "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => "working",
@@ -767,7 +777,8 @@ impl Desk {
     pub fn handle_until(&self, event: Event, gone: &dyn Fn() -> bool) -> Option<Decision> {
         let (tx, rx) = mpsc::channel();
         let mut guard = false;
-        let copilot = event.agent == COPILOT;
+        let deny_only = event.deny_only();
+        let agent = event.agent;
         let id = {
             let mut state = self.lock();
             state.track(&event);
@@ -794,7 +805,7 @@ impl Desk {
             } else if !event.is_permission_request() {
                 guard = state.guards(&event);
                 None
-            } else if copilot {
+            } else if deny_only {
                 // Copilot gets Deny or nothing: never a rule, an offer or an
                 // allow (a hook's allow beats its own deny rules). A card
                 // only for a risky request with the guard on.
@@ -812,7 +823,7 @@ impl Desk {
                         id
                     }
                     _ => {
-                        state.answered(&event, LEFT_TO_COPILOT);
+                        state.answered(&event, left_to(event.agent));
                         None
                     }
                 }
@@ -862,8 +873,8 @@ impl Desk {
         };
         // Unanswered: the card goes and the agent decides (for Copilot this
         // is "Let Copilot decide"; the wait is shorter than its hook timeout).
-        let (status, how) = match copilot {
-            true => ("working", LEFT_TO_COPILOT),
+        let (status, how) = match deny_only {
+            true => ("working", left_to(agent)),
             false => (IN_TERMINAL, "asked in terminal"),
         };
         if answer.is_none() && self.lock().take(&id, status, how).is_some() {
@@ -881,19 +892,19 @@ impl Desk {
             let mut state = self.lock();
             let pending = state.pending(id, Kind::Permission)?;
             let early = pending.issued.elapsed() < ARM;
-            let copilot = pending.event.agent == COPILOT;
+            let deny_only = pending.event.deny_only();
             if allow && early {
                 return Err("too soon to allow");
             }
-            let how = match (allow, copilot) {
-                (true, true) => LEFT_TO_COPILOT,
+            let how = match (allow, deny_only) {
+                (true, true) => left_to(pending.event.agent),
                 (true, false) => "you allowed",
                 (false, _) => "you denied",
             };
             let pending = state
                 .take(id, "working", how)
                 .ok_or("unknown or already answered request")?;
-            if allow && copilot {
+            if allow && deny_only {
                 drop(state);
                 drop(pending);
                 self.publish();
@@ -1315,6 +1326,7 @@ pub fn visible(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::COPILOT;
     use crate::rules::tests::{TempDir, temp_dir};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -2386,6 +2398,50 @@ mod tests {
         desk.handle(copilot_note("agent_idle"));
         assert_eq!(desk.view()["sessions"][0]["status"], "idle");
         assert!(desk.view()["queue"].as_array().unwrap().is_empty());
+    }
+
+    /// Cursor gets what Copilot gets (Charan, 2026-10-29): a rule never
+    /// answers, a card only for a risky request with the guard on, Deny
+    /// reaches Cursor, "Let Cursor decide" and the timeout send nothing; the
+    /// session and history name Cursor.
+    #[test]
+    fn cursor_gets_deny_or_nothing_like_copilot() {
+        let cursor = |command: &str| Event {
+            agent: CURSOR,
+            tool: Some("PowerShell".into()),
+            ..event("cu", "PermissionRequest", command)
+        };
+        let (desk, _, _dir) = desk_with_rules("cursor-guard", &format!("guard = true\n{AUTO}"));
+        assert_eq!(desk.handle(cursor("ls")), None, "a rule never answers");
+        assert_eq!(desk.view()["sessions"][0]["agent"], "cursor");
+        assert_eq!(
+            desk.view()["sessions"][0]["history"][0]["how"],
+            "left to Cursor"
+        );
+        for (allow, want) in [(false, Some(Decision::Deny)), (true, None)] {
+            let d = desk.clone();
+            let waiting = std::thread::spawn(move || d.handle(cursor(RISKY)));
+            let id = queued(&desk, 1).remove(0);
+            let card = desk.view()["queue"][0].clone();
+            assert_eq!(card["agent"], "cursor");
+            assert_eq!(
+                (card["would"].clone(), card["offer"].clone()),
+                (Value::Null, Value::Null)
+            );
+            assert!(desk.always(&id).is_err(), "no rule for Cursor");
+            std::thread::sleep(ARM);
+            desk.decide(&id, allow).unwrap();
+            assert_eq!(waiting.join().unwrap(), want, "allow = {allow}");
+        }
+        let (off, _, _dir2) = desk_with_rules("cursor-off", AUTO);
+        assert_eq!(off.handle(cursor(RISKY)), None, "guard off");
+        assert!(off.view()["queue"].as_array().unwrap().is_empty());
+        let dir = temp_dir("desk-cursor-timeout");
+        let path = dir.join("rules.toml");
+        std::fs::write(&path, "guard = true\n").unwrap();
+        let timeout = Desk::new(Duration::from_millis(300), Some(path), |_| {});
+        assert_eq!(timeout.handle(cursor(RISKY)), None, "unanswered");
+        assert_eq!(timeout.view()["sessions"][0]["status"], "working");
     }
 
     #[test]
