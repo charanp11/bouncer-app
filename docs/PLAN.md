@@ -5045,6 +5045,34 @@ prints valid deny JSON or nothing, with a test for each case. Check a
 normal command isn't noticeably slowed. If any "nothing" case blocks and
 can't be fixed: stop and ask.
 
+### Fall-through proof with the wrapper (run 4, 2026-10-29)
+
+One request, seven `echo` commands; `beforeShellExecution` had one entry
+per case, each with a `matcher` on its probe tag and the production form
+`& '<exe>' --agent cursor --event beforeShellExecution; exit 0` (a
+logger entry on `probe-` showed each case's hook fired). Relay: a scratch
+debug build of today's relay (`--agent cursor` is still unknown to it, so
+it prints nothing); no Bouncer app or relay process was running.
+
+| Case | Hook | Result |
+| --- | --- | --- |
+| empty output | relay `--agent cursor` | ran |
+| Bouncer closed | relay `--agent claude-code` (no pipe) | ran |
+| relay missing | a path that doesn't exist | ran |
+| relay crash | stand-in that aborts (exit 0xC0000409) | ran |
+| hook timeout | stand-in sleeping 40 s, `timeout` 10 | ran (after the 10 s) |
+
+**No case blocked.** With run 3: valid deny → blocked with our message;
+garbage → blocked (so the relay prints exactly one valid deny or nothing).
+
+**Speed.** Cursor's own `echo` took 10–14 s per call on this machine with
+or without a hook (13.8 s unhooked vs 10.3 s hooked: noise). The wrapper
+itself, run the way Cursor runs it (`Get-Content payload | & { $input | &
+'<relay>' …; exit 0 }` in a fresh PowerShell), median 756 ms vs 630 ms for
+PowerShell alone: about 0.13 s is the relay, the rest PowerShell's start,
+which Cursor pays for any hook. A hung relay costs its `timeout`; the
+relay's own deadlines keep it below that.
+
 ### Threats (Cursor, if picked)
 
 1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
