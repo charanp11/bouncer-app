@@ -4421,7 +4421,7 @@ hooks hint reads in full and no hint is cut (UI20); Claude Code hooks
 Installed. Roadmap h1 (Codex) is done; next: GitHub Copilot CLI (roadmap
 h2) in a new session, when Charan says.
 
-## Roadmap h2 — GitHub Copilot CLI (current)
+## Roadmap h2 — GitHub Copilot CLI
 
 Second of roadmap h (Charan, 2026-10-28). Goal: as close to Claude Code as
 Copilot's hooks allow (cards, risky flags, the guard through `ask` if it
@@ -4780,6 +4780,127 @@ Hooks installed through the scratch `bouncer install-hooks --copilot`
 - The machine slept once mid-run (clock jump of 6.4 h): that run was
   discarded and repeated. Real `~/.copilot` and Claude Code's
   `settings.json` compared afterwards: unchanged.
+
+## Roadmap h3 — the next agent (current)
+
+Third of roadmap h (2026-10-29). Audit of the two agents left, Cursor CLI
+(`cursor-agent`) and Antigravity CLI (`agy`), from public docs only;
+nothing installed. Sources: Cursor's hooks reference (cursor.com/docs,
+"Hooks"), Cursor's CLI authentication page, Cursor forum threads (staff
+replies on which events the CLI fires, Jan–May 2026); Antigravity's hooks
+reference (antigravity.google/docs, "Hooks"), two third-party write-ups
+tested on agy 1.1.21 / 1.2.14 (agenticcontrolplane.com, symposium.dev;
+one sells a product on these hooks), install guides. **(step 1)** = not
+documented, must be confirmed in scratch.
+
+### Cursor CLI
+
+1. **Hooks before a tool call, can block.** `beforeShellExecution`
+   (`command`, `cwd`, `sandbox`) answers `permission` `allow` / `deny` /
+   `ask`, `user_message`, `agent_message`. `preToolUse` answers `allow` /
+   `deny` (`ask` accepted, not enforced). Several hooks merge: deny beats
+   ask beats allow.
+2. **Which fire in the CLI.** Staff (Apr 2026): `beforeShellExecution`,
+   `afterShellExecution`, `afterFileEdit`, `postToolUse`, `stop`,
+   `sessionStart`; a May 2026 bug report has `preToolUse` firing for Shell
+   in `cursor-agent`. Not documented per event **(step 1)**. Shell is the
+   one that matters for Bouncer's checks.
+3. **Failures (documented).** Crash, timeout, no output, non-zero exit other
+   than 2: **fail open** (the action proceeds) unless the hook sets
+   `failClosed: true` (default false). Exit 2 = deny. **Exit 0 with invalid
+   JSON or a schema mismatch on a permission hook = blocked** — so the relay
+   must print exactly one valid answer or nothing, and the command ends
+   `; exit 0` as for Copilot. Timeout per hook (`timeout`, seconds; default
+   not stated).
+4. **Unknown (step 1):** whether a hook `allow` beats Cursor's own deny
+   list (`cli-config.json` permissions), as Copilot's did; whether the hook
+   runs for every command or only where Cursor would ask; what `ask` does
+   under `--force`; native Windows behaviour (which shell runs the hook).
+5. **Files.** User `~/.cursor/hooks.json` (one file: rule 6 merge, our
+   entries only), project `.cursor/hooks.json` (trusted workspaces),
+   enterprise `C:\ProgramData\Cursor\hooks.json`. User hooks run from
+   `~/.cursor/`.
+6. **Telling it apart.** snake_case input close to Claude Code's
+   (`tool_name`, `tool_input`, `tool_use_id`, `cwd`); Cursor sets
+   `CLAUDE_PROJECT_DIR` and has Claude Code compatibility (`loop_limit` "null
+   for Claude Code"). So `--agent cursor` in the installed command, and
+   **(step 1)** whether `cursor-agent` also runs Claude Code's hooks from
+   `~/.claude/settings.json` (if so, the `--agent claude-code` entry would
+   see Cursor's input: the h2 trade-off again, but for the user-level file).
+7. **Account.** Needs a Cursor account (browser login or `CURSOR_API_KEY`);
+   models are Cursor's service, no documented custom endpoint, so **no fake
+   local model**: step 1 needs a real sign-in and spends real requests. Free
+   plan limits for the CLI not documented. Official Windows install is an
+   `irm … | iex` script (writes to the user profile, not scratch).
+
+### Antigravity CLI
+
+1. **Hook before a tool call, can block.** `PreToolUse` (`toolCall` `name`,
+   `args`; shell command in `args.CommandLine`) answers `decision`: `allow`,
+   `auto_approve`, `deny`, `ask`, `force_ask`, `deny_unless_prior_grant`,
+   plus `reason`, `overwrite` (rewrites args), `permissionOverrides`.
+2. **Failures.** Official docs: not documented. Third party (agy 1.1.21):
+   crash, timeout, non-zero exit → **"pre-tool hook failed", the tool does
+   not run** (fail closed); exit codes have no deny channel. Another write-up:
+   **`{}` denies**, nothing allows, a non-blocking hook must print
+   `{"decision":"allow"}`. Sources disagree; neither is Google's.
+3. **No "say nothing".** If `{}` denies and a failure denies, there is no
+   answer that means "Antigravity decides as usual": the relay would have
+   to print `allow` (which may override the user's own rules, unknown) or
+   `ask` (a prompt for every tool) whenever Bouncer is closed or slow, and a
+   relay crash blocks the agent. That breaks security rules 1 and 2.
+4. **`--dangerously-skip-permissions`** skips `PreToolUse` entirely
+   (third party, 1.1.21): the guard can't work there.
+5. **Files.** Global `~/.gemini/config/hooks.json`, workspace
+   `.agents/hooks.json`; `/hooks` lists them. Default timeout 30 s.
+6. **Account.** Google account sign-in (free tier in preview); API-key and
+   token paths disputed between guides; no documented custom endpoint, so
+   no fake model. Install `irm https://antigravity.google/cli/install.ps1 | iex`.
+
+### Verdict
+
+- **Antigravity: not safely supportable as approvals now.** It fails closed
+  and (reportedly) has no neutral answer; a watch-only mode through
+  `PostToolUse` / `SessionStart` has the same undocumented failure risk.
+  Revisit if Google documents fail-open behaviour.
+- **Cursor CLI: supportable, Copilot-style.** Its shell hook fails open on
+  crash / timeout / no output, and our relay already prints valid JSON or
+  nothing. Proposed design, pending step 1: `--agent cursor`;
+  `beforeShellExecution` **deny or nothing** (no `allow` until step 1 shows
+  it can't beat Cursor's own deny list; no `ask` until its `--force`
+  behaviour is known); risky card only with Guard every mode on, "Let Cursor
+  decide" and the timeout print nothing (card < relay < `timeout`);
+  `sessionStart` / `stop` watched; never `failClosed`; never a `matcher`;
+  every command ends `; exit 0`; rule 6 for `~/.cursor/hooks.json`.
+- **Blocker:** step 1 and the end-to-end run need a Cursor account and
+  real model requests (no fake model). That is Charan's call (Autopilot
+  rule 3: accounts, installs). If no account: close h, move to f.
+
+### Threats (Cursor, if picked)
+
+1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
+   answer string, tested byte-for-byte; `; exit 0`; tests for crash,
+   missing relay, garbage, timeout → Cursor's normal flow.
+2. **Bouncer overrides Cursor's deny list.** Never `allow` (step 1 decides
+   whether that ever changes).
+3. **Cursor taken for Claude Code, or the reverse.** The flag; step 1
+   checks whether `cursor-agent` runs `~/.claude` hooks.
+4. **Account and data.** Step 1 under a scratch `HOME` / `USERPROFILE`, the
+   install into scratch if the installer allows a prefix, else ask; prompts
+   that only run harmless commands in the playground; the real `~/.cursor`
+   compared before and after.
+5. **Writing Cursor's settings.** Rule 6; `hooks::user_file` and
+   `hermetic()` cover `~/.cursor/hooks.json`.
+6. **Hostile text:** `textContent`, labelled as Cursor's.
+
+### Done when (Cursor, if picked)
+
+- [x] audit from docs recorded here
+- [ ] Charan: account / install OK and the design
+- [ ] step 1 in scratch recorded (events on Windows, failures, `allow` vs
+  deny list, `ask` under `--force`, `~/.claude` hooks)
+- [ ] relay `--agent cursor`, install / uninstall, island label, TESTS +
+  BRIEF, CI green, reviewer agent, Charan's merge, release, hand checks
 
 ## Phase 8 — Music (~1 week)
 
