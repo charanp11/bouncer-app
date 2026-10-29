@@ -5033,6 +5033,18 @@ have asked (it runs for every shell command):
   shell commands on Windows.
 - **Minimum version:** the one tested (2026.10.22); Settings says so.
 
+### Design approved (Charan, 2026-10-29)
+
+**Deny or nothing**, as proposed above, plus the unflagged
+`cursor_version` refusal. **The refusal ships even if Cursor support
+slips: it is a privacy fix** (its own small PR if needed). Before
+building, prove with the `; exit 0` wrapper that empty output, Bouncer
+closed, relay missing, relay crash and hook timeout each fall through to
+Cursor's normal flow, never block; garbage blocks (run 3), so the relay
+prints valid deny JSON or nothing, with a test for each case. Check a
+normal command isn't noticeably slowed. If any "nothing" case blocks and
+can't be fixed: stop and ask.
+
 ### Threats (Cursor, if picked)
 
 1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
