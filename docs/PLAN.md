@@ -4876,6 +4876,68 @@ documented, must be confirmed in scratch.
   real model requests (no fake model). That is Charan's call (Autopilot
   rule 3: accounts, installs). If no account: close h, move to f.
 
+### Decision: Cursor CLI (Charan, 2026-10-29)
+
+Charan makes his own free Cursor account (Hobby plan) and signs in only to
+the scratch profile, when Claude says. Conditions:
+
+1. Cursor's Privacy Mode on before any model request.
+2. Only dummy files in scratch; never his real projects or profiles.
+3. Model requests kept to the minimum step 1 needs.
+4. Record whether `cursor-agent` runs natively on Windows or needs WSL;
+   **WSL only → stop and ask**.
+5. Exact sign-up and sign-in steps when it's time.
+6. After testing: sign out of the scratch profile; tell him how to delete
+   the account.
+
+### Before sign-in: read and smoke-run in scratch (2026-10-29)
+
+- **Installer not used.** `irm 'https://cursor.com/install?win32=true' | iex`
+  (read, not run) deletes and recreates `%LOCALAPPDATA%\cursor-agent` and
+  appends it to the user `PATH` (HKCU). Instead its package
+  (`downloads.cursor.com/lab/2026.10.22-27dcf5f/windows/x64/agent-cli-package.zip`,
+  80 MB, SHA-256 `864a8f6a…c147`) was unpacked into scratch with `tar.exe`:
+  a Windows build with its own `node.exe` (Node 24.22.1), `rg.exe`,
+  `cursorsandbox.exe`. **Native Windows, no WSL** (condition 4). Its
+  messages say Git for Windows is needed for "a private worker" (not the
+  plain CLI; installed here anyway).
+- **Where it writes** (from its code): config `CURSOR_CONFIG_DIR`, else
+  `XDG_CONFIG_HOME\cursor`, else `~\.cursor` (`cli-config.json`); sign-in
+  `%APPDATA%\Cursor\auth.json`; data `CURSOR_DATA_DIR`; Node compile cache
+  `NODE_COMPILE_CACHE`, else `%LOCALAPPDATA%\cursor-compile-cache`;
+  auto-update off with the hidden `--disable-auto-update`. **Hooks use
+  `os.homedir()`** (`USERPROFILE`), not `CURSOR_CONFIG_DIR`, so a scratch
+  run must move `USERPROFILE` / `HOME` too. A scratch launcher sets all of
+  these and clears `CLAUDE*`, `ANTHROPIC*`, `OPENAI*`, `CURSOR_*`, `GH_*`,
+  `GITHUB_*`, `COPILOT_*`, `CODEX_*`, `BOUNCER_*`, `XDG_*`.
+- **Smoke run, no account:** `--version` → `2026.10.22-27dcf5f`; `status` →
+  "Not logged in". Wrote only `cli-config.json` and the compile cache, both
+  in scratch. Real `%LOCALAPPDATA%\cursor-agent`, `cursor-compile-cache`,
+  `%APPDATA%\Cursor`, `~\.cursor`, `~\.local\share\cursor-agent`: absent
+  before and after (also checked from a WMI-created process).
+- **Default permissions:** `approvalMode: "allowlist"`, allow `Shell(ls)`,
+  deny `[]`, sandbox disabled.
+- **It runs Claude Code's hooks (from the code; step 1 confirms).** The
+  hooks loader reads, with no setting to turn it off: enterprise
+  `C:\ProgramData\Cursor\hooks.json`, team, `~\.cursor\hooks.json`, the
+  project's `.cursor\hooks.json`, **`~\.claude\settings.json`**, the
+  project's `.claude\settings.json` and `.claude\settings.local.json`
+  (Claude entries that duplicate a Cursor entry's command are dropped).
+  Claude events map: `PreToolUse` → `preToolUse` (Claude's
+  `hookSpecificOutput.permissionDecision` → `permission`), `PostToolUse`,
+  `UserPromptSubmit` → `beforeSubmitPrompt`, `Stop`, `SubagentStop`,
+  `SessionStart`, `SessionEnd`, `PreCompact`; **`PermissionRequest` and
+  `Notification` are dropped**. Tool names: `Bash` → `Shell`, `Edit` /
+  `Write` → `Write`. Claude entries get `failClosed: false`.
+  **Consequence:** anyone with Bouncer's Claude Code hooks installed who
+  runs `cursor-agent` already has the relay running under Cursor as
+  `--agent claude-code` (SessionStart, PreToolUse, PostToolUse, Stop, …).
+  Step 1 must show what that does today (does a Cursor session show as
+  Claude Code; can the guard's PreToolUse `ask` reach Cursor, where `ask`
+  isn't enforced on `preToolUse`). It also means a separate `--agent
+  cursor` entry in `~\.cursor\hooks.json` would run **beside** the Claude
+  Code one (different command, not deduplicated).
+
 ### Threats (Cursor, if picked)
 
 1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
@@ -4896,7 +4958,8 @@ documented, must be confirmed in scratch.
 ### Done when (Cursor, if picked)
 
 - [x] audit from docs recorded here
-- [ ] Charan: account / install OK and the design
+- [x] Charan: Cursor picked (2026-10-29), with conditions below
+- [ ] Charan: the design, after step 1
 - [ ] step 1 in scratch recorded (events on Windows, failures, `allow` vs
   deny list, `ask` under `--force`, `~/.claude` hooks)
 - [ ] relay `--agent cursor`, install / uninstall, island label, TESTS +
