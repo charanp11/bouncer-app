@@ -5137,6 +5137,13 @@ No blockers. Acted on:
 2. `from_cursor` had split `from_copilot` from its doc comment: moved.
 3. `request.agent in LET_DECIDE` → `Object.hasOwn` (inherited keys).
 
+**Scratch Cursor profile closed (condition 6, 2026-10-29).** `agent logout`
+in the scratch profile: "Logout successful", then "Not logged in"; its
+`auth.json` and the `authInfo` in `cli-config.json` gone. The scratch
+Cursor data (profile, chats, hook logs that held the account's email, the
+unpacked CLI, the test instance's data) deleted. Deleting the account
+itself is Charan's (steps given to him).
+
 Left as is: uninstall turns a user's own `{"version": 1}` (or with an empty
 `hooks`) into `{}`, and removes an empty event list, as for the other
 agents; Cursor reads an empty file the same. A multi-root workspace with an
