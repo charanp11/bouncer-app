@@ -5073,6 +5073,20 @@ PowerShell alone: about 0.13 s is the relay, the rest PowerShell's start,
 which Cursor pays for any hook. A hung relay costs its `timeout`; the
 relay's own deadlines keep it below that.
 
+### The refusal PR and its follow-up (Charan, 2026-10-29)
+
+- **#65** (unflagged `cursor_version` refused): reviewer agent found
+  nothing to change; its note (6 of 9 fixtures had no `cwd`, so the test
+  app would drop them unseen) fixed by also sending each with a `cwd`.
+  Charan: merge when green. **No release of its own: it ships with Cursor
+  support; if Cursor stalls or is dropped, release #65 alone as a patch.**
+- **Also refuse unflagged input with `user_email` or `workspace_roots`**
+  (Charan, yes), in the Cursor PR with tests, so a Cursor event without
+  `cursor_version` still can't pass as Claude Code's. Checked first: none
+  of the 970 recorded Claude Code inputs in `bouncer-playground/recorded`
+  has either field (nor `cursor_version`, nor `timestamp`); their keys are
+  Claude Code's own (`session_id`, `cwd`, `tool_input`, `prompt`, …).
+
 ### Threats (Cursor, if picked)
 
 1. **Bouncer causes a block.** Invalid JSON at exit 0 blocks: one fixed
