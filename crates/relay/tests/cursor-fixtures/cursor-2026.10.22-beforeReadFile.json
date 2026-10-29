@@ -1,0 +1,17 @@
+{
+  "conversation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "generation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "model": "default",
+  "content": "hello from a dummy file\n",
+  "file_path": "C:\\Users\\dev\\project\\dummy.txt",
+  "attachments": [],
+  "tool_use_id": "call-5a2eb1ec-a4b5-43b3-9c16-4d6233351909-0\nfc_09b443e5-7f1e-9aa0-bb18-287139c37cb1_0",
+  "session_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "hook_event_name": "beforeReadFile",
+  "cursor_version": "2026.10.22-27dcf5f",
+  "workspace_roots": [
+    "C:\\Users\\dev\\project"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

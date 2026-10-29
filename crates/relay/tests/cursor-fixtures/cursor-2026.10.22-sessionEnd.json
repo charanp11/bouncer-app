@@ -1,0 +1,17 @@
+{
+  "conversation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "generation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "model": "default",
+  "reason": "completed",
+  "duration_ms": 324127,
+  "is_background_agent": false,
+  "final_status": "completed",
+  "session_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "hook_event_name": "sessionEnd",
+  "cursor_version": "2026.10.22-27dcf5f",
+  "workspace_roots": [
+    "C:\\Users\\dev\\project"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

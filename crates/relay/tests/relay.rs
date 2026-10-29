@@ -843,8 +843,36 @@ fn copilot_vs_code_style_events_print_nothing_even_if_answered() {
     assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
 }
 
+/// Cursor's CLI runs `~/.claude/settings.json` hooks (when any group there
+/// has a `matcher`) without their `args`, so Bouncer's Claude Code entry
+/// runs unflagged with Cursor's own input, `user_email` included. None of
+/// it reaches the app, and nothing prints, even if the app says allow.
+#[test]
+fn cursor_inputs_without_a_flag_print_nothing_and_never_reach_the_app() {
+    let closed = endpoint("cursor-closed");
+    let (seen, answers) = recording("cursor-allow", Decision::Allow);
+    let all = fixtures_in("cursor-fixtures");
+    assert!(all.len() >= 9, "{}", all.len());
+    for (name, raw) in all {
+        assert!(
+            String::from_utf8_lossy(&raw).contains("cursor_version"),
+            "{name}"
+        );
+        assert_silent(&relay(&closed, &raw));
+        assert_silent(&relay(&answers, &raw));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
+}
+
 fn copilot_fixtures() -> Vec<(String, Vec<u8>)> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/copilot-fixtures");
+    fixtures_in("copilot-fixtures")
+}
+
+fn fixtures_in(folder: &str) -> Vec<(String, Vec<u8>)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(folder);
     let mut all: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| {
