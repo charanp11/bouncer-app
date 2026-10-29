@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.11.1 plus roadmap h3 (Cursor CLI, not yet released), 2026-10-29
+Last updated: v0.12.0 (draft), 2026-10-29
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -47,7 +47,7 @@ Bouncer never blocks the agent and never allows anything by default.
 
 ## 3. Features by agent
 
-| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (v0.11.0) | Cursor CLI (next release) |
+| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (v0.11.0) | Cursor CLI (v0.12.0) |
 | --- | --- | --- | --- | --- |
 | Sessions in the island | Yes | Yes, labelled Codex | Yes, labelled Copilot | Yes, labelled Cursor |
 | Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | No Allow ever; Deny on risky commands (guard on) | No Allow ever; Deny on risky shell commands (guard on) |
@@ -81,7 +81,7 @@ Why the differences:
   Needs Copilot CLI 1.0.67 or newer (1.0.66 treats a slow hook as a
   refusal). Nothing is visible inside Copilot's sandbox (`--sandbox`): its
   hooks can't reach Bouncer there.
-- **Cursor** (next release, roadmap h3): its shell hook runs before every
+- **Cursor** (v0.12.0, roadmap h3): its shell hook runs before every
   shell command, whether or not Cursor would ask, so Bouncer gets what
   Copilot gets: Deny or nothing, with a Deny / "Let Cursor decide" card for
   risky shell commands when Guard every mode is on. A hook `allow` doesn't
@@ -264,6 +264,11 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
+- **v0.12.0** (2026-10-29, draft): Cursor CLI support: watch-only plus Deny
+  on risky shell commands (Guard every mode), no Allow from Bouncer, your
+  own Cursor hooks kept; tested with Cursor CLI 2026.10.22. Privacy fix:
+  Cursor's input sent through Claude Code's hooks is ignored (it carried
+  your email).
 - **v0.11.1** (2026-10-28, published 2026-10-28): hardening: Claude Code's hooks name
   themselves (`--agent claude-code`); older hooks keep working and
   Settings shows "Update needed" with Re-install.

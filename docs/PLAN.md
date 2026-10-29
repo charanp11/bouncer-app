@@ -5118,7 +5118,20 @@ relay's own deadlines keep it below that.
   (CU1–CU9) + BRIEF + README
 - [x] end to end in scratch (below)
 - [x] reviewer agent (below)
-- [ ] CI green, Charan's merge, release, hand checks
+- [x] CI green (#66, all 7 checks incl. the installer test), Charan's
+  merge (2026-10-29)
+- [ ] release v0.12.0 (#65 included), Charan's hand checks
+
+**#66 merged (Charan, 2026-10-29); v0.12.0** (notes `docs/releases/v0.12.0.md`,
+#65's privacy fix included, no release of its own): tag on main, release
+workflow, draft for Charan to publish. Hand checks only what he can do
+without signing into Cursor on his real profile.
+
+**Pre-approved (Charan, 2026-10-29):** if a later Cursor drops the UTF-8
+line from its hook wrapper (`$OutputEncoding = [System.Text.UTF8Encoding]
+::new($false)`), add it to the command Bouncer installs, with the same test
+(`the_cursor_command_exits_0_even_with_the_relay_gone`, run without
+Cursor's prefix).
 
 ### Review (2026-10-29, separate reviewer agent)
 
