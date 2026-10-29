@@ -9,9 +9,9 @@ const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 
 test("a Copilot card never says Allow", () => {
-  assert.match(main, /const LET_COPILOT = "Let Copilot decide";/);
-  assert.match(main, /answerButtons\(request, request\.agent === "copilot" \? LET_COPILOT : "Allow once"\)/);
-  assert.match(main, /copilot \? "Left to Copilot: its own rules decide\." : "Allowed\. Back to work\."/);
+  assert.match(main, /const LET_DECIDE: Record<string, string> = \{ copilot: "Let Copilot decide",/);
+  assert.match(main, /answerButtons\(request, LET_DECIDE\[request\.agent\] \?\? "Allow once"\)/);
+  assert.match(main, /left \? `Left to \$\{name\}: its own rules decide\.` : "Allowed\. Back to work\."/);
 });
 
 test("Copilot's hooks: offered only where Copilot is, and say what it gets", () => {
