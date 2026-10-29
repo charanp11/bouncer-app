@@ -678,7 +678,7 @@ function card(request: Request, queue: Request[], done?: boolean): HTMLElement {
   const c = el("section", request.risk ? "card risky" : "card");
   if (done !== undefined) {
     const name = AGENTS[request.agent] ?? request.agent;
-    const left = request.agent in LET_DECIDE;
+    const left = Object.hasOwn(LET_DECIDE, request.agent);
     const text =
       toast?.text ?? (done ? (left ? `Left to ${name}: its own rules decide.` : "Allowed. Back to work.") : `Denied. ${name} was told no.`);
     c.append(el("div", `toast ${done ? "ok" : "no"}`, text));
