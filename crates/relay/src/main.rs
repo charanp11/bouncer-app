@@ -315,32 +315,6 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
 /// was installed for (its `hookName` / `hook_event_name`, where Copilot
 /// sends one), else `None`. The prompt, the notification's text and the
 /// rest stay behind.
-/// Cursor CLI's input (its event `camel`, which the input must name) as
-/// Bouncer's line: only the session, the folder (Cursor's `cwd` is often
-/// empty: then its first workspace root) and, for the shell hook, the
-/// command as a PowerShell (Windows) or Bash request. Everything else
-/// (`user_email`, `workspace_roots`, `model`, the transcript) stays here.
-fn from_cursor(input: &Value, camel: &str, kind: &str, windows: bool) -> Option<Value> {
-    let text = |key| input.get(key)?.as_str();
-    if text("hook_event_name")? != camel {
-        return None;
-    }
-    let cwd = match text("cwd") {
-        Some(cwd) if !cwd.is_empty() => cwd,
-        _ => input.get("workspace_roots")?.get(0)?.as_str()?,
-    };
-    let mut line = serde_json::json!({
-        "hook_event_name": kind,
-        "session_id": text("session_id").or_else(|| text("conversation_id"))?,
-        "cwd": cwd,
-    });
-    if camel == "beforeShellExecution" {
-        line["tool_name"] = if windows { "PowerShell" } else { "Bash" }.into();
-        line["tool_input"] = serde_json::json!({ "command": text("command")? });
-    }
-    Some(line)
-}
-
 fn from_copilot(input: &Value, camel: &str, kind: &str) -> Option<Value> {
     let text = |key| input.get(key)?.as_str();
     let mut line = serde_json::json!({
@@ -369,6 +343,32 @@ fn from_copilot(input: &Value, camel: &str, kind: &str) -> Option<Value> {
                 serde_json::json!({ "notification_type": text("notification_type")? });
         }
         _ => {}
+    }
+    Some(line)
+}
+
+/// Cursor CLI's input (its event `camel`, which the input must name) as
+/// Bouncer's line: only the session, the folder (Cursor's `cwd` is often
+/// empty: then its first workspace root) and, for the shell hook, the
+/// command as a PowerShell (Windows) or Bash request. Everything else
+/// (`user_email`, `workspace_roots`, `model`, the transcript) stays here.
+fn from_cursor(input: &Value, camel: &str, kind: &str, windows: bool) -> Option<Value> {
+    let text = |key| input.get(key)?.as_str();
+    if text("hook_event_name")? != camel {
+        return None;
+    }
+    let cwd = match text("cwd") {
+        Some(cwd) if !cwd.is_empty() => cwd,
+        _ => input.get("workspace_roots")?.get(0)?.as_str()?,
+    };
+    let mut line = serde_json::json!({
+        "hook_event_name": kind,
+        "session_id": text("session_id").or_else(|| text("conversation_id"))?,
+        "cwd": cwd,
+    });
+    if camel == "beforeShellExecution" {
+        line["tool_name"] = if windows { "PowerShell" } else { "Bash" }.into();
+        line["tool_input"] = serde_json::json!({ "command": text("command")? });
     }
     Some(line)
 }
