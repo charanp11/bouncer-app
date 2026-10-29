@@ -1442,3 +1442,75 @@ fn cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints() {
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
 }
+
+/// The command `install-hooks --cursor` writes, run the way Cursor's CLI
+/// runs it (on Windows: `Get-Content <payload> | & { $input | <command> }`
+/// in PowerShell, PLAN roadmap h3; elsewhere through bash with the payload
+/// on stdin): it prints exactly Cursor's deny, and with the relay gone it
+/// exits 0 and prints nothing (Cursor then decides). An odd path runs only
+/// the relay.
+#[test]
+fn the_cursor_command_exits_0_even_with_the_relay_gone() {
+    let base = std::env::temp_dir().join(format!("bouncer-cursor-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let odd = base.join("O'Brien $(touch canary) ; a");
+    std::fs::create_dir_all(&odd).unwrap();
+    let exe = std::env::consts::EXE_SUFFIX;
+    let relay = odd.join(format!("bouncer-hook{exe}"));
+    std::fs::copy(env!("CARGO_BIN_EXE_bouncer-hook"), &relay).unwrap();
+    let request = fixtures_in("cursor-fixtures")
+        .into_iter()
+        .find(|(n, _)| n.contains("beforeShellExecution"))
+        .unwrap()
+        .1;
+    let payload = base.join("payload.json");
+    std::fs::write(&payload, &request).unwrap();
+    let path = serve("cursor-command", always(Some(Decision::Deny)));
+    let run = |relay: &Path| {
+        let command = bouncer_core::hooks::cursor_command(
+            relay.to_str().unwrap(),
+            "beforeShellExecution",
+            cfg!(windows),
+        );
+        let mut shell = if cfg!(windows) {
+            let wrapped = format!(
+                "Get-Content -LiteralPath '{}' -Raw -Encoding UTF8 | & {{ $input | {command} }}",
+                payload.display().to_string().replace('\'', "''")
+            );
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
+            c
+        } else {
+            let mut c = Command::new("bash");
+            c.args(["-c", &command]);
+            c
+        };
+        let mut child = shell
+            .current_dir(&base)
+            .env(bouncer_relay::ENDPOINT_ENV, &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        if !cfg!(windows) {
+            stdin.write_all(&request).unwrap();
+        }
+        drop(stdin);
+        child.wait_with_output().unwrap()
+    };
+    let out = run(&relay);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        stdout_json(&out),
+        serde_json::json!({ "permission": "deny", "user_message": "Denied in Bouncer",
+            "agent_message": "Denied in Bouncer" }),
+        "{out:?}"
+    );
+    let out = run(&odd.join(format!("missing{exe}")));
+    assert!(out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty(), "{out:?}");
+    assert!(!base.join("canary").exists() && !odd.join("canary").exists());
+    let _ = std::fs::remove_dir_all(&base);
+}
