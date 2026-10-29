@@ -860,6 +860,11 @@ fn cursor_inputs_without_a_flag_print_nothing_and_never_reach_the_app() {
         );
         assert_silent(&relay(&closed, &raw));
         assert_silent(&relay(&answers, &raw));
+        // The test app drops a line with no `cwd` (6 of Cursor's events);
+        // with one added, any line that got through would be recorded.
+        let mut with_cwd: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        with_cwd["cwd"] = r"C:\Users\dev\project".into();
+        assert_silent(&relay(&answers, with_cwd.to_string().as_bytes()));
     }
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(*seen.lock().unwrap(), Vec::<String>::new());
