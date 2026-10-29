@@ -4781,7 +4781,7 @@ Hooks installed through the scratch `bouncer install-hooks --copilot`
   discarded and repeated. Real `~/.copilot` and Claude Code's
   `settings.json` compared afterwards: unchanged.
 
-## Roadmap h3 — the next agent (current)
+## Roadmap h3 — Cursor CLI (current)
 
 Third of roadmap h (2026-10-29). Audit of the two agents left, Cursor CLI
 (`cursor-agent`) and Antigravity CLI (`agy`), from public docs only;
@@ -5108,11 +5108,64 @@ relay's own deadlines keep it below that.
 
 - [x] audit from docs recorded here
 - [x] Charan: Cursor picked (2026-10-29), with conditions below
-- [ ] Charan: the design, after step 1
-- [ ] step 1 in scratch recorded (events on Windows, failures, `allow` vs
-  deny list, `ask` under `--force`, `~/.claude` hooks)
-- [ ] relay `--agent cursor`, install / uninstall, island label, TESTS +
-  BRIEF, CI green, reviewer agent, Charan's merge, release, hand checks
+- [x] Charan: the design, after step 1 (Deny or nothing, 2026-10-29)
+- [x] step 1 in scratch recorded (events on Windows, failures, `allow` vs
+  deny list, `ask` in print mode, `~/.claude` hooks); `ask` under
+  `--force` not tried (`--force` refused by the auto-mode classifier; not
+  needed: Bouncer never sends `ask`)
+- [x] fall-through proof with the wrapper (run 4)
+- [x] relay `--agent cursor`, install / uninstall, island label, TESTS
+  (CU1–CU9) + BRIEF + README
+- [x] end to end in scratch (below)
+- [ ] CI green, reviewer agent, Charan's merge, release, hand checks
+
+### Build (2026-10-29)
+
+- **Relay.** `--agent cursor --event <name>` for `sessionStart`,
+  `sessionEnd`, `beforeShellExecution` (the request), `stop`. Cursor's
+  input is rebuilt (`from_cursor`): session, folder (`cwd`, else the first
+  workspace root: Cursor sends `cwd: ""`), and for the shell hook the
+  command as PowerShell (Windows) or Bash. `user_email`,
+  `workspace_roots`, `model`, the transcript never leave the relay. Output:
+  exactly `{"permission":"deny","user_message":"Denied in Bouncer",
+  "agent_message":"Denied in Bouncer"}` or nothing. Unflagged input with
+  `cursor_version`, `user_email` or `workspace_roots` is refused (#65 plus
+  Charan's follow-up).
+- **Desk.** Copilot's deny-only branch now covers Cursor (`deny_only`); the
+  history says "left to Cursor".
+- **Hooks.** Merged into the user's own `~/.cursor/hooks.json` (from the
+  home folder, as Cursor reads it): `version` 1, each event's entry
+  directly in its list (`{ command, timeout }`; Cursor's validator rejects
+  Claude-style groups), `& '<relay>' --agent cursor --event <name>; exit 0`,
+  `timeout` 10 / 120; never `preToolUse`, `matcher`, `failClosed`. CLI
+  `--cursor`; the uninstaller asks fourth; the test guard covers the file.
+- **Island.** "Cursor" label; "Let Cursor decide" (shared `LET_DECIDE`
+  table with Copilot); Settings' "Cursor CLI hooks" row where `~/.cursor`
+  exists; README section. The prototype has no agent-specific card (as for
+  Copilot), so it doesn't change.
+
+### End to end in scratch (2026-10-29, cursor-agent 2026.10.22)
+
+The real Cursor CLI (scratch profile, Charan's free account, Privacy Mode
+on, print mode, model Auto), hooks installed through the scratch
+`bouncer install-hooks --cursor` (diff, yes), a scratch test instance
+(custom-protocol debug build, own pipe via `BOUNCER_ENDPOINT`, which
+Cursor passes on, own rules with `guard = true`, APPDATA, WebView2 folder,
+debug port). One model request. Clicks over CDP.
+
+| Time | Request | Island | Cursor |
+| --- | --- | --- | --- |
+| 13:04:57 | `echo safe-step` | no card; "left to Cursor" | ran |
+| 13:05:22 | `Get-Content $HOME\.claude\settings.json` | red card "Cursor · cursor-work", "Touches Claude Code's own settings.", Deny / Let Cursor decide / Explain this command; left unanswered (the click script's selector broke on PowerShell quoting), gone after 100 s → "left to Cursor", nothing printed | its own flow refused it (not on its allowlist) |
+| 13:07:05 | the same again | red card; **Deny** at 13:07:18 | "Command execution was blocked by a hook: Denied in Bouncer" |
+
+Settings (`about`): Cursor CLI hooks "installed". The timeout path sends
+what "Let Cursor decide" sends (nothing; the button itself is
+`approvals::tests::cursor_gets_deny_or_nothing_like_copilot`). Test
+instance stopped by PID; real `%LOCALAPPDATA%\cursor-agent`,
+`%APPDATA%\Cursor`, `~\.cursor`, `~\.local\share\cursor-agent`: absent;
+real `~\.claude\settings.json` last written 2026-10-28 (checked from a
+WMI-created process). Model requests in all of h3: 5.
 
 ## Phase 8 — Music (~1 week)
 

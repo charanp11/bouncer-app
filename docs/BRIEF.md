@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.11.1, 2026-10-28
+Last updated: v0.11.1 plus roadmap h3 (Cursor CLI, not yet released), 2026-10-29
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -10,7 +10,7 @@ fix this brief.
 ## 1. What Bouncer is
 
 Bouncer is a free, open-source desktop companion for coding agents (Claude
-Code and the Codex CLI today) on Windows. A small "island" at the top of the
+Code, the Codex CLI, GitHub Copilot CLI and Cursor CLI today) on Windows. A small "island" at the top of the
 screen shows every agent session live. When an agent asks for permission
 (run a command, edit a file), Bouncer shows a card with the whole request
 and Allow / Deny buttons; rules you write can answer safe requests for you;
@@ -22,7 +22,7 @@ Bouncer never blocks the agent and never allows anything by default.
 
 ## 2. How it works
 
-- **Hooks.** Claude Code and Codex can run a small program at set moments
+- **Hooks.** Claude Code and the other agents can run a small program at set moments
   ("a session started", "I want to run this command"). Bouncer installs
   entries in their settings files that run its **relay**.
 - **Relay** (`bouncer-hook.exe`). A tiny program the agent starts for each
@@ -47,16 +47,16 @@ Bouncer never blocks the agent and never allows anything by default.
 
 ## 3. Features by agent
 
-| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (v0.11.0) |
-| --- | --- | --- | --- |
-| Sessions in the island | Yes | Yes, labelled Codex | Yes, labelled Copilot |
-| Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | No Allow ever; Deny on risky commands (guard on) |
-| Rules auto-allow | Yes (auto mode) | Yes | No: Copilot's own rules decide |
-| Risky flags | Yes | Yes (PowerShell rules on Windows) | Yes, on the guard's card |
-| "Asking in the terminal" | Yes | Yes | Yes (watch-only) |
-| Questions and plans in the island | Yes | No | No (watch-only "question in the terminal") |
-| Guard every mode | Yes (opt-in) | No | Yes (opt-in), Deny / "Let Copilot decide" only |
-| Explain this command | Yes | Yes | Yes, on the guard's card |
+| | Claude Code | Codex CLI (v0.10.0) | GitHub Copilot CLI (v0.11.0) | Cursor CLI (next release) |
+| --- | --- | --- | --- | --- |
+| Sessions in the island | Yes | Yes, labelled Codex | Yes, labelled Copilot | Yes, labelled Cursor |
+| Allow / Deny cards | Yes, when Claude Code asks | Yes, when Codex asks | No Allow ever; Deny on risky commands (guard on) | No Allow ever; Deny on risky shell commands (guard on) |
+| Rules auto-allow | Yes (auto mode) | Yes | No: Copilot's own rules decide | No: Cursor's own rules decide |
+| Risky flags | Yes | Yes (PowerShell rules on Windows) | Yes, on the guard's card | Yes, on the guard's card (shell commands only) |
+| "Asking in the terminal" | Yes | Yes | Yes (watch-only) | No (Cursor's hooks don't say) |
+| Questions and plans in the island | Yes | No | No (watch-only "question in the terminal") | No |
+| Guard every mode | Yes (opt-in) | No | Yes (opt-in), Deny / "Let Copilot decide" only | Yes (opt-in), Deny / "Let Cursor decide" only |
+| Explain this command | Yes | Yes | Yes, on the guard's card | Yes, on the guard's card |
 
 Why the differences:
 
@@ -81,6 +81,19 @@ Why the differences:
   Needs Copilot CLI 1.0.67 or newer (1.0.66 treats a slow hook as a
   refusal). Nothing is visible inside Copilot's sandbox (`--sandbox`): its
   hooks can't reach Bouncer there.
+- **Cursor** (next release, roadmap h3): its shell hook runs before every
+  shell command, whether or not Cursor would ask, so Bouncer gets what
+  Copilot gets: Deny or nothing, with a Deny / "Let Cursor decide" card for
+  risky shell commands when Guard every mode is on. A hook `allow` doesn't
+  beat Cursor's own deny list, but would skip its prompt, so Bouncer never
+  sends one. On Windows Cursor reads a hook's answer only when the hook's
+  shell exits, and blocks a command on output that isn't valid JSON: every
+  hook command ends in "exit 0" and the relay prints one valid deny or
+  nothing, so a closed, missing, crashed or slow Bouncer never blocks Cursor
+  (all proven with the real Cursor CLI). Bouncer adds its entries to your
+  own `~/.cursor/hooks.json` and leaves your hooks alone. Each shell command
+  costs about 0.75 s more on Windows. Tested with Cursor CLI 2026.10.22 on a
+  free account in a test profile, Privacy Mode on.
 
 Where Claude Code runs: the terminal, the VS Code extension and the Claude
 desktop app's Code tab all work; Claude Code on the web can't (its hooks run
@@ -89,7 +102,7 @@ in the cloud).
 ## 4. Safety model
 
 **How risk is decided.** Bouncer parses shell commands (Bash, and PowerShell
-for Codex and Copilot on Windows) with its own parser. A request is flagged risky when
+for Codex, Copilot and Cursor on Windows) with its own parser. A request is flagged risky when
 it: downloads a script and runs it; builds part of the command while it
 runs; hides a command inside a string; deletes outside the project; touches
 secrets (.env, keys, credentials); force-pushes; runs as administrator;
@@ -160,6 +173,11 @@ In the order they appear:
   the diff; says what Copilot gets (watch-only plus Deny on risky commands,
   no Allow from Bouncer, nothing inside its sandbox); needs Copilot CLI
   1.0.67+.
+- **Cursor CLI hooks**: shown when a `~/.cursor` folder exists; adds
+  Bouncer's entries to Cursor's `~/.cursor/hooks.json` with the diff (your
+  own hooks there stay); says what Cursor gets (watch-only plus Deny on
+  risky shell commands, no Allow from Bouncer); tested with Cursor CLI
+  2026.10.22.
 - **Start with Windows**: off by default.
 - **Shortcut Ctrl+Alt+B**: opens Bouncer from anywhere; never approves.
 - **Check for updates**: on by default; off = no network at all.
@@ -191,15 +209,17 @@ In the order they appear:
 
 - `crates/relay/`: the `bouncer-hook` relay (std + serde_json only).
   - `src/main.rs`: reads one event, talks to the app, prints the answer
-    or nothing; the `--agent claude-code`, `--agent codex` and `--agent
-    copilot --event <name>` flags (Copilot's camelCase input becomes the
-    same line; deny only). No flag is an older Claude Code install.
+    or nothing; the `--agent claude-code`, `--agent codex`, `--agent
+    copilot --event <name>` and `--agent cursor --event <name>` flags
+    (Copilot's and Cursor's input becomes the same line; deny only). No
+    flag is an older Claude Code install.
   - `src/lib.rs`: shared pipe / socket naming and limits.
   - `src/win.rs`, `src/unix.rs`: the named pipe (Windows) and Unix socket
     (macOS), with same-user checks.
   - `src/questions.rs`: Claude Code question / plan answers.
   - `tests/`: fail-safe and end-to-end relay tests, recorded fixtures
-    (Claude Code's, `codex-fixtures/`, `copilot-fixtures/`).
+    (Claude Code's, `codex-fixtures/`, `copilot-fixtures/`,
+    `cursor-fixtures/`).
 - `crates/core/`: everything that isn't UI.
   - `event.rs`: the events the app understands.
   - `ipc.rs`: the app's side of the pipe.
@@ -291,11 +311,12 @@ published.
 - **One feature per release**, each audited first, its own PR, Charan's OK
   to merge; a tag means a release.
 - **Agents one per release, told apart by an explicit flag**
-  (`--agent codex`, `--agent copilot`, and since v0.11.1 `--agent
-  claude-code`): the relay never guesses from the input's shape. Older
-  Claude Code installs have no flag; for them only, input with a
-  `timestamp` (Copilot's) or a `cursor_version` (Cursor's) is refused, so a
-  field Claude Code may add one day can't hide a flagged install.
+  (`--agent codex`, `--agent copilot`, `--agent cursor`, and since v0.11.1
+  `--agent claude-code`): the relay never guesses from the input's shape.
+  Older Claude Code installs have no flag; for them only, input with a
+  `timestamp` (Copilot's) or a `cursor_version`, `user_email` or
+  `workspace_roots` (Cursor's) is refused, so a field Claude Code may add
+  one day can't hide a flagged install.
   Why Cursor (Charan, 2026-10-29, a privacy fix): Cursor's CLI also runs
   the hooks in `~/.claude/settings.json` (when any of them has a matcher),
   drops their arguments so Bouncer's entry runs with no flag, and sends its
@@ -309,6 +330,13 @@ published.
   "ask" (a Yes beats them too, and autopilot turns it into a refusal), any
   `preToolUse` hook (it refuses the tool when the hook fails), and cards
   for every request (the hook can't tell whether Copilot would have asked).
+- **Cursor: Deny only too** (Charan, 2026-10-29, after step 1): its shell
+  hook runs for every command and can't say whether Cursor would ask; an
+  `allow` doesn't beat Cursor's deny list but would skip its prompt. Picked
+  over Antigravity CLI, whose hooks block the tool when they fail and have
+  no "say nothing" answer. Shipping it needed proof first that empty
+  output, a closed Bouncer, a missing or crashed relay and a hook timeout
+  all let Cursor carry on (they do, with "exit 0").
 - **Character and sounds drawn in code**: nothing copied from Coucou.
 - **Repo name `bouncer-app`**: "bouncer" was taken on crates.io and npm.
 
@@ -321,6 +349,10 @@ published.
 - Codex: allow / deny only. Copilot: watch-only plus Deny; nothing inside
   its sandbox; rules never answer for it. Both tested with the real CLI and
   a local test model, never a live one (no subscriptions).
+- Cursor: watch-only plus Deny, shell commands only (no file edits, reads
+  or MCP tools as requests); rules never answer for it. Tested with the
+  real Cursor CLI and a live model on a free account in a test profile.
+  Antigravity CLI isn't supported: its hooks block the tool when they fail.
 - Not code-signed: SmartScreen warns; Smart App Control blocks it.
 - No Mac release (the code is checked on macOS in CI); no Linux.
 - Explain and chat answers can be wrong; Explain costs CPU while it streams.
@@ -335,6 +367,8 @@ In order, one per release, each audited first:
 
 1. **More agents (h)**, one per release, each audited for whether its hooks
    can block a tool call (yes: approvals; no: watch-and-flag, labelled).
+   Codex, Copilot and Cursor are in; Antigravity was audited and left out
+   (its hooks fail closed).
 2. **f: Ask about this session**: a read-only question about a running
    session.
 3. **g: Mac release** (needs a real Mac).
