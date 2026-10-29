@@ -1,0 +1,17 @@
+{
+  "conversation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "generation_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "model": "default",
+  "command": "echo probe-plain",
+  "cwd": "",
+  "sandbox": false,
+  "tool_use_id": "d64ef8c6-9fee-4c97-a922-cf6f62ca3a05",
+  "session_id": "344137a9-6042-4be6-95c0-e8ebcc7a7626",
+  "hook_event_name": "beforeShellExecution",
+  "cursor_version": "2026.10.22-27dcf5f",
+  "workspace_roots": [
+    "C:\\Users\\dev\\project"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

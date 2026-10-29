@@ -32,6 +32,10 @@ const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path", "error"];
 const CODEX_DROPPED: &[&str] = &["model", "prompt", "last_assistant_message"];
 /// Marks the line for the app as Codex's (`bouncer_core::event::AGENT_FIELD`).
 const AGENT_FIELD: &str = "bouncer_agent";
+/// Fields Claude Code never sends and another agent always does: with no
+/// flag, input carrying one is refused (Copilot's `timestamp`, Cursor's
+/// `cursor_version`).
+const OTHER_AGENTS_FIELDS: &[&str] = &["timestamp", "cursor_version"];
 
 /// Copilot CLI's events Bouncer installs, by their camelCase names (the
 /// installed command names the event: Copilot's `sessionStart` input
@@ -214,9 +218,12 @@ fn decision_json(answer: &str, tool: Option<&str>, input: &Value) -> Option<Stri
 /// comes only from the relay's own command line: any copy in the input goes.
 /// With no flag, input carrying a `timestamp` is refused: Claude Code never
 /// sent one and every Copilot input does (Copilot runs a repository's
-/// `.claude/settings.json` hooks with input in Claude Code's shape). With
-/// `--agent claude-code` the input is Claude Code's whatever it carries, so
-/// a `timestamp` Claude Code may add one day never hides it.
+/// `.claude/settings.json` hooks with input in Claude Code's shape). So is
+/// input carrying `cursor_version`: Cursor's CLI runs `~/.claude/settings.json`
+/// hooks without their `args` (so with no flag) and sends its own input,
+/// with the user's email. With `--agent claude-code` the input is Claude
+/// Code's whatever it carries, so a field Claude Code may add one day never
+/// hides it.
 fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     let mut raw = Vec::new();
     input.take(MAX_INPUT + 1).read_to_end(&mut raw).ok()?;
@@ -230,7 +237,7 @@ fn read_event(input: impl Read, agent: Agent) -> Option<(String, Value)> {
     }
     let map = payload.as_object_mut()?;
     map.get("hook_event_name")?.as_str()?;
-    if agent == Agent::Unflagged && map.contains_key("timestamp") {
+    if agent == Agent::Unflagged && OTHER_AGENTS_FIELDS.iter().any(|f| map.contains_key(*f)) {
         return None;
     }
     map.remove(AGENT_FIELD);
@@ -617,6 +624,22 @@ mod tests {
         );
         let claude = br#"{"hook_event_name":"PreToolUse","session_id":"v","cwd":"/p","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
         assert!(read_event_claude(&claude[..]).is_some());
+    }
+
+    /// Cursor's CLI runs `~/.claude/settings.json` hooks with no `args` and
+    /// its own input (with `user_email`), whatever the event name's case.
+    #[test]
+    fn with_no_flag_input_with_cursor_version_is_refused() {
+        for kind in ["preToolUse", "PreToolUse", "sessionStart", "Stop"] {
+            let cursor = format!(
+                r#"{{"hook_event_name":"{kind}","session_id":"c","cursor_version":"2026.10.22-27dcf5f","user_email":"dev@example.com","tool_name":"Shell","tool_input":{{"command":"ls"}}}}"#
+            );
+            assert!(read_event_claude(cursor.as_bytes()).is_none(), "{kind}");
+            assert!(
+                read_event(cursor.as_bytes(), Agent::ClaudeCode).is_some(),
+                "flag decides"
+            );
+        }
     }
 
     /// `--agent claude-code` (installs since v0.11.1): always Claude Code's,
