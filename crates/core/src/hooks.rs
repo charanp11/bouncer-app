@@ -58,12 +58,23 @@ pub const COPILOT_EVENTS: &[(&str, u64)] = &[
     ("notification", 10),
 ];
 
+/// Cursor CLI's events, with the hook timeout in seconds. Only the shell
+/// hook decides (Deny or nothing); never `preToolUse` (it would only double
+/// it). `beforeShellExecution`'s stays above the relay's 110 s budget.
+pub const CURSOR_EVENTS: &[(&str, u64)] = &[
+    ("sessionStart", 10),
+    ("sessionEnd", 10),
+    ("beforeShellExecution", 120),
+    ("stop", 10),
+];
+
 /// Whose hooks file it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
     ClaudeCode,
     Codex,
     Copilot,
+    Cursor,
 }
 
 impl Agent {
@@ -72,6 +83,7 @@ impl Agent {
             Agent::ClaudeCode => EVENTS,
             Agent::Codex => CODEX_EVENTS,
             Agent::Copilot => COPILOT_EVENTS,
+            Agent::Cursor => CURSOR_EVENTS,
         }
     }
 
@@ -80,7 +92,20 @@ impl Agent {
             Agent::ClaudeCode => is_ours(hook),
             Agent::Codex => is_ours_codex(hook),
             Agent::Copilot => is_ours_copilot(hook),
+            Agent::Cursor => is_ours_cursor(hook),
         }
+    }
+
+    /// Cursor's events hold their entries directly; the others hold groups
+    /// (`{ "hooks": [entry] }`). A group in Cursor's file is invalid there.
+    fn flat(self) -> bool {
+        self == Agent::Cursor
+    }
+
+    /// Whether Bouncer adds `"version": 1` (Copilot's and Cursor's files
+    /// need it).
+    fn versioned(self) -> bool {
+        matches!(self, Agent::Copilot | Agent::Cursor)
     }
 
     /// The entry's field holding the command `status` compares.
@@ -113,6 +138,11 @@ impl Agent {
                 "type": "command",
                 COPILOT_SHELL: copilot_command(relay, event, cfg!(windows)),
                 "timeoutSec": timeout,
+            }),
+            // Never `failClosed`, never a `matcher`.
+            Agent::Cursor => json!({
+                "command": cursor_command(relay, event, cfg!(windows)),
+                "timeout": timeout,
             }),
         }
     }
@@ -179,6 +209,21 @@ fn copilot_rest(event: &str) -> String {
     format!(" --agent copilot --event {event}; exit 0")
 }
 
+/// Cursor's CLI runs a hook's `command` in PowerShell on Windows (`sh`
+/// elsewhere) and reads its answer only when that shell exits; a hook that
+/// ends on its own never does there, so its answer was ignored until the
+/// timeout. And output that isn't valid JSON blocks the command. So the
+/// command always ends in `exit 0`: Cursor reads the answer at once, and a
+/// missing relay, a crash or a timeout means "nothing" (PLAN roadmap h3,
+/// runs 3 and 4). The relay is quoted as for Codex.
+pub fn cursor_command(relay: &str, event: &str, windows: bool) -> String {
+    shell_command(relay, &cursor_rest(event), windows)
+}
+
+fn cursor_rest(event: &str) -> String {
+    format!(" --agent cursor --event {event}; exit 0")
+}
+
 /// The relay path in a command `codex_command` wrote, in either form; `None`
 /// for anything else (it must come back out exactly).
 fn codex_relay(command: &str) -> Option<String> {
@@ -227,6 +272,17 @@ fn is_ours_copilot(hook: &Value) -> bool {
             })
         })
     })
+}
+
+/// A command `cursor_command` wrote for any of our events.
+fn is_ours_cursor(hook: &Value) -> bool {
+    hook.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|c| {
+            CURSOR_EVENTS.iter().any(|(event, _)| {
+                shell_relay(c, &cursor_rest(event)).is_some_and(|p| is_relay_name(&p))
+            })
+        })
 }
 
 /// `$CLAUDE_CONFIG_DIR/settings.json` (as Claude Code reads it), else
@@ -278,6 +334,16 @@ pub fn copilot_hooks_path(
     Ok(dir.join("hooks").join("bouncer.json"))
 }
 
+/// `~/.cursor/hooks.json`, Cursor CLI's user hooks file (read from the home
+/// folder; `CURSOR_CONFIG_DIR` doesn't move it). Shared with the user's own
+/// hooks: only our entries are ever changed.
+pub fn cursor_hooks_path(home: Option<OsString>) -> Result<PathBuf, String> {
+    let home = home
+        .filter(|h| !h.is_empty())
+        .ok_or("can't find your home folder; pass --settings")?;
+    Ok(PathBuf::from(home).join(".cursor").join("hooks.json"))
+}
+
 /// Set (to anything) by tests that run Bouncer's programs: every real
 /// profile file `user_file` resolves must then be inside the temp folder.
 pub const TEST_GUARD_ENV: &str = "BOUNCER_TEST_GUARD";
@@ -294,6 +360,7 @@ pub fn user_file(agent: Agent) -> Result<PathBuf, String> {
         Agent::ClaudeCode => settings_path(std::env::var_os("CLAUDE_CONFIG_DIR"), home)?,
         Agent::Codex => codex_hooks_path(std::env::var_os("CODEX_HOME"), home)?,
         Agent::Copilot => copilot_hooks_path(std::env::var_os("COPILOT_HOME"), home)?,
+        Agent::Cursor => cursor_hooks_path(home)?,
     };
     if cfg!(test) || std::env::var_os(TEST_GUARD_ENV).is_some() {
         guard_test_path(&path, &std::env::temp_dir());
@@ -336,14 +403,21 @@ fn installed_for(agent: Agent, settings: &Value) -> bool {
     settings["hooks"].as_object().is_some_and(|events| {
         events
             .values()
-            .filter_map(Value::as_array)
-            .flatten()
-            .any(|group| {
-                group["hooks"]
-                    .as_array()
-                    .is_some_and(|list| list.iter().any(|h| agent.is_ours(h)))
-            })
+            .any(|list| !entries_of(agent, list).is_empty())
     })
+}
+
+/// Our hook entries in one event's list (in groups, or directly for Cursor).
+fn entries_of(agent: Agent, list: &Value) -> Vec<&Value> {
+    let list = list.as_array().into_iter().flatten();
+    if agent.flat() {
+        list.filter(|h| agent.is_ours(h)).collect()
+    } else {
+        list.filter_map(|group| group["hooks"].as_array())
+            .flatten()
+            .filter(|h| agent.is_ours(h))
+            .collect()
+    }
 }
 
 /// Adds our hooks (replacing any old ones) pointing at the `relay` executable.
@@ -359,7 +433,7 @@ pub fn install_for(agent: Agent, settings: &mut Value, relay: &str) -> Result<()
     let root = settings
         .as_object_mut()
         .ok_or("the settings file is not a JSON object")?;
-    if agent == Agent::Copilot {
+    if agent.versioned() {
         root.entry("version").or_insert(json!(1));
     }
     let hooks = root
@@ -373,7 +447,10 @@ pub fn install_for(agent: Agent, settings: &mut Value, relay: &str) -> Result<()
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .ok_or(format!("\"hooks.{event}\" is not a list"))?
-            .push(json!({ "hooks": [agent.entry(relay, event, timeout)] }));
+            .push(match agent.flat() {
+                true => agent.entry(relay, event, timeout),
+                false => json!({ "hooks": [agent.entry(relay, event, timeout)] }),
+            });
     }
     Ok(())
 }
@@ -394,14 +471,18 @@ fn uninstall_for(agent: Agent, settings: &mut Value) {
             continue;
         };
         let had_groups = !groups.is_empty();
-        groups.retain_mut(|group| {
-            let Some(list) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
-                return true;
-            };
-            let had_hooks = !list.is_empty();
-            list.retain(|hook| !agent.is_ours(hook));
-            !(had_hooks && list.is_empty())
-        });
+        if agent.flat() {
+            groups.retain(|hook| !agent.is_ours(hook));
+        } else {
+            groups.retain_mut(|group| {
+                let Some(list) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let had_hooks = !list.is_empty();
+                list.retain(|hook| !agent.is_ours(hook));
+                !(had_hooks && list.is_empty())
+            });
+        }
         if had_groups && groups.is_empty() {
             emptied.push(event.clone());
         }
@@ -414,8 +495,9 @@ fn uninstall_for(agent: Agent, settings: &mut Value) {
             .as_object_mut()
             .map(|root| root.shift_remove("hooks"));
     }
-    // Copilot's file is ours: with our hooks gone, our `version` goes too.
-    if agent == Agent::Copilot && *settings == json!({ "version": 1 }) {
+    // Copilot's file is ours; Cursor's left with only a `version`: with our
+    // hooks gone, that `version` goes too.
+    if agent.versioned() && *settings == json!({ "version": 1 }) {
         *settings = json!({});
     }
 }
@@ -483,14 +565,7 @@ pub fn status_for(agent: Agent, settings: &Value, relay: &str) -> Status {
     }
     let (mut moved, mut outdated) = (false, false);
     for &(event, timeout) in agent.events() {
-        let ours: Vec<&Value> = settings["hooks"][event]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|group| group["hooks"].as_array())
-            .flatten()
-            .filter(|hook| agent.is_ours(hook))
-            .collect();
+        let ours = entries_of(agent, &settings["hooks"][event]);
         let want = agent.entry(relay, event, timeout);
         let key = agent.command_key();
         let same_relay = |h: &&Value| want[key] == h[key];
@@ -1146,16 +1221,125 @@ mod tests {
         assert!(is_ours_copilot(&json!({ "powershell": w })));
     }
 
+    /// Cursor's file is shared with the user's own hooks: version 1, each
+    /// event's list holds our entry directly (a group is invalid in
+    /// Cursor's file), the command the quoted relay with its event and
+    /// `; exit 0`, never `failClosed`; uninstall gives the user's file back
+    /// exactly. Never `preToolUse`.
+    #[test]
+    fn cursor_install_status_and_uninstall() {
+        let mut s = json!({});
+        assert_eq!(status_for(Agent::Cursor, &s, ODD), Status::Missing);
+        install_for(Agent::Cursor, &mut s, ODD).unwrap();
+        install_for(Agent::Cursor, &mut s, ODD).unwrap();
+        assert_eq!(s["version"], 1);
+        assert!(!installed(&s), "Claude Code's check doesn't see Cursor's");
+        assert_eq!(
+            s["hooks"].as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["sessionStart", "sessionEnd", "beforeShellExecution", "stop"]
+        );
+        for &(event, timeout) in CURSOR_EVENTS {
+            let list = s["hooks"][event].as_array().unwrap();
+            assert_eq!(list.len(), 1, "{event}");
+            let entry = &list[0];
+            assert_eq!(
+                entry.as_object().unwrap().len(),
+                2,
+                "only command and timeout"
+            );
+            assert_eq!(entry["timeout"], timeout);
+            let command = entry["command"].as_str().unwrap();
+            assert_eq!(command, cursor_command(ODD, event, cfg!(windows)));
+            assert!(command.ends_with(&format!("--agent cursor --event {event}; exit 0")));
+        }
+        assert_eq!(status_for(Agent::Cursor, &s, ODD), Status::Installed);
+        assert_eq!(
+            status_for(Agent::Cursor, &s, r"D:\other\bouncer-hook.exe"),
+            Status::Moved
+        );
+        let mut old = s.clone();
+        old["hooks"]["beforeShellExecution"][0]["timeout"] = json!(30);
+        assert_eq!(status_for(Agent::Cursor, &old, ODD), Status::Incomplete);
+        uninstall_for(Agent::Cursor, &mut s);
+        assert_eq!(s, json!({}));
+        // The user's own hooks in the same file and event stay, in order.
+        let mut mine = json!({ "version": 1, "hooks": {
+            "beforeShellExecution": [{ "command": "./audit.sh", "matcher": "rm" }],
+            "afterFileEdit": [{ "command": "./format.sh" }] } });
+        let before = mine.clone();
+        install_for(Agent::Cursor, &mut mine, ODD).unwrap();
+        assert_eq!(
+            mine["hooks"]["beforeShellExecution"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(status_for(Agent::Cursor, &mine, ODD), Status::Installed);
+        uninstall_for(Agent::Cursor, &mut mine);
+        assert_eq!(mine, before);
+        // Claude Code's, Codex's and Copilot's entries are never Cursor's.
+        for agent in [Agent::ClaudeCode, Agent::Codex, Agent::Copilot] {
+            let mut other = json!({});
+            install_for(agent, &mut other, RELAY).unwrap();
+            assert!(!installed_for(Agent::Cursor, &other), "{agent:?}");
+        }
+    }
+
+    /// Cursor's command, read back: odd paths come out exactly; lookalikes
+    /// aren't ours. The Windows form is the one proven in scratch (run 4).
+    #[test]
+    fn cursor_commands_quote_the_path_and_lookalikes_are_not_ours() {
+        for windows in [true, false] {
+            for event in ["sessionStart", "beforeShellExecution"] {
+                let c = cursor_command(ODD, event, windows);
+                assert_eq!(shell_relay(&c, &cursor_rest(event)).as_deref(), Some(ODD));
+            }
+        }
+        let w = cursor_command(RELAY, "beforeShellExecution", true);
+        assert_eq!(
+            w,
+            r"& 'C:\Program Files\Bouncer\bouncer-hook.exe' --agent cursor --event beforeShellExecution; exit 0"
+        );
+        for fake in [
+            w.replace("; exit 0", ""),
+            w.replace("cursor", "copilot"),
+            w.replace("beforeShellExecution", "preToolUse"),
+            w.replace("bouncer-hook.exe", "other.exe"),
+            format!("{w}; Remove-Item x"),
+        ] {
+            assert!(!is_ours_cursor(&json!({ "command": fake })), "{fake}");
+        }
+        assert!(is_ours_cursor(&json!({ "command": w })));
+    }
+
+    #[test]
+    fn cursor_hooks_path_is_in_the_home_folder() {
+        let path = |home: Option<&str>| cursor_hooks_path(home.map(Into::into));
+        assert_eq!(
+            path(Some("h")),
+            Ok(Path::new("h").join(".cursor").join("hooks.json"))
+        );
+        assert!(path(Some("")).is_err());
+        assert!(path(None).is_err());
+    }
+
     /// Condition 4 (Charan, 2026-10-28): Copilot rejects a whole settings
     /// file over one empty `matcher`, so no group Bouncer writes, for any
-    /// agent, carries a `matcher`.
+    /// agent, carries a `matcher`. Nor a `failClosed`.
     #[test]
     fn bouncer_never_writes_a_matcher() {
-        for agent in [Agent::ClaudeCode, Agent::Codex, Agent::Copilot] {
+        for agent in [
+            Agent::ClaudeCode,
+            Agent::Codex,
+            Agent::Copilot,
+            Agent::Cursor,
+        ] {
             let mut s = json!({});
             install_for(agent, &mut s, RELAY).unwrap();
             let text = serde_json::to_string(&s).unwrap();
             assert!(!text.contains("matcher"), "{agent:?}: {text}");
+            assert!(!text.contains("failClosed"), "{agent:?}: {text}");
         }
     }
 
@@ -1186,6 +1370,7 @@ mod tests {
             home.join(".claude").join("settings.json"),
             home.join(".codex").join("hooks.json"),
             home.join(".copilot").join("hooks").join("bouncer.json"),
+            home.join(".cursor").join("hooks.json"),
             temp.clone(),
             temp.join("..").join("settings.json"),
             PathBuf::from("settings.json"),

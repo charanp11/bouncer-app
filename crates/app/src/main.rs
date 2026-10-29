@@ -976,6 +976,7 @@ fn about(app: AppHandle, island: State<'_, Island>) -> Value {
         "hooks": hook_status(Agent::ClaudeCode),
         "codexHooks": hook_status(Agent::Codex),
         "copilotHooks": hook_status(Agent::Copilot),
+        "cursorHooks": hook_status(Agent::Cursor),
         "autostart": std::env::current_exe().ok().and_then(|exe| autostart::enabled(&exe)),
         "shortcutTaken": island.shortcut_taken.load(Ordering::Relaxed),
     })
@@ -991,8 +992,8 @@ fn set_autostart(on: bool) -> Result<bool, String> {
 }
 
 /// "installed", "incomplete", "moved", "missing" (no file, or none of ours)
-/// or "unknown" (unreadable), for the relay beside this app. For Codex and
-/// Copilot also "absent": no Codex (Copilot) folder, so Settings doesn't
+/// or "unknown" (unreadable), for the relay beside this app. For Codex,
+/// Copilot and Cursor also "absent": no such folder, so Settings doesn't
 /// offer its hooks. Copilot's folder is the one above `hooks/`.
 fn hook_status(agent: Agent) -> &'static str {
     let (Ok(path), Ok(relay)) = (hooks::user_file(agent), hooks::relay_beside_me()) else {
@@ -1002,6 +1003,7 @@ fn hook_status(agent: Agent) -> &'static str {
         Agent::ClaudeCode => None,
         Agent::Codex => path.parent(),
         Agent::Copilot => path.parent().and_then(Path::parent),
+        Agent::Cursor => path.parent(),
     };
     if agent != Agent::ClaudeCode && !folder.is_some_and(Path::is_dir) {
         return "absent";
@@ -1036,6 +1038,7 @@ fn hooks_preview(
         None | Some("claude-code") => Agent::ClaudeCode,
         Some("codex") => Agent::Codex,
         Some("copilot") => Agent::Copilot,
+        Some("cursor") => Agent::Cursor,
         Some(_) => return Err("unknown agent".into()),
     };
     let path = hooks::user_file(agent)?;

@@ -310,6 +310,90 @@ fn copilot_hooks_install_and_the_uninstaller_removes_them() {
     );
 }
 
+/// Cursor CLI: `install-hooks --cursor` merges Bouncer's entries into the
+/// user's own `~/.cursor/hooks.json` (their hooks stay) after the diff and a
+/// yes; the uninstaller offers it fourth, and a yes gives the user's file
+/// back as it was (a dated backup beside it).
+#[test]
+fn cursor_hooks_install_and_the_uninstaller_removes_them() {
+    let dir = temp_dir("cursor");
+    let relay = dir.join("bouncer-hook.exe");
+    fs::write(&relay, "").unwrap();
+    let file = dir.join(".cursor").join("hooks.json");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let mine = "{
+  \"version\": 1,
+  \"hooks\": {
+    \"afterFileEdit\": [
+      {
+        \"command\": \"./format.sh\"
+      }
+    ]
+  }
+}
+";
+    fs::write(&file, mine).unwrap();
+    let run = |args: &[&str], answer: &str| {
+        let mut child = hermetic(&dir)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(answer.as_bytes());
+        child.wait_with_output().unwrap()
+    };
+    let relay = relay.to_str().unwrap();
+    let out = run(
+        &["install-hooks", "--cursor", "--relay", relay],
+        "n
+",
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .contains("--agent cursor --event beforeShellExecution; exit 0")
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        mine,
+        "nothing without a yes"
+    );
+    assert!(
+        run(
+            &["install-hooks", "--cursor", "--relay", relay],
+            "y
+"
+        )
+        .status
+        .success()
+    );
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("./format.sh") && text.contains("beforeShellExecution"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("preToolUse") && !text.contains("matcher") && !text.contains("failClosed"),
+        "{text}"
+    );
+    let out = run(
+        &["uninstall-hooks", "--uninstalling"],
+        "y
+",
+    );
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        shown.contains("Remove its hooks from Cursor CLI?"),
+        "{shown}"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), mine);
+    assert_eq!(
+        fs::read_dir(file.parent().unwrap()).unwrap().count(),
+        3,
+        "the file and its two backups"
+    );
+}
+
 /// With the test marker set, a CLI that would resolve a file outside the
 /// temp folder (here a home in cargo's own target folder, nothing set for
 /// Claude Code or Codex) refuses before reading or writing anything. No
@@ -326,7 +410,12 @@ fn the_cli_refuses_a_real_profile_path_under_test() {
     );
     let relay = temp_dir("guard");
     let relay = relay.join("bouncer-hook.exe");
-    for extra in [&[][..], &["--codex"][..], &["--copilot"][..]] {
+    for extra in [
+        &[][..],
+        &["--codex"][..],
+        &["--copilot"][..],
+        &["--cursor"][..],
+    ] {
         let out = Command::new(env!("CARGO_BIN_EXE_bouncer"))
             .args(["install-hooks", "--relay", relay.to_str().unwrap()])
             .args(extra)
@@ -351,6 +440,7 @@ fn the_cli_refuses_a_real_profile_path_under_test() {
         !home.join(".claude").exists()
             && !home.join(".codex").exists()
             && !home.join(".copilot").exists()
+            && !home.join(".cursor").exists()
     );
     let _ = fs::remove_dir_all(&home);
 }
