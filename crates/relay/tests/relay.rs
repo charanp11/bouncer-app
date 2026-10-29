@@ -1444,11 +1444,13 @@ fn cursor_fixtures_reach_the_app_as_cursor_and_only_deny_prints() {
 }
 
 /// The command `install-hooks --cursor` writes, run the way Cursor's CLI
-/// runs it (on Windows: `Get-Content <payload> | & { $input | <command> }`
-/// in PowerShell, PLAN roadmap h3; elsewhere through bash with the payload
-/// on stdin): it prints exactly Cursor's deny, and with the relay gone it
-/// exits 0 and prints nothing (Cursor then decides). An odd path runs only
-/// the relay.
+/// runs it (on Windows: its UTF-8 `$OutputEncoding` line, then
+/// `Get-Content <payload> | & { $input | <command> }` in Windows
+/// PowerShell, PLAN roadmap h3; elsewhere through bash with the payload on
+/// stdin): a command with non-ASCII text reaches the app exactly as Cursor
+/// sent it, the relay prints exactly Cursor's deny, and with the relay gone
+/// it exits 0 and prints nothing (Cursor then decides). An odd path runs
+/// only the relay.
 #[test]
 fn the_cursor_command_exits_0_even_with_the_relay_gone() {
     let base = std::env::temp_dir().join(format!("bouncer-cursor-{}", std::process::id()));
@@ -1458,14 +1460,29 @@ fn the_cursor_command_exits_0_even_with_the_relay_gone() {
     let exe = std::env::consts::EXE_SUFFIX;
     let relay = odd.join(format!("bouncer-hook{exe}"));
     std::fs::copy(env!("CARGO_BIN_EXE_bouncer-hook"), &relay).unwrap();
-    let request = fixtures_in("cursor-fixtures")
-        .into_iter()
-        .find(|(n, _)| n.contains("beforeShellExecution"))
-        .unwrap()
-        .1;
+    let mut request: serde_json::Value = serde_json::from_slice(
+        &fixtures_in("cursor-fixtures")
+            .into_iter()
+            .find(|(n, _)| n.contains("beforeShellExecution"))
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    // Not ASCII: a Windows pipe in the wrong encoding would turn it into `?`.
+    let command = "Remove-Item 'C:\\Users\\José\\données' \u{2013}Recurse # 日本 \u{202E}";
+    request["command"] = command.into();
+    let request = request.to_string().into_bytes();
     let payload = base.join("payload.json");
     std::fs::write(&payload, &request).unwrap();
-    let path = serve("cursor-command", always(Some(Decision::Deny)));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let path = serve(
+        "cursor-command",
+        Arc::new(move |e: Event, _: &dyn Fn() -> bool| {
+            log.lock().unwrap().push(e.input);
+            Some(Decision::Deny)
+        }),
+    );
     let run = |relay: &Path| {
         let command = bouncer_core::hooks::cursor_command(
             relay.to_str().unwrap(),
@@ -1473,8 +1490,11 @@ fn the_cursor_command_exits_0_even_with_the_relay_gone() {
             cfg!(windows),
         );
         let mut shell = if cfg!(windows) {
+            // Cursor's own prefix (its `ut` wrapper), then its pipe.
             let wrapped = format!(
-                "Get-Content -LiteralPath '{}' -Raw -Encoding UTF8 | & {{ $input | {command} }}",
+                "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); \
+                 try {{ [Console]::InputEncoding = $OutputEncoding }} catch {{ }}; \
+                 Get-Content -LiteralPath '{}' -Raw -Encoding UTF8 | & {{ $input | {command} }}",
                 payload.display().to_string().replace('\'', "''")
             );
             let mut c = Command::new("powershell.exe");
@@ -1507,6 +1527,12 @@ fn the_cursor_command_exits_0_even_with_the_relay_gone() {
         serde_json::json!({ "permission": "deny", "user_message": "Denied in Bouncer",
             "agent_message": "Denied in Bouncer" }),
         "{out:?}"
+    );
+    wait_for(&seen, 1);
+    assert_eq!(
+        seen.lock().unwrap()[0],
+        Some(serde_json::json!({ "command": command })),
+        "the command arrives exactly"
     );
     let out = run(&odd.join(format!("missing{exe}")));
     assert!(out.status.success(), "{out:?}");
