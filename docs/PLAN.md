@@ -5456,6 +5456,36 @@ files; Cursor gives no transcript (`transcript_path` is `null`), so it
 needs another source of the log, audited first. Either one comes back with
 the same digest, redaction and preview rules.
 
+## v0.13.1 — Updater plugin 2.14.0 (2026-10-30)
+
+Dependabot #71 (`tauri-plugin-updater` =2.13.3 → =2.14.0, replacing #57)
+and #72 (`@tauri-apps/cli` 2.12.4, `vite` 8.3.5) go out together: one is
+the updater, the other builds the installer and signs it. Charan approved
+the plan: v0.13.1, then a notes-only v0.13.2, because 0.13.0 → 0.13.1 is
+still installed by plugin 2.13.3; only 0.13.1 → 0.13.2 runs 2.14.0.
+
+**Platform key (Charan's condition).** Plugin 2.13.3 and 2.14.0 both search
+`{os}-{arch}-{installer}`, then `{os}-{arch}`, so `windows-x86_64-nsis`,
+then `windows-x86_64`. Ours is `windows-x86_64`, confirmed from the plugin's
+source and the published v0.13.0 `latest.json`. A wrong key would be an
+error from `check()`, which `update.rs` ignores, so no update would ever
+show. Nothing checked this against the plugin, so
+`scripts/check-updater-target.mjs` now does (TESTS UP9): the key in the
+release job, before the draft; the plugin's own source in the tag's checks.
+
+**Also read in 2.14.0:** `install()` now verifies the bytes too (harmless,
+same bytes), and a signature's version is compared with `latest.json` when
+it has one. Ours have none (`signer sign` without `--app-version`), so that
+check passes. Adding `--app-version` would bind each signature to its
+version; not done here.
+
+**Review (2026-10-30, a reviewer that wrote none of this):** #71 and #72
+clean: no new crates, no new config, `signer sign` unchanged, the NSIS
+rename doesn't reach our hooks. Two low findings on #74, both fixed: the
+step would first have run on Ubuntu at the tag and needed crates.io after
+the build (450 crates, 3m42s cold), so the source check moved to the tag's
+checks; this section and BRIEF were missing.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
