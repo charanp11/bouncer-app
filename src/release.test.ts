@@ -171,7 +171,8 @@ test("updater: a platform key the pinned plugin doesn't look up stops the releas
     };
     const good = file("good.json", { "windows-x86_64": {} });
     // The plugin Cargo.lock pins, read from its own source.
-    const real = run(good);
+    assert.equal(run(good).status, 0);
+    const real = run(good, "pinned");
     assert.equal(real.status, 0, real.stderr);
     for (const platforms of [{ "windows-x64": {} }, { "windows-x86_64": {}, "darwin-aarch64": {} }, {}]) {
       const r = run(file("bad.json", platforms));

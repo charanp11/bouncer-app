@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.13.0, 2026-10-30
+Last updated: v0.13.1 (draft), 2026-10-30
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -274,6 +274,9 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
+- **v0.13.1** (2026-10-30, draft): updater plugin 2.14.0 and Tauri CLI 2.12.4;
+  a release now stops if `latest.json`'s key isn't the one the updater looks
+  up. v0.13.2 follows, to test an update installed by the new plugin.
 - **v0.13.0** (2026-10-30, published 2026-10-30): Ask about this session: a question about a
   Claude Code or Codex session, answered from a redacted log you see first,
   in a chat with no tools.
