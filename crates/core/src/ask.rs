@@ -16,7 +16,7 @@ use serde_json::Value;
 use crate::approvals::visible;
 use crate::chat::fenced;
 use crate::hooks::{self, Agent};
-use crate::redact::redact;
+use crate::redact::redact_out;
 use crate::rules;
 
 /// The log is cut to this, newest kept (about 10k tokens of the plan's use).
@@ -126,9 +126,9 @@ fn tail(path: &Path) -> std::io::Result<String> {
 }
 
 /// Hidden characters shown, secrets out, then cut: in that order, so a cut
-/// can't hide a secret from `redact`.
+/// can't hide a secret from `redact_out`.
 fn clean(text: &str, max: usize) -> String {
-    let text = redact(&visible(text));
+    let text = redact_out(&visible(text));
     match text.char_indices().nth(max) {
         Some((i, _)) => format!("{}…", &text[..i]),
         None => text,
@@ -138,6 +138,18 @@ fn clean(text: &str, max: usize) -> String {
 fn said(who: &str, text: &str) -> Option<String> {
     let text = text.trim();
     (!text.is_empty()).then(|| format!("{who}: {}", clean(text, MAX_ENTRY)))
+}
+
+/// One line, always: what follows a command's first line can be a file's
+/// body (a heredoc, `python -c`).
+fn one_line(text: &str) -> String {
+    let text = clean(text.trim(), MAX_TARGET);
+    let mut lines = text.lines();
+    let first = lines.next().unwrap_or_default();
+    match lines.next() {
+        Some(_) => format!("{first} …"),
+        None => first.to_string(),
+    }
 }
 
 /// One tool call: its name and one named field, never its other input
@@ -150,12 +162,12 @@ fn claude_tool(name: &str, input: &Value) -> Option<String> {
 }
 
 fn tool(name: &str, target: Option<&str>) -> Option<String> {
-    let name = clean(name.trim(), MAX_TARGET);
+    let name = one_line(name);
     if name.is_empty() {
         return None;
     }
     Some(match target {
-        Some(t) => format!("Tool {name}: {} (output left out)", clean(t, MAX_TARGET)),
+        Some(t) => format!("Tool {name}: {} (output left out)", one_line(t)),
         None => format!("Tool {name} (output left out)"),
     })
 }
@@ -183,10 +195,15 @@ fn from_the_app(text: &str) -> bool {
 }
 
 fn claude_code(v: &Value, out: &mut Vec<String>) {
-    if ["isMeta", "isSidechain", "isCompactSummary"]
-        .iter()
-        .any(|k| v[k] == true)
-    {
+    let skipped = [
+        "isMeta",
+        "isSidechain",
+        "isCompactSummary",
+        "repeatsCompactSummary",
+        "isVisibleInTranscriptOnly",
+    ];
+    // A tool's result record can carry text blocks beside the result.
+    if skipped.iter().any(|k| v[k] == true) || !v["toolUseResult"].is_null() {
         return;
     }
     let content = &v["message"]["content"];
@@ -400,10 +417,13 @@ mod tests {
             meta("isMeta"),
             meta("isSidechain"),
             meta("isCompactSummary"),
+            meta("repeatsCompactSummary"),
+            meta("isVisibleInTranscriptOnly"),
             user("<bash-stdout>OUTPUT</bash-stdout>"),
             user("  <local-command-stdout>OUTPUT</local-command-stdout>"),
             user("<task-notification>OUTPUT</task-notification>"),
             user("<system-reminder>HIDDEN</system-reminder>"),
+            json!({"type": "user", "toolUseResult": "x", "message": {"content": [{"type": "text", "text": "BESIDE-A-RESULT"}, {"type": "tool_result", "content": "OUTPUT"}]}}),
             json!({"type": "user", "message": {"content": [{"type": "text", "text": "with an image"}, {"type": "image", "source": {"data": "BASE64"}}]}}),
         ];
         assert_eq!(log("claude-code", &lines), ["You: with an image"]);
@@ -446,7 +466,7 @@ mod tests {
             user(&format!("use {key} and API_KEY = hunter2")),
             tool_use(
                 "Bash",
-                json!({"command": format!("{}curl -H 'Authorization: Bearer abc' https://u:pw@h.example token={key}", "x ".repeat(100))}),
+                json!({"command": format!("{}xh -H 'Authorization: Bearer abc' https://u:pw@h.example token={key}", "x ".repeat(100))}),
             ),
         ];
         let text = log("claude-code", &lines).join("\n");
@@ -458,6 +478,23 @@ mod tests {
         let at_end = format!("{}{key}", "a ".repeat(MAX_TARGET / 2 - 2));
         let line = tool("Bash", Some(&at_end)).unwrap();
         assert!(!line.contains("sk-abc"), "{line}");
+    }
+
+    /// A heredoc's body is a file's body: a tool line is one line.
+    #[test]
+    fn a_tool_line_is_one_line() {
+        let lines = [tool_use(
+            "Bash",
+            json!({"command": "cat > notes.txt <<EOF\nFILE-BODY\nMORE-BODY\nEOF"}),
+        )];
+        assert_eq!(
+            log("claude-code", &lines),
+            ["Tool Bash: cat > notes.txt <<EOF … (output left out)"]
+        );
+        assert_eq!(
+            tool("a\nb", Some("  x  ")).unwrap(),
+            "Tool a …: x (output left out)"
+        );
     }
 
     #[test]

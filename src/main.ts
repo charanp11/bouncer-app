@@ -12,7 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, arrivalFocus, ASK_AGENTS, askedChat, PARTIAL_LOG, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
+import { apply, arrivalFocus, ASK_AGENTS, ASK_HOLD_MS, askedChat, PARTIAL_LOG, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
@@ -1724,6 +1724,7 @@ function sendChat() {
   // "Ask about this session": the same, and the backend holds the text.
   const asked = sessionAsk;
   sessionAsk = null;
+  if (asked) chat = askedChat(chat);
   if (asked) chat = { ...chat, items: [...chat.items, { kind: "tool", name: "Session", target: `${asked.name} · ${sizeText(asked.size)}`, denied: false }] };
   if (file) chat = { ...chat, items: [...chat.items, { kind: "tool", name: "File", target: `${file.name} · ${sizeText(file.size)}`, denied: false }] };
   chat = begin(chat, text);
@@ -1732,6 +1733,11 @@ function sendChat() {
   pinned = true;
   invoke("chat_send", { chat: id, prompt: text, model: chat.model, file: file?.id ?? null, session: asked?.id ?? null }).catch((code) => {
     if (chat.id === id) chat = refused(chat, file && code === "gone" ? "file-gone" : String(code));
+    // Nothing went: the log and the question are still there to send.
+    if (asked) {
+      draft = text;
+      if (code !== "session-gone") sessionAsk = asked;
+    }
     if (code === "missing" || code === "unconfirmed") {
       chatAsked = false;
       askChatStatus();
@@ -1995,15 +2001,19 @@ function askParts(s: Session): HTMLElement[] {
   if (!s.ask) return [el("div", "after", ASK_AGENTS)];
   const ask = el("button", "btn", "Ask about this session");
   ask.dataset.key = `session-ask:${s.id}`;
-  ask.disabled = chat.busy;
   ask.addEventListener("click", () => {
     invoke<Omit<SessionAsk, "name">>("session_ask", { session: s.id })
       .then((a) => {
-        if (chat.items.length) invoke("chat_new");
-        chat = askedChat(chat);
         attached = null;
         sessionAsk = { ...a, name: folder(s.project) };
         askScroll = 0;
+        // The backend forgets it at the same time.
+        setTimeout(() => {
+          if (sessionAsk?.id !== a.id) return;
+          sessionAsk = null;
+          chat = refused(chat, "session-gone");
+          if (current) render(current);
+        }, ASK_HOLD_MS);
         askFailed = null;
         detail = null;
         pinned = true;
@@ -2020,11 +2030,17 @@ function askParts(s: Session): HTMLElement[] {
   return askFailed?.session === s.id ? [ask, el("div", "after", askFailed.text)] : [ask];
 }
 
+/** The log isn't going: the page and the backend both let it go. */
+function dropSessionAsk() {
+  if (!sessionAsk) return;
+  sessionAsk = null;
+  invoke("session_ask_drop");
+}
+
 /** In the chat panel: the session's log, where it goes, exactly what goes. */
 function sessionPart(a: SessionAsk): HTMLElement {
   const box = attachBox("Session", `${a.name} · ${sizeText(a.size)}`, "Don't send the log", a.text, () => {
-    sessionAsk = null;
-    invoke("session_ask_drop");
+    dropSessionAsk();
     if (current) render(current);
   });
   const pre = box.querySelector("pre")!;
@@ -2180,6 +2196,7 @@ function renderDrop(d: Exclude<DropView, null>) {
     ask.dataset.key = `drop-ask:${d.id}`;
     ask.disabled = !ready;
     ask.addEventListener("click", () => {
+      dropSessionAsk();
       attached = { id: d.id, name: d.name, size: d.size, preview: null };
       invoke<string>("drop_preview", { id: d.id, ask: true })
         .then((text) => {
