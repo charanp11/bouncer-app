@@ -148,6 +148,7 @@ jobs:
         run: |
           node scripts/latest-json.mjs "$VERSION" "$GITHUB_REPOSITORY" "out/Bouncer_${VERSION}_x64-setup.exe.sig" > out/latest.json
           cat out/latest.json
+          node scripts/check-updater-target.mjs out/latest.json
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

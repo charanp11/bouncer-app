@@ -156,6 +156,40 @@ test("updater: latest.json points at this release's installer with its signature
   }
 });
 
+test("updater: a platform key the pinned plugin doesn't look up stops the release", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bouncer-target-"));
+  try {
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [fileURLToPath(new URL("scripts/check-updater-target.mjs", root)), ...args], {
+        cwd: root,
+        encoding: "utf8",
+      });
+    const file = (name: string, platforms: object) => {
+      const path = join(dir, name);
+      writeFileSync(path, JSON.stringify({ version: "0.8.0", platforms }));
+      return path;
+    };
+    const good = file("good.json", { "windows-x86_64": {} });
+    // The plugin Cargo.lock pins, read from its own source.
+    const real = run(good);
+    assert.equal(real.status, 0, real.stderr);
+    for (const platforms of [{ "windows-x64": {} }, { "windows-x86_64": {}, "darwin-aarch64": {} }, {}]) {
+      const r = run(file("bad.json", platforms));
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /the plugin looks up windows-x86_64/);
+    }
+    // A plugin that builds its key another way: stopped, not guessed at.
+    const other = join(dir, "updater.rs");
+    writeFileSync(other, 'Some("windows") Some("x86_64") targets.push(format!("{arch}-{os}"));');
+    const changed = run(good, other);
+    assert.notEqual(changed.status, 0);
+    assert.match(changed.stderr, /changed its lookup/);
+    assert.ok(read(".github/workflows/release.yml").includes("node scripts/check-updater-target.mjs out/latest.json"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("v0.8.1's notes: the first release with these features, 0.8.0 never released, 0.7.0 users install it by hand once", () => {
   const intro = read("docs/releases/v0.8.1.md");
   assert.match(intro, /^\*\*0\.8\.1 is the first release with these features\.\*\* 0\.8\.0 was never released/);
