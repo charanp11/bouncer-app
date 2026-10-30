@@ -3266,8 +3266,8 @@ Roadmap after v0.7.0 (decision 7). One feature per release:
 | v0.8 | Answer Claude Code's questions in the island | c2 |
 | v0.9 | File drop | d (Phase 7) |
 | then | Other agents, one per release | h |
-| now | Ask about this session | f (6d), current: "Roadmap f" |
-| then | Mac release | g |
+| v0.13 | Ask about this session | f (6d), done: "Roadmap f" |
+| now | Mac release | g |
 | then | Music | e (Phase 8) |
 | optional | Linux | i |
 
@@ -5220,7 +5220,7 @@ instance stopped by PID; real `%LOCALAPPDATA%\cursor-agent`,
 real `~\.claude\settings.json` last written 2026-10-28 (checked from a
 WMI-created process). Model requests in all of h3: 5.
 
-## Roadmap f — Ask about this session (current)
+## Roadmap f — Ask about this session (done)
 
 Ask the read-only chat a question about one session in the island's list
 ("what is it doing?", "did it touch anything outside the repo?"). Charan
@@ -5429,7 +5429,24 @@ of the log (now kept, with keyboard focus).
 - [x] CPU while an answer streams measured: 7.2% of a core (50 s, app + WebView2, fake `claude`), under the chat's 15%
 - [x] TESTS and BRIEF updated; CI green on Windows and macOS; reviewer agent
 - [x] Charan's OK on the safety design, his merge (#69, 2026-10-30)
-- [ ] Release v0.13.0 published, hand checks
+- [x] Release v0.13.0 published, hand checks (2026-10-30)
+
+**v0.13.0 published (Charan, 2026-10-30).** Manual checks (Charan, his own
+desktop, the installed build; Claude Code 2.1.312): the update to 0.13.0
+came through the updater (TESTS UP8); Settings shows 0.13.0 (U11), Claude
+Code hooks Installed (I8) and the line that says which agents work (AS7).
+On a short real session in a throwaway folder (a read of `note.txt`, a fake
+`API_KEY` in the prompt): the preview said where it goes and had the
+"Partial log" line, showed the key as `[redacted]` and the tool line as
+"(output left out)", had no file body, and ended at "Their question:". The
+log dropped and came back on a second Ask. A real answer (Default,
+`claude-opus-5-5`) described the session from the log and refused to run
+`whoami`: no tools, no chip (AS14). Roadmap f is done; Codex stays checked
+on fake-model files only.
+
+The hand steps said "New chat · no tools" would show; it shows only over a
+chat that already has messages, so not in this check (TESTS AS11's test
+covers it).
 
 ### Copilot and Cursor stay out (Charan, 2026-10-30)
 
