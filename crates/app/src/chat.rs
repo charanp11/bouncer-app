@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use bouncer_core::chat::{self, Binary, Cancel, Chat, Claude, Limits, Model, Out, Stop};
-use bouncer_core::drop;
+use bouncer_core::chat::{self, Binary, Cancel, Chat, Claude, Limits, Lock, Model, Out, Stop};
+use bouncer_core::drop::{self, HOLD};
 use serde_json::{Value, json};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -30,6 +30,10 @@ pub struct Chats {
     /// "Is this safe to run?" on a dropped file: its drop ID, run number
     /// and how to stop it. Apart from `explain`: cards come and go under it.
     drop_run: Mutex<Option<(String, u64, Cancel)>>,
+    /// "Ask about this session": the exact text the page shows, under a
+    /// random ID, until sent (once), dropped or `HOLD` is up. The page only
+    /// ever sends the ID back.
+    asked: Mutex<Option<(String, String, Instant)>>,
 }
 
 /// The two one-message runs beside the chat panel.
@@ -62,6 +66,8 @@ struct Run {
     /// The page's number for this chat.
     chat: u32,
     model: Model,
+    /// Holds a session's log: no tools, and it never takes a chat's place.
+    lock: Lock,
     prompts: mpsc::Sender<String>,
     cancel: Cancel,
     busy: Arc<AtomicBool>,
@@ -85,6 +91,29 @@ impl Chats {
             .is_some_and(|r| r.busy.load(Ordering::SeqCst));
         let explaining = self.explain.lock().unwrap().is_some();
         answering || explaining || self.drop_run.lock().unwrap().is_some()
+    }
+
+    /// Holds a session's text for `chat_send`; any earlier one is gone.
+    pub fn hold_session(&self, id: String, text: String) {
+        *self.asked.lock().unwrap() = Some((id, text, Instant::now()));
+    }
+
+    /// Takes the held text, if `id` is its ID and it's in time: single use.
+    fn take_session(&self, id: &str) -> Option<String> {
+        let mut asked = self.asked.lock().unwrap();
+        let (held, text, at) = asked.take()?;
+        (held == id && at.elapsed() < HOLD).then_some(text)
+    }
+
+    /// Forgets a session's text held longer than `HOLD`.
+    pub fn expire_session(&self) {
+        let mut asked = self.asked.lock().unwrap();
+        if asked
+            .as_ref()
+            .is_some_and(|(_, _, at)| at.elapsed() >= HOLD)
+        {
+            *asked = None;
+        }
     }
 
     /// Quitting: the chat, the explanation and the file answer, if any,
@@ -141,8 +170,15 @@ pub fn chat_confirm(path: String) -> Result<Value, String> {
 /// if it isn't the one running. Refused unless the `claude` found now is the
 /// confirmed one. `file`: a dropped file's ID ("Ask about it"): the message
 /// becomes the held report's facts followed by it, exactly as previewed.
+/// `session`: a held session's ID ("Ask about this session"): the message
+/// is the text the page showed followed by it, nothing else, and the chat
+/// runs with no tools; a chat with tools ends first, so the log never joins
+/// one. Its follow-ups stay in that run.
 /// Errors are short codes the page words: `missing`, `unconfirmed`, `busy`,
-/// `model`, `empty`, `gone` (the file isn't held), or Claude Code's own text.
+/// `model`, `empty`, `gone` (the file isn't held), `session-gone`, or Claude
+/// Code's own text.
+// The arguments are the page's call, one per thing a message can carry.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(async)]
 pub fn chat_send(
     app: AppHandle,
@@ -152,14 +188,20 @@ pub fn chat_send(
     prompt: String,
     model: String,
     file: Option<String>,
+    session: Option<String>,
 ) -> Result<(), String> {
     let model = Model::parse(&model).ok_or("model")?;
     if prompt.trim().is_empty() {
         return Err("empty".into());
     }
-    let prompt = match file {
-        Some(id) => drop::ask_prompt(&drops.report(&id).ok_or("gone")?, &prompt),
-        None => prompt,
+    let sealed = session.is_some();
+    let prompt = match (session, file) {
+        (Some(id), _) => {
+            let text = chats.take_session(&id).ok_or("session-gone")?;
+            format!("{text}{prompt}")
+        }
+        (None, Some(id)) => drop::ask_prompt(&drops.report(&id).ok_or("gone")?, &prompt),
+        (None, None) => prompt,
     };
     if prompt.len() > chat::MAX_PROMPT {
         return Err("too-long".into());
@@ -172,9 +214,10 @@ pub fn chat_send(
     let mut run = chats.run.lock().unwrap();
     if run
         .as_ref()
-        .is_some_and(|r| r.chat != chat || r.model != model)
+        .is_some_and(|r| r.chat != chat || r.model != model || (sealed && r.lock != Lock::NoTools))
     {
-        // The page moved on (New chat, another model): end the old one.
+        // The page moved on (New chat, another model), or a log can't join
+        // this run: end the old one.
         if let Some(old) = run.take() {
             old.cancel.cancel();
         }
@@ -184,12 +227,18 @@ pub fn chat_send(
     }
     if run.is_none() {
         let dir = chat::folder().ok_or("no chat folder")?;
-        let started = Chat::start(&bin, &dir, model, Limits::default())?;
+        let lock = if sealed {
+            Lock::NoTools
+        } else {
+            Lock::ReadOnly
+        };
+        let started = Chat::start_locked(&bin, &dir, lock, model, Limits::default())?;
         let (prompts, inbox) = mpsc::channel();
         let busy = Arc::new(AtomicBool::new(false));
         *run = Some(Run {
             chat,
             model,
+            lock,
             prompts,
             cancel: started.cancel_handle(),
             busy: busy.clone(),
@@ -204,6 +253,12 @@ pub fn chat_send(
         return Err("ended".into());
     }
     Ok(())
+}
+
+/// × on the session preview: the held text goes.
+#[tauri::command]
+pub fn session_ask_drop(chats: State<'_, Chats>) {
+    *chats.asked.lock().unwrap() = None;
 }
 
 /// Stops the answer in progress; the chat is over ("New chat").
@@ -543,6 +598,34 @@ mod tests {
             tagged("drop", "cd34", &Out::Text("x".into())),
             json!({"drop": "cd34", "kind": "text", "text": "x"})
         );
+    }
+
+    /// A session's text goes once, only under its own ID.
+    #[test]
+    fn a_held_session_is_single_use() {
+        let chats = Chats::default();
+        chats.hold_session("a".into(), "text".into());
+        assert_eq!(chats.take_session("b"), None);
+        // A wrong ID drops it too: the next try can't guess again.
+        assert_eq!(chats.take_session("a"), None);
+        chats.hold_session("a".into(), "text".into());
+        chats.hold_session("b".into(), "newer".into());
+        assert_eq!(chats.take_session("a"), None);
+        chats.hold_session("b".into(), "newer".into());
+        assert_eq!(chats.take_session("b").as_deref(), Some("newer"));
+        assert_eq!(chats.take_session("b"), None);
+    }
+
+    /// Past the hold, it's gone from memory, not only refused.
+    #[test]
+    fn a_held_session_expires() {
+        let chats = Chats::default();
+        chats.hold_session("a".into(), "text".into());
+        chats.expire_session();
+        assert!(chats.asked.lock().unwrap().is_some());
+        chats.asked.lock().unwrap().as_mut().unwrap().2 = Instant::now() - HOLD;
+        chats.expire_session();
+        assert!(chats.asked.lock().unwrap().is_none());
     }
 
     #[test]

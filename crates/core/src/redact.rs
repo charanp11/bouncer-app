@@ -52,6 +52,7 @@ pub fn redact(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut next_is_secret = false;
     let mut next_is_login = false;
+    let mut after_name = false;
     let mut rest = text.as_str();
     while !rest.is_empty() {
         let space = rest.len() - rest.trim_start().len();
@@ -63,17 +64,24 @@ pub fn redact(text: &str) -> String {
         if word.is_empty() {
             continue;
         }
+        // `NAME = value`: the word after the sign is the value.
+        let sign = after_name && (word == "=" || word == ":");
+        let glued = after_name && word.starts_with('=') && word.len() > 1;
         let whole = next_is_secret;
         let login = next_is_login;
         // `-u user:password` / `--user user:password` (curl, wget, …): the next word is a login.
         next_is_login = word == "-u" || word == "--user";
         let name = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-        next_is_secret = (secret_name(name)
-            && !word.contains('=')
-            && (word.starts_with('-') || word.ends_with(':')))
+        after_name = secret_name(name) && !word.contains('=');
+        next_is_secret = (after_name && (word.starts_with('-') || word.ends_with(':')))
+            || (secret_name(name) && word.ends_with('='))
+            || sign
             || name.eq_ignore_ascii_case("bearer")
             || name.eq_ignore_ascii_case("basic");
         if whole {
+            out += MARK;
+        } else if glued {
+            out += "=";
             out += MARK;
         } else if login {
             out += &redact_word(&login_password(word));
@@ -269,6 +277,26 @@ fn runs(text: &str, is_char: fn(char) -> bool, secret: impl Fn(&str) -> bool) ->
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// Spaces around the sign don't hide a value (roadmap f: what `redact`
+    /// misses now leaves the machine).
+    #[test]
+    fn a_secret_name_and_its_value_may_be_spaced() {
+        for (text, want) in [
+            ("API_KEY = hunter2", "API_KEY = [redacted]"),
+            ("API_KEY =hunter2", "API_KEY =[redacted]"),
+            ("API_KEY= hunter2", "API_KEY=[redacted] [redacted]"),
+            ("password : hunter2", "password : [redacted]"),
+            (
+                "db_token   =   hunter2 next",
+                "db_token   =   [redacted] next",
+            ),
+        ] {
+            assert_eq!(redact(text), want, "{text}");
+        }
+        assert_eq!(redact("count = 3"), "count = 3");
+        assert_eq!(redact("a = b : c"), "a = b : c");
+    }
 
     /// `-----<what> KEY-----`, built at run time like the fakes below.
     fn armor(what: &str) -> String {

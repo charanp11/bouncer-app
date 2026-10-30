@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod approvals;
+pub mod ask;
 pub mod autostart;
 pub mod away;
 pub mod chat;

@@ -2303,6 +2303,16 @@ pre.cmd {
   user-select: text;
 }
 
+/* A session's log is the whole message: more of it in view. */
+.attach pre.pv.log {
+  max-height: 140px;
+}
+
+.attach .note {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
 .attach pre.pv:focus-visible {
   outline: 2px solid var(--sun);
   outline-offset: 2px;
