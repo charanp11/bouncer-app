@@ -56,6 +56,12 @@ test("Settings says which agents it works for, and a stale ID is said plainly", 
   assert.match(sendError("session-gone"), /Press Ask about this session again/);
 });
 
+test("a redraw keeps the reader's place in the log", () => {
+  assert.match(fn("sessionPart"), /pre\.dataset\.key = "session-log";/, "focus comes back by key");
+  assert.match(fn("sessionPart"), /askScroll = pre\.scrollTop/);
+  assert.match(fn("renderChat"), /read\.scrollTop = askScroll/);
+});
+
 test("the prototype has the state", () => {
   assert.match(proto, /data-s="chatsession"/);
   assert.match(proto, /Sent to Claude through your Claude Code\. It leaves Codex \(OpenAI\) for Anthropic\./);

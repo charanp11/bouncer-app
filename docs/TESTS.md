@@ -356,6 +356,29 @@ PLAN, roadmap h3.
 | CU8 | What Cursor gets, said plainly | Settings' "Cursor CLI hooks" (only where there's a `~/.cursor` folder) and the README: watch-only plus Deny on risky shell commands, no Allow from Bouncer, the user's own hooks kept, tested with Cursor CLI 2026.10.22 | frontend | `ts: Cursor's hooks: offered only where Cursor is, and say what it gets` `ts: the README says the same` | CI; hand 2026-10-29 (Charan, v0.12.0 installed: no Cursor row without `~/.cursor`; with an empty one made by hand, "Cursor CLI hooks · Not installed", tested with 2026.10.22) |
 | CU9 | The real Cursor CLI (scratch) | Step 1 (2026.10.22, Windows): events, input, the Windows hang without `exit 0`, deny / garbage / allow vs the deny list / ask; run 4: empty output, Bouncer closed, relay missing, relay crash and hook timeout all fall through; end to end through a test instance: see PLAN | hand (scratch profile, live model, page clicks over CDP) | (PLAN, roadmap h3) | Hand (scratch) 2026-10-29 |
 
+## Ask about this session (roadmap f)
+
+PLAN, roadmap f. Bouncer reads the session itself, builds a redacted log,
+shows it whole, and sends it to a chat with no tools only on Send.
+
+| ID | Scenario | Expected | Proof | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| AS1 | What goes in | Prompts, replies (no thinking), one line per tool call with only `command` / `file_path` / `pattern`; never tool outputs, `content`, `old_string`, `new_string`, `plan`, `questions`, attachments or unknown records | unit | `ask::tests::claude_code_gives_prompts_replies_and_tool_lines_only` | CI |
+| AS2 | Claude Code's own messages | `isMeta`, `isSidechain`, `isCompactSummary` and user text opening with `<` (`<bash-stdout>`, `<local-command-stdout>` …) stay out | unit | `ask::tests::claude_codes_own_messages_and_subagents_stay_out` | CI |
+| AS3 | Codex's file | Only `item_completed` items: `UserMessage`, `AgentMessage` (`text` or `Text` blocks), `CommandExecution` (argv or text, never `aggregated_output`); not `response_item` wrappers or `session_meta` | unit, real file | `ask::tests::codex_gives_its_items_never_outputs_or_wrappers` | CI |
+| AS4 | Secrets | Redacted before the preview and before any cut; `NAME = value` with spaces too; hidden characters shown | unit | `ask::tests::secrets_go_before_anything_is_shown_and_a_cut_cant_hide_one` `ask::tests::hidden_characters_are_shown_and_markup_stays_text` `redact::tests::a_secret_name_and_its_value_may_be_spaced` | CI |
+| AS5 | Size | 40 KB log, newest kept, "(N earlier entries left out)"; 8 MB of the file's end; lines over 1 MB skipped; a running session read to its last complete line | unit | `ask::tests::the_log_keeps_the_newest_within_the_cap` `ask::tests::a_huge_file_is_read_from_its_end_and_huge_lines_are_skipped` `ask::tests::a_running_session_is_read_to_its_last_complete_line` | CI |
+| AS6 | Finding the file | By a UUID from Bouncer's own session list, in the agent's own folder, never a hook's path; other IDs, paths and subagent files refused; links refused; never written | unit | `ask::tests::sessions_are_found_by_uuid_in_the_agents_own_folder` `macos: ask::tests::a_link_is_refused` `ask::tests::asking_never_changes_the_session_file` | CI |
+| AS7 | Which agents | Claude Code and Codex get Ask; Copilot and Cursor get a line, and Settings says which work | unit, frontend | `ask::tests::only_claude_code_and_codex_sessions_can_be_read` `ts: Ask reads only on the press, and other agents get a line, not a button` `ts: Settings says which agents it works for, and a stale ID is said plainly` | CI |
+| AS8 | Where it goes | "Sent to Claude through your Claude Code."; another agent's session also says it leaves that vendor; shown with the preview | unit, frontend | `ask::tests::the_preview_says_where_it_goes_and_what_it_leaves` `ts: the preview says where it goes, shows the backend's text, and can be dropped` | CI |
+| AS9 | What's shown is what goes | The prompt is fixed wording, the fenced log, then "Their question:"; the backend holds that text and adds only the typed question; the page sends a single-use ID, held 10 minutes, dropped by × | unit, frontend, integration | `ask::tests::the_prompt_fences_the_log_and_ends_where_the_question_goes` `chat::tests::a_held_session_is_single_use` `chat::tests::a_held_session_expires` `ts: the page sends the held text's ID, never the text` | CI |
+| AS10 | No tools | A constant command line differing from `LOCKED` only in `--tools ""` and the system line, never `--resume`; any tool at `init` stops the run; follow-ups stay in it | unit, integration, real run | `chat::tests::the_no_tools_lock_is_locked_plus_no_tools` `chat::tests::any_tool_stops_a_no_tools_run` `a_no_tools_chat_really_has_none` `a_no_tools_run_that_lists_a_tool_is_stopped` | CI |
+| AS11 | A log never joins a chat with tools | Ask starts a new chat, said with a line; the backend ends any run with tools before taking a log | frontend | `ts: Ask opens a new chat, said with a line, so the log never joins one with tools` | CI |
+| AS12 | The state matches the design | The prototype has the session-attached chat | frontend | `ts: the prototype has the state` | CI |
+| AS15 | Reading a running session's log | A redraw keeps the preview's scroll and keyboard | frontend, real instance | `ts: a redraw keeps the reader's place in the log` | CI |
+| AS13 | The whole flow on the app | A test instance with the fake `claude`: Ask, preview, Send, answer; what the fake received equals the preview plus the question | real instance | — | 2026-10-30 |
+| AS14 | A real session and a real answer | Hand check after the release | hand | — | Hand |
+
 ## macOS
 
 | ID | Scenario | Expected | Proof | Test | Status |
