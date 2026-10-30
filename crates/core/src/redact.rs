@@ -1,5 +1,6 @@
 //! Secret redaction for the activity log, run on every text field before it
 //! is written. Over-redacting a local log is fine; a missed secret isn't.
+//! Text that leaves the machine goes through the stricter `redact_out`.
 
 pub const MARK: &str = "[redacted]";
 
@@ -43,16 +44,36 @@ const SECRET_NAMES: &[&str] = &[
     "credential",
     "cookie",
 ];
+/// In `redact_out`: these take a password as the word after `-p`.
+const PASSWORD_TOOLS: &[&str] = &["mysql", "mysqldump", "mariadb", "sshpass"];
 /// A run this long that looks random is a secret.
 const LONG_RUN: usize = 32;
 
 /// `text` with secrets replaced by `MARK`.
 pub fn redact(text: &str) -> String {
+    scan(text, false)
+}
+
+/// `redact` for text leaving the machine: a miss can't be taken back, and a
+/// wrongly hidden word costs nothing, so it also takes spaced and glued forms
+/// (`API_KEY = x`, `KEY := x`, `a=1&token=x`, `password:x`), the rest of a
+/// quoted value, `mysql -p x` and `setx TOKEN x`. Kept apart from `redact`:
+/// these match ordinary code (`key = 1`), and a drop's report and the log
+/// must not call that a secret.
+pub fn redact_out(text: &str) -> String {
+    scan(text, true)
+}
+
+fn scan(text: &str, strict: bool) -> String {
     let text = private_keys(text);
     let mut out = String::with_capacity(text.len());
     let mut next_is_secret = false;
     let mut next_is_login = false;
     let mut after_name = false;
+    let mut after_set = false;
+    let mut takes_p = false;
+    // The closing quote of a secret value still going on.
+    let mut quote = None;
     let mut rest = text.as_str();
     while !rest.is_empty() {
         let space = rest.len() - rest.trim_start().len();
@@ -64,32 +85,63 @@ pub fn redact(text: &str) -> String {
         if word.is_empty() {
             continue;
         }
+        if let Some(q) = quote {
+            out += MARK;
+            quote = (!word.ends_with(q)).then_some(q);
+            continue;
+        }
         // `NAME = value`: the word after the sign is the value.
-        let sign = after_name && (word == "=" || word == ":");
-        let glued = after_name && word.starts_with('=') && word.len() > 1;
+        let sign = strict && after_name && matches!(word, "=" | ":" | ":=" | "?=" | "+=" | "==");
+        let glued = (strict && after_name && word.starts_with('='))
+            .then(|| word.trim_start_matches('='))
+            .filter(|v| !v.is_empty());
         let whole = next_is_secret;
         let login = next_is_login;
         // `-u user:password` / `--user user:password` (curl, wget, …): the next word is a login.
         next_is_login = word == "-u" || word == "--user";
         let name = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
         after_name = secret_name(name) && !word.contains('=');
+        takes_p |= strict && PASSWORD_TOOLS.contains(&word);
         next_is_secret = (after_name && (word.starts_with('-') || word.ends_with(':')))
-            || (secret_name(name) && word.ends_with('='))
+            || (strict && secret_name(name) && word.ends_with('='))
+            || (strict && after_name && after_set)
+            || (takes_p && word == "-p")
             || sign
             || name.eq_ignore_ascii_case("bearer")
             || name.eq_ignore_ascii_case("basic");
+        after_set =
+            strict && (word.eq_ignore_ascii_case("set") || word.eq_ignore_ascii_case("setx"));
+        let named = word.split_once('=').filter(|(k, _)| secret_name(bare(k)));
+        let value = if whole {
+            Some(word)
+        } else {
+            glued.or(named.map(|(_, v)| v))
+        };
+        if strict {
+            quote = value.and_then(open_quote);
+        }
         if whole {
             out += MARK;
-        } else if glued {
-            out += "=";
+        } else if let Some(v) = glued {
+            out += &word[..word.len() - v.len()];
             out += MARK;
         } else if login {
-            out += &redact_word(&login_password(word));
+            out += &redact_word(&login_password(word), strict);
         } else {
-            out += &redact_word(word);
+            out += &redact_word(word, strict);
         }
     }
     out
+}
+
+/// The quote `value` opens and doesn't close.
+fn open_quote(value: &str) -> Option<char> {
+    let q = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+    (value.len() == 1 || !value.ends_with(q)).then_some(q)
+}
+
+fn bare(word: &str) -> &str {
+    word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_')
 }
 
 fn secret_name(name: &str) -> bool {
@@ -129,7 +181,7 @@ fn private_keys(text: &str) -> String {
 /// One word: a password glued to `-p` or a login glued to `-u` / `--user=`,
 /// a secret-named assignment or JSON value, a password in a URL, known token
 /// prefixes and long random-looking runs.
-fn redact_word(word: &str) -> String {
+fn redact_word(word: &str, strict: bool) -> String {
     // `mysql -pSECRET`: anything glued onto `-p` (also hides `-pthread`-like
     // option clusters; over-redacting is fine).
     if word.strip_prefix("-p").is_some_and(|rest| !rest.is_empty()) {
@@ -142,12 +194,12 @@ fn redact_word(word: &str) -> String {
         return format!("-u{}", login_password(login));
     }
     let word = json_values(word);
+    let word = if strict { named_values(&word) } else { word };
     let word = word.as_str();
-    if let Some((key, _)) = word.split_once('=') {
-        let name = key.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-        if secret_name(name) {
-            return format!("{key}={MARK}");
-        }
+    if let Some((key, _)) = word.split_once('=')
+        && secret_name(bare(key))
+    {
+        return format!("{key}={MARK}");
     }
     let word = url_password(word);
     let word = runs(&word, is_token_char, |run| {
@@ -156,6 +208,33 @@ fn redact_word(word: &str) -> String {
             .any(|p| run.starts_with(p) && run.len() >= p.len() + MIN_AFTER)
     });
     runs(&word, is_long_char, looks_random)
+}
+
+/// Each `&`, `?` or `;` piece of a word on its own: a piece `name=value` or
+/// `name:value` with a secret name loses its value.
+fn named_values(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    let mut rest = word;
+    loop {
+        let end = rest.find(['&', '?', ';']).unwrap_or(rest.len());
+        let (piece, tail) = rest.split_at(end);
+        match piece.find(['=', ':']) {
+            Some(i)
+                if i + 1 < piece.len()
+                    && !piece[i..].starts_with("://")
+                    && secret_name(bare(&piece[..i])) =>
+            {
+                out += &piece[..=i];
+                out += MARK;
+            }
+            _ => out += piece,
+        }
+        let Some(sep) = tail.chars().next() else {
+            return out;
+        };
+        out.push(sep);
+        rest = &tail[sep.len_utf8()..];
+    }
 }
 
 /// `user:password` → `user:[redacted]`; a login without `:` is left as is.
@@ -278,26 +357,6 @@ fn runs(text: &str, is_char: fn(char) -> bool, secret: impl Fn(&str) -> bool) ->
 pub(crate) mod tests {
     use super::*;
 
-    /// Spaces around the sign don't hide a value (roadmap f: what `redact`
-    /// misses now leaves the machine).
-    #[test]
-    fn a_secret_name_and_its_value_may_be_spaced() {
-        for (text, want) in [
-            ("API_KEY = hunter2", "API_KEY = [redacted]"),
-            ("API_KEY =hunter2", "API_KEY =[redacted]"),
-            ("API_KEY= hunter2", "API_KEY=[redacted] [redacted]"),
-            ("password : hunter2", "password : [redacted]"),
-            (
-                "db_token   =   hunter2 next",
-                "db_token   =   [redacted] next",
-            ),
-        ] {
-            assert_eq!(redact(text), want, "{text}");
-        }
-        assert_eq!(redact("count = 3"), "count = 3");
-        assert_eq!(redact("a = b : c"), "a = b : c");
-    }
-
     /// `-----<what> KEY-----`, built at run time like the fakes below.
     fn armor(what: &str) -> String {
         let dashes = "-".repeat(5);
@@ -416,6 +475,79 @@ pub(crate) mod tests {
             format!("{}\n{rsa_body}", armor("BEGIN RSA PRIVATE")),
         );
         cases
+    }
+
+    /// What leaves the machine is held to more than the local log (roadmap
+    /// f), and ordinary code stays out of the stricter forms for everyone else.
+    #[test]
+    fn outgoing_text_loses_more_than_the_log() {
+        for (text, want) in [
+            ("API_KEY = hunter2", "API_KEY = [redacted]"),
+            ("API_KEY =hunter2", "API_KEY =[redacted]"),
+            ("API_KEY= hunter2", "API_KEY=[redacted] [redacted]"),
+            ("API_KEY := hunter2", "API_KEY := [redacted]"),
+            ("API_KEY ?= hunter2", "API_KEY ?= [redacted]"),
+            ("API_KEY += hunter2", "API_KEY += [redacted]"),
+            ("password == hunter2", "password == [redacted]"),
+            ("password ==hunter2", "password ==[redacted]"),
+            ("password : hunter2", "password : [redacted]"),
+            (
+                "db_token   =   hunter2 next",
+                "db_token   =   [redacted] next",
+            ),
+            (
+                "https://h/x?a=1&token=abc",
+                "https://h/x?a=1&token=[redacted]",
+            ),
+            (
+                "url=http://h?password=hunter2",
+                "url=http://h?password=[redacted]",
+            ),
+            ("x=1;password=hunter2", "x=1;password=[redacted]"),
+            ("password:hunter2", "password:[redacted]"),
+            ("api_key:hunter2", "api_key:[redacted]"),
+            ("-H 'X-API-Key:abc123'", "-H 'X-API-Key:[redacted]"),
+            ("mysql -p hunter2 db", "mysql -p [redacted] db"),
+            ("sshpass -p hunter2 ssh h", "sshpass -p [redacted] ssh h"),
+            ("set PASSWORD hunter2", "set PASSWORD [redacted]"),
+            ("setx API_TOKEN hunter2", "setx API_TOKEN [redacted]"),
+            (
+                r#"password = "correct horse battery" next"#,
+                "password = [redacted] [redacted] [redacted] next",
+            ),
+            (
+                "export API_KEY='ab cd ef' next",
+                "export API_KEY=[redacted] [redacted] [redacted] next",
+            ),
+        ] {
+            assert_eq!(redact_out(text), want, "{text}");
+        }
+        for plain in [
+            "count = 3",
+            "a = b : c",
+            "mkdir -p src/a",
+            "https://h.example/x?a=1&b=2",
+            "set color blue",
+            "see \"quoted words\" here",
+        ] {
+            assert_eq!(redact_out(plain), plain);
+        }
+    }
+
+    /// The log and a drop's report keep `redact` as it was: `key = 1` in a
+    /// dropped script is not a secret.
+    #[test]
+    fn plain_redact_leaves_ordinary_code_alone() {
+        for code in [
+            "key = 1",
+            "max_tokens = 500",
+            "author = bob",
+            "if key == value",
+            "for key : map",
+            "mysql -p hunter2",
+        ] {
+            assert_eq!(redact(code), code);
+        }
     }
 
     #[test]

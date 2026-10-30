@@ -5293,7 +5293,8 @@ skipped, so a new format sends less, not more):
 **Redaction is patterns, not a promise.** `redact` was built for the
 local log, where a miss stays on the machine; here a miss leaves it. Gap
 found by reading it: `API_KEY = abc123` (spaces around `=`) goes through.
-Fix with this work (stricter for the log too). It still can't see a
+Fixed in `redact_out`, for text leaving the machine only (see "Review").
+It still can't see a
 password in prose ("my password is hunter2"): that's what the preview is
 for, and the preview says so.
 
@@ -5320,7 +5321,7 @@ in `chat::fenced` (data, not instructions), then the question. Nothing the
 model says reaches a card, a rule or a decision: the answer is chat text
 only (`textContent`, the Markdown builder).
 
-**One chat, its own run.** Ask starts a new chat (a line says so): a
+**One chat, its own run.** Send starts a new chat (a line says so): a
 running chat has tools, so the digest can't join it. Follow-ups stay in
 that no-tools run, no new digest. Another model or New chat ends it. The
 backend ends any run with tools before it takes a digest.
@@ -5365,6 +5366,29 @@ blocks and `command` as an argv array; the first reader, written from
 inline fixtures, dropped both, and only a run over the scratch rollouts
 showed it. Fixed, tests now use those shapes. `redact` also passed
 `NAME= value` (space after the sign), fixed with the other spaced forms.
+
+### Review (2026-10-30)
+
+A separate reviewer found no safety blocker; fixed: (1) a tool line could
+be many lines, so a heredoc's body went out: first line only; (2) `redact`
+missed `:=`, `==`, `a=1&token=x`, `password:x`, the rest of a quoted
+value, `mysql -p x`, `set NAME x`; (3) my spaced forms made a dropped file's
+`key = 1` "a secret" and changed the log: so all the stricter forms moved
+to `redact_out`, used only by Ask, and `redact` is back as on `main`; (4) a
+failed send lost the log: it's spent only once sent, and the page keeps it
+and the question; (5) a held log beat an attached file with a false chip:
+a file's Ask drops it; (6) the page's copy outlived the hold: it lets go
+then, saying so; (7) "New chat · no tools" showed before anything was sent
+and stayed after ×: the new chat starts on Send. Also skipped:
+`repeatsCompactSummary`, `isVisibleInTranscriptOnly`, tool-result records.
+
+Left as they are: in stream-json mode `init` comes after the first message
+is written, so a run that somehow had tools is stopped at `init` with the log
+already at the process; `--tools ""` is the barrier before it (the pattern
+every chat uses). A real run on macOS is unproven (Windows only). A linked
+top-level `projects` or `sessions` folder is followed: it needs the user's
+own write access. `\u{XXXX}` shows as a chip in the preview, the same text
+underneath.
 
 ### Test instance (2026-10-30)
 

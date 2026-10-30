@@ -61,12 +61,15 @@ export function switchModel(chat: Chat, model: Model): Chat {
 
 const line = (text: string): Item => ({ kind: "new", text });
 
-/** "Ask about this session": a new chat, with no tools. The old one's words
+/** Sending a session's log: a new chat, with no tools. The old one's words
  * stay on screen, said with a line. */
 export function askedChat(chat: Chat): Chat {
   const items = chat.items.length && chat.items.at(-1)?.kind !== "new" ? [...chat.items, line("New chat · no tools")] : chat.items;
   return { ...chat, id: chat.id + 1, items, busy: false, ended: false };
 }
+
+/** How long the backend holds a session's log (`HOLD`). */
+export const ASK_HOLD_MS = 10 * 60_000;
 
 /** Which sessions Ask works for (the backend decides each one). */
 export const ASK_AGENTS = "Ask about this session works for Claude Code and Codex sessions.";

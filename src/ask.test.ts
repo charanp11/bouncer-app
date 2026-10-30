@@ -14,7 +14,7 @@ function fn(name: string): string {
   return main.slice(start, main.indexOf("\n}\n", start));
 }
 
-test("Ask opens a new chat, said with a line, so the log never joins one with tools", () => {
+test("sending the log starts a new chat, said with a line, so it never joins one with tools", () => {
   const chat = begin(fresh(), "hi");
   const next = askedChat({ ...chat, busy: false });
   assert.equal(next.id, chat.id + 1);
@@ -23,6 +23,9 @@ test("Ask opens a new chat, said with a line, so the log never joins one with to
   assert.equal(next.model, chat.model);
   // Another model starts a new chat too: the log stays behind in the old run.
   assert.notEqual(switchModel(next, "Haiku").id, next.id);
+  // On Send, not on Ask: × leaves the chat as it was.
+  assert.match(fn("sendChat"), /if \(asked\) chat = askedChat\(chat\);/);
+  assert.doesNotMatch(fn("askParts"), /askedChat|chat_new/);
 });
 
 test("the page sends the held text's ID, never the text", () => {
@@ -37,7 +40,8 @@ test("the preview says where it goes, shows the backend's text, and can be dropp
   assert.match(part, /a\.destination/);
   assert.match(part, /PARTIAL_LOG/);
   assert.match(part, /attachBox\("Session", [^,]+, "Don't send the log", a\.text,/);
-  assert.match(part, /invoke\("session_ask_drop"\)/);
+  assert.match(part, /dropSessionAsk\(\)/);
+  assert.match(fn("dropSessionAsk"), /invoke\("session_ask_drop"\)/);
   assert.match(fn("attachBox"), /linesInto\(pre, preview\)/, "drawn as text");
   assert.match(PARTIAL_LOG, /no outputs or subagent work/);
 });
@@ -48,6 +52,17 @@ test("Ask reads only on the press, and other agents get a line, not a button", (
   const press = parts.indexOf("addEventListener");
   assert.ok(parts.indexOf(`invoke<Omit<SessionAsk, "name">>("session_ask"`) > press);
   assert.equal(main.split(`"session_ask"`).length - 1, 1, "called from one place");
+});
+
+test("a send that fails keeps the log and the question", () => {
+  const send = fn("sendChat");
+  assert.match(send, /if \(asked\) \{\n\s+draft = text;\n\s+if \(code !== "session-gone"\) sessionAsk = asked;/);
+});
+
+test("the log and a file never go together, and the page lets go when the backend does", () => {
+  assert.match(main, /dropSessionAsk\(\);\n\s+attached = \{ id: d\.id/);
+  assert.match(fn("askParts"), /attached = null;/);
+  assert.match(fn("askParts"), /setTimeout\([\s\S]*sessionAsk = null;[\s\S]*ASK_HOLD_MS\)/);
 });
 
 test("Settings says which agents it works for, and a stale ID is said plainly", () => {

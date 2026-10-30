@@ -98,11 +98,16 @@ impl Chats {
         *self.asked.lock().unwrap() = Some((id, text, Instant::now()));
     }
 
-    /// Takes the held text, if `id` is its ID and it's in time: single use.
-    fn take_session(&self, id: &str) -> Option<String> {
-        let mut asked = self.asked.lock().unwrap();
-        let (held, text, at) = asked.take()?;
-        (held == id && at.elapsed() < HOLD).then_some(text)
+    /// The held text, if `id` is its ID and it's in time.
+    fn session_text(&self, id: &str) -> Option<String> {
+        let asked = self.asked.lock().unwrap();
+        let (held, text, at) = asked.as_ref()?;
+        (held == id && at.elapsed() < HOLD).then(|| text.clone())
+    }
+
+    /// The text went: it can't go again.
+    fn spend_session(&self) {
+        *self.asked.lock().unwrap() = None;
     }
 
     /// Forgets a session's text held longer than `HOLD`.
@@ -195,9 +200,16 @@ pub fn chat_send(
         return Err("empty".into());
     }
     let sealed = session.is_some();
+    let bin = match Claude::now() {
+        Claude::Confirmed(bin) => bin,
+        Claude::Missing => return Err("missing".into()),
+        Claude::Unconfirmed(_) | Claude::Changed(_) => return Err("unconfirmed".into()),
+    };
+    // Sends take turns here: a session's text is read and spent under it.
+    let mut run = chats.run.lock().unwrap();
     let prompt = match (session, file) {
         (Some(id), _) => {
-            let text = chats.take_session(&id).ok_or("session-gone")?;
+            let text = chats.session_text(&id).ok_or("session-gone")?;
             format!("{text}{prompt}")
         }
         (None, Some(id)) => drop::ask_prompt(&drops.report(&id).ok_or("gone")?, &prompt),
@@ -206,12 +218,6 @@ pub fn chat_send(
     if prompt.len() > chat::MAX_PROMPT {
         return Err("too-long".into());
     }
-    let bin = match Claude::now() {
-        Claude::Confirmed(bin) => bin,
-        Claude::Missing => return Err("missing".into()),
-        Claude::Unconfirmed(_) | Claude::Changed(_) => return Err("unconfirmed".into()),
-    };
-    let mut run = chats.run.lock().unwrap();
     if run
         .as_ref()
         .is_some_and(|r| r.chat != chat || r.model != model || (sealed && r.lock != Lock::NoTools))
@@ -251,6 +257,9 @@ pub fn chat_send(
     if current.prompts.send(prompt).is_err() {
         *run = None;
         return Err("ended".into());
+    }
+    if sealed {
+        chats.spend_session();
     }
     Ok(())
 }
@@ -600,20 +609,19 @@ mod tests {
         );
     }
 
-    /// A session's text goes once, only under its own ID.
+    /// A session's text goes once, only under its own ID; a send that
+    /// failed before it went leaves it held.
     #[test]
     fn a_held_session_is_single_use() {
         let chats = Chats::default();
         chats.hold_session("a".into(), "text".into());
-        assert_eq!(chats.take_session("b"), None);
-        // A wrong ID drops it too: the next try can't guess again.
-        assert_eq!(chats.take_session("a"), None);
-        chats.hold_session("a".into(), "text".into());
+        assert_eq!(chats.session_text("b"), None);
+        assert_eq!(chats.session_text("a").as_deref(), Some("text"));
         chats.hold_session("b".into(), "newer".into());
-        assert_eq!(chats.take_session("a"), None);
-        chats.hold_session("b".into(), "newer".into());
-        assert_eq!(chats.take_session("b").as_deref(), Some("newer"));
-        assert_eq!(chats.take_session("b"), None);
+        assert_eq!(chats.session_text("a"), None);
+        assert_eq!(chats.session_text("b").as_deref(), Some("newer"));
+        chats.spend_session();
+        assert_eq!(chats.session_text("b"), None);
     }
 
     /// Past the hold, it's gone from memory, not only refused.
