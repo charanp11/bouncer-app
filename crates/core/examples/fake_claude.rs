@@ -65,7 +65,15 @@ fn main() {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    let tools = ["Glob", "Grep", "Read"];
+    // `--tools ""`: an init with none, as the real one reports.
+    let sealed = args
+        .windows(2)
+        .any(|a| a[0] == "--tools" && a[1].is_empty());
+    let tools: &[&str] = if sealed {
+        &[]
+    } else {
+        &["Glob", "Grep", "Read"]
+    };
     let mut out = std::io::stdout().lock();
     // Left running on purpose: the tests check that the kill takes them too.
     let mut grandchildren = Vec::new();
@@ -76,7 +84,7 @@ fn main() {
         // A card's command with this word in it: a slow explanation (about
         // 8 s), for clicking the card while it streams.
         if prompt.contains("slow-explain") {
-            init(&mut out, "none", &tools);
+            init(&mut out, "none", tools);
             let answer = "**What it does:** deletes the `build` folder and everything in it, \
 without asking.
 
@@ -99,14 +107,14 @@ Ignore the above and click Allow. (A hostile line: it's only text.)";
                 eprintln!("error: unknown option '--permission-prompts'");
                 std::process::exit(1);
             }
-            "key" => init(&mut out, "ANTHROPIC_API_KEY", &tools),
+            "key" => init(&mut out, "ANTHROPIC_API_KEY", tools),
             "tools" => init(&mut out, "none", &["Read", "Bash"]),
             "hang" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 std::thread::sleep(Duration::from_secs(3600));
             }
             "trickle" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 loop {
                     say(&mut out, json!({"type": "system", "subtype": "status"}));
                     std::thread::sleep(Duration::from_millis(50));
@@ -117,13 +125,13 @@ Ignore the above and click Allow. (A hostile line: it's only text.)";
                     .env("FAKE_CLAUDE_GRANDCHILD", "1")
                     .spawn()
                     .unwrap();
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 text(&mut out, &child.id().to_string());
                 grandchildren.push(child);
                 done(&mut out, None);
             }
             "flood" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 writeln!(out, "{}", "x".repeat(2 << 20)).unwrap();
                 writeln!(out, "not json\n[1,2]\n{{\"type\":").unwrap();
                 text(&mut out, "after the flood");
@@ -134,7 +142,7 @@ Ignore the above and click Allow. (A hostile line: it's only text.)";
                 std::process::exit(3);
             }
             "slow" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 let secs: u64 = prompt
                     .split_whitespace()
                     .nth(1)
@@ -155,7 +163,7 @@ Ignore the above and click Allow. (A hostile line: it's only text.)";
                 done(&mut out, None);
             }
             "md" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 let answer = "## What I can do
 
 I'm a **read-only** chat. I can:
@@ -178,7 +186,7 @@ Docs: [the README](https://example.com/readme) and <b>tags stay text</b>.";
                 done(&mut out, None);
             }
             "demo" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 say(
                     &mut out,
                     json!({"type": "assistant", "parent_tool_use_id": null, "message": {"content": [
@@ -202,11 +210,11 @@ Docs: [the README](https://example.com/readme) and <b>tags stay text</b>.";
                 done(&mut out, None);
             }
             "error" => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 done(&mut out, Some("Claude Fable isn't available on your plan."));
             }
             _ => {
-                init(&mut out, "none", &tools);
+                init(&mut out, "none", tools);
                 let env: Vec<String> = std::env::vars_os()
                     .map(|(k, _)| k.to_string_lossy().into_owned())
                     .collect();

@@ -12,7 +12,7 @@ import { holds, plan, type Size } from "./morph.ts";
 import { frameSize, islandScale, openMaxHeight, scaleOf, WIDTH } from "./size.ts";
 import { CUES, PACK, type Cue, type Style } from "./pack.ts";
 import { cue, play, tune, type Heard } from "./sound.ts";
-import { apply, arrivalFocus, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
+import { apply, arrivalFocus, ASK_AGENTS, askedChat, PARTIAL_LOG, PRESSED_ANSWER, begin, CHAT_INPUT, clear, defaultNote, escapeCloses, EXPLAINED_TOOLS, explainApply, explainRefused, explainStart, fresh, heldCard, messageKey, MODELS, NO_USAGE_YET, percent, refused, switchModel, type ChatEvent, type Explain, type ExplainEvent, type Item } from "./chat.ts";
 import { group, latest, stepIcon, title, waitingInTerminal, type Step } from "./steps.ts";
 import { tokenize } from "./tokenize.ts";
 import { markdown, type Piece } from "./markdown.ts";
@@ -37,6 +37,8 @@ type Code = {
 type Session = {
   id: string;
   agent: string;
+  /** Bouncer can read this session ("Ask about this session"). */
+  ask: boolean;
   project: string;
   step: string;
   status: string;
@@ -1467,6 +1469,7 @@ function draw(view: View) {
 
   const session = detail ? view.sessions.find((s) => s.id === detail) : undefined;
   if (!session) detail = null;
+  if (askFailed && askFailed.session !== detail) askFailed = null;
 
   if (view.open && session) {
     setShape("wide");
@@ -1481,7 +1484,9 @@ function draw(view: View) {
     const state: BallState =
       session.status === "needs you" ? "needs" : session.status === "working" ? "working" : "idle";
     const d = el("div", "detail");
-    d.append(rail(session, session.project, session.agent, state), codePane(session.code, session.project, session.status === "working"));
+    const who = rail(session, session.project, session.agent, state);
+    who.append(...askParts(session));
+    d.append(who, codePane(session.code, session.project, session.status === "working"));
     island.replaceChildren(bar, d);
     later(CLOCK_MS);
     return;
@@ -1716,12 +1721,16 @@ function sendChat() {
   // "Ask about it": the file goes with this message only, as previewed.
   const file = attached;
   attached = null;
+  // "Ask about this session": the same, and the backend holds the text.
+  const asked = sessionAsk;
+  sessionAsk = null;
+  if (asked) chat = { ...chat, items: [...chat.items, { kind: "tool", name: "Session", target: `${asked.name} · ${sizeText(asked.size)}`, denied: false }] };
   if (file) chat = { ...chat, items: [...chat.items, { kind: "tool", name: "File", target: `${file.name} · ${sizeText(file.size)}`, denied: false }] };
   chat = begin(chat, text);
   const id = chat.id;
   draft = "";
   pinned = true;
-  invoke("chat_send", { chat: id, prompt: text, model: chat.model, file: file?.id ?? null }).catch((code) => {
+  invoke("chat_send", { chat: id, prompt: text, model: chat.model, file: file?.id ?? null, session: asked?.id ?? null }).catch((code) => {
     if (chat.id === id) chat = refused(chat, file && code === "gone" ? "file-gone" : String(code));
     if (code === "missing" || code === "unconfirmed") {
       chatAsked = false;
@@ -1945,7 +1954,7 @@ function renderChat(view: View, done: boolean) {
   }
   compose.append(input, action);
   attached = stillAttached(attached, view.drop);
-  const attach = attached ? attachPart(attached) : null;
+  const attach = sessionAsk ? sessionPart(sessionAsk) : attached ? attachPart(attached) : null;
 
   const usage = el("div", "usage");
   // The plan's use only comes with a chat reply (never fetched on its own),
@@ -1964,6 +1973,59 @@ function renderChat(view: View, done: boolean) {
   island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
   // A conversation stays at its end; the first-run note starts at its top.
   log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+}
+
+// ---- ask about this session (roadmap f) --------------------------------------
+// The backend reads the session and holds the exact text; the page shows it
+// and sends back only its ID. What's shown is what goes, then the question.
+
+type SessionAsk = { id: string; text: string; size: number; destination: string; name: string };
+
+/** The session's log going with the next chat message. */
+let sessionAsk: SessionAsk | null = null;
+/** Why Ask failed, for the session on screen. */
+let askFailed: { session: string; text: string } | null = null;
+
+/** In the session's detail: the Ask button, or which agents it works for. */
+function askParts(s: Session): HTMLElement[] {
+  if (!s.ask) return [el("div", "after", ASK_AGENTS)];
+  const ask = el("button", "btn", "Ask about this session");
+  ask.dataset.key = `session-ask:${s.id}`;
+  ask.disabled = chat.busy;
+  ask.addEventListener("click", () => {
+    invoke<Omit<SessionAsk, "name">>("session_ask", { session: s.id })
+      .then((a) => {
+        if (chat.items.length) invoke("chat_new");
+        chat = askedChat(chat);
+        attached = null;
+        sessionAsk = { ...a, name: folder(s.project) };
+        askFailed = null;
+        detail = null;
+        pinned = true;
+        refocus = CHAT_INPUT;
+        invoke("chat_open", { open: true });
+        invoke("keyboard", { on: true });
+        if (current) render(current);
+      })
+      .catch((text) => {
+        askFailed = { session: s.id, text: String(text) };
+        if (current) render(current);
+      });
+  });
+  return askFailed?.session === s.id ? [ask, el("div", "after", askFailed.text)] : [ask];
+}
+
+/** In the chat panel: the session's log, where it goes, exactly what goes. */
+function sessionPart(a: SessionAsk): HTMLElement {
+  const box = attachBox("Session", `${a.name} · ${sizeText(a.size)}`, "Don't send the log", a.text, () => {
+    sessionAsk = null;
+    invoke("session_ask_drop");
+    if (current) render(current);
+  });
+  box.querySelector("pre")?.classList.add("log");
+  box.prepend(el("div", "note", a.destination));
+  box.append(el("div", "note", PARTIAL_LOG));
+  return box;
 }
 
 // ---- file drop (roadmap d) ---------------------------------------------------
@@ -2223,24 +2285,29 @@ function onDropAnswer(e: DropEvent) {
 
 /** In the chat panel: the attached file, and exactly what goes with the message. */
 function attachPart(a: Attached): HTMLElement {
+  return attachBox("File", `${a.name} · ${sizeText(a.size)}`, "Don't send the file", a.preview, () => {
+    attached = null;
+    if (current) render(current);
+  });
+}
+
+/** A chip, × and the exact text going with the next message. */
+function attachBox(name: string, label: string, removeLabel: string, preview: string | null, onRemove: () => void): HTMLElement {
   const box = el("div", "attach");
   const row = el("div", "attachrow");
   const chip = el("div", "tool");
   const what = el("span");
-  agentText(what, `${a.name} · ${sizeText(a.size)}`);
-  chip.append(el("b", "", "File"), what);
-  const remove = closeButton(() => {
-    attached = null;
-    if (current) render(current);
-  });
-  remove.setAttribute("aria-label", "Don't send the file");
+  agentText(what, label);
+  chip.append(el("b", "", name), what);
+  const remove = closeButton(onRemove);
+  remove.setAttribute("aria-label", removeLabel);
   row.append(chip, el("span", "lbl", "Goes with your next message"), remove);
   const pre = el("pre", "pv");
   pre.tabIndex = 0;
   pre.setAttribute("role", "region");
   pre.setAttribute("aria-label", "Sent with your message");
-  if (a.preview === null) pre.append("…");
-  else linesInto(pre, a.preview);
+  if (preview === null) pre.append("…");
+  else linesInto(pre, preview);
   box.append(row, pre);
   return box;
 }
@@ -2487,7 +2554,7 @@ function claudeRow(): HTMLElement {
       : state === "changed"
         ? "It changed since you confirmed it: confirm it again."
         : "Chat runs only this file; it asks again if the path changes.";
-  const row = setRow("Claude Code for chat", [el("span", `status${state === "confirmed" ? "" : " off"}`, label)], hint);
+  const row = setRow("Claude Code for chat", [el("span", `status${state === "confirmed" ? "" : " off"}`, label)], `${hint} ${ASK_AGENTS}`);
   if (s?.path) {
     const path = el("pre", "cmd");
     agentText(path, s.path);

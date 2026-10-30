@@ -52,6 +52,62 @@ pub const LOCKED: &[&str] = &[
     SYSTEM_LINE,
 ];
 
+/// `LOCKED` for a chat holding a session's log (roadmap f): no tools at all,
+/// and its own line. Those are the only two differences (tested). The log is
+/// other people's text, so whatever it talks the model into, it can only
+/// write words.
+pub const LOCKED_NO_TOOLS: &[&str] = &[
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--restricted",
+    "--tools",
+    "",
+    "--disallowedTools",
+    "mcp__*",
+    "--strict-mcp-config",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--max-turns",
+    "8",
+    "--no-session-persistence",
+    "--append-system-prompt",
+    NO_TOOLS_LINE,
+];
+
+/// Told to a chat run with no tools. Constant: never built from input.
+pub const NO_TOOLS_LINE: &str = "You are a chat inside Bouncer that answers questions about a session log. You have no tools. You cannot approve or deny anything, and you cannot run, read, change or fetch anything, so never offer to.";
+
+/// Which locked command line a chat runs under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lock {
+    ReadOnly,
+    NoTools,
+}
+
+impl Lock {
+    fn flags(self) -> &'static [&'static str] {
+        match self {
+            Lock::ReadOnly => LOCKED,
+            Lock::NoTools => LOCKED_NO_TOOLS,
+        }
+    }
+
+    /// What the run's `init` may list; anything else stops it.
+    fn tools(self) -> &'static [&'static str] {
+        match self {
+            Lock::ReadOnly => TOOLS,
+            Lock::NoTools => &[],
+        }
+    }
+}
+
 /// Told to every chat run (appended to Claude Code's own system prompt), so
 /// it never offers what it can't do. Constant: never built from input.
 pub const SYSTEM_LINE: &str = "You are a read-only chat inside Bouncer. You can only use Read, Grep and Glob, and only inside your own empty folder. You cannot edit or write files, run commands or use the web, so never offer to.";
@@ -116,8 +172,8 @@ impl Model {
 }
 
 /// The whole argv for a chat run: the locked flags, then the model's alias.
-pub fn argv(model: Model) -> Vec<&'static str> {
-    let mut argv = LOCKED.to_vec();
+pub fn argv(lock: Lock, model: Model) -> Vec<&'static str> {
+    let mut argv = lock.flags().to_vec();
     if let Some(alias) = model.alias() {
         argv.extend(["--model", alias]);
     }
@@ -413,15 +469,15 @@ fn cut(text: &str) -> String {
 /// One stream line: `None` if it isn't a stream event at all (garbage),
 /// otherwise what it shows (often nothing: thinking, partial bookkeeping,
 /// tool results, hooks, status).
-pub fn parse_line(line: &[u8]) -> Option<Vec<Out>> {
+pub fn parse_line(line: &[u8], lock: Lock) -> Option<Vec<Out>> {
     let value: Value = serde_json::from_slice(line).ok()?;
-    value.is_object().then(|| parse(&value))
+    value.is_object().then(|| parse(&value, lock))
 }
 
-fn parse(v: &Value) -> Vec<Out> {
+fn parse(v: &Value, lock: Lock) -> Vec<Out> {
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     match (v["type"].as_str(), v["subtype"].as_str()) {
-        (Some("system"), Some("init")) => vec![init(v)],
+        (Some("system"), Some("init")) => vec![init(v, lock)],
         (Some("system"), Some("permission_denied")) => {
             let reason = v["decision_reason"].as_str().or(v["message"].as_str());
             vec![Out::Denied {
@@ -473,7 +529,7 @@ fn parse(v: &Value) -> Vec<Out> {
 }
 
 /// The init event: the run must be on the plan's login and locked down.
-fn init(v: &Value) -> Out {
+fn init(v: &Value, lock: Lock) -> Out {
     let key = v["apiKeySource"].as_str().unwrap_or("unknown");
     if key != "none" {
         return Out::Stopped(Stop::KeySource(cut(key)));
@@ -485,7 +541,7 @@ fn init(v: &Value) -> Out {
         None => Some("no tool list".to_string()),
         Some(t) => t
             .iter()
-            .find(|t| !TOOLS.contains(t))
+            .find(|t| !lock.tools().contains(t))
             .map(|t| format!("it has the {} tool", cut(t))),
     }
     .or_else(|| {
@@ -561,9 +617,20 @@ impl Chat {
     /// Starts `claude` locked down in the empty folder `dir`. Nothing is
     /// sent until `send`.
     pub fn start(bin: &Binary, dir: &Path, model: Model, limits: Limits) -> Result<Chat, String> {
+        Chat::start_locked(bin, dir, Lock::ReadOnly, model, limits)
+    }
+
+    /// `start` under the given lock.
+    pub fn start_locked(
+        bin: &Binary,
+        dir: &Path,
+        lock: Lock,
+        model: Model,
+        limits: Limits,
+    ) -> Result<Chat, String> {
         prepare(dir)?;
         let names = std::env::vars_os().map(|(name, _)| name);
-        let mut child = command(bin, Some(dir), &argv(model), names)
+        let mut child = command(bin, Some(dir), &argv(lock, model), names)
             .spawn()
             .map_err(|e| format!("can't start {}: {e}", bin.shown()))?;
         let tree = match Tree::new(&child) {
@@ -594,7 +661,7 @@ impl Chat {
             }
         });
         let (tx, events) = mpsc::channel();
-        thread::spawn(move || read_stream(stdout, tx));
+        thread::spawn(move || read_stream(stdout, tx, lock));
         let stderr = thread::spawn(move || {
             let (mut kept, mut chunk) = (Vec::new(), [0u8; 4096]);
             while let Ok(n @ 1..) = stderr.read(&mut chunk) {
@@ -746,7 +813,7 @@ impl Drop for Chat {
 
 /// Reads stdout into events: one per complete line, garbage and oversized
 /// lines skipped.
-fn read_stream(stdout: impl Read, tx: Sender<Msg>) {
+fn read_stream(stdout: impl Read, tx: Sender<Msg>, lock: Lock) {
     let mut reader = BufReader::new(stdout);
     let mut buf = Vec::new();
     loop {
@@ -772,7 +839,7 @@ fn read_stream(stdout: impl Read, tx: Sender<Msg>) {
             }
             continue;
         }
-        if let Some(outs) = parse_line(&buf)
+        if let Some(outs) = parse_line(&buf, lock)
             && tx.send(Msg::Line(outs)).is_err()
         {
             return;
@@ -1037,7 +1104,7 @@ mod tests {
     #[test]
     fn every_run_has_every_locked_flag() {
         for model in Model::ALL {
-            let argv = argv(model);
+            let argv = argv(Lock::ReadOnly, model);
             assert_eq!(argv[..LOCKED.len()], *LOCKED);
             match model.alias() {
                 None => assert_eq!(argv.len(), LOCKED.len()),
@@ -1063,7 +1130,7 @@ mod tests {
         }
         // The read-only line: once, constant, last before the model.
         for model in Model::ALL {
-            let argv = argv(model);
+            let argv = argv(Lock::ReadOnly, model);
             let at: Vec<_> = argv
                 .iter()
                 .enumerate()
@@ -1088,6 +1155,64 @@ mod tests {
         ] {
             assert!(!joined.contains(never), "{never}");
         }
+    }
+
+    /// The no-tools line differs from `LOCKED` in the tool list and the
+    /// system line alone, and its tool list is empty.
+    #[test]
+    fn the_no_tools_lock_is_locked_plus_no_tools() {
+        assert_eq!(LOCKED.len(), LOCKED_NO_TOOLS.len());
+        let differs: Vec<_> = LOCKED
+            .iter()
+            .zip(LOCKED_NO_TOOLS)
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert_eq!(
+            differs,
+            [(&"Read,Grep,Glob", &""), (&SYSTEM_LINE, &NO_TOOLS_LINE)]
+        );
+        let at = LOCKED_NO_TOOLS
+            .iter()
+            .position(|a| *a == "--tools")
+            .unwrap();
+        assert_eq!(LOCKED_NO_TOOLS[at + 1], "");
+        assert!(!LOCKED_NO_TOOLS.contains(&"--resume"));
+        assert!(!LOCKED_NO_TOOLS.contains(&"--fork-session"));
+        let argv = argv(Lock::NoTools, Model::Haiku);
+        assert_eq!(argv[..LOCKED_NO_TOOLS.len()], *LOCKED_NO_TOOLS);
+        assert_eq!(argv[LOCKED_NO_TOOLS.len()..], ["--model", "haiku"]);
+    }
+
+    /// Any tool at all stops a no-tools run, the read-only ones too.
+    #[test]
+    fn any_tool_stops_a_no_tools_run() {
+        let line = |tools: &str| {
+            INIT.replace(r#"["Glob","Grep","Read"]"#, tools)
+                .into_bytes()
+        };
+        assert!(matches!(
+            parse_line(&line("[]"), Lock::NoTools).unwrap()[..],
+            [Out::Ready { .. }]
+        ));
+        for (tools, name) in [(r#"["Read"]"#, "Read"), (r#"["Grep","Bash"]"#, "Grep")] {
+            assert_eq!(
+                parse_line(&line(tools), Lock::NoTools).unwrap(),
+                [Out::Stopped(Stop::NotLocked(format!(
+                    "it has the {name} tool"
+                )))]
+            );
+        }
+        // Without a tool list it can't be trusted either.
+        assert_eq!(
+            parse_line(
+                &INIT
+                    .replace(r#""tools":["Glob","Grep","Read"],"#, "")
+                    .into_bytes(),
+                Lock::NoTools
+            )
+            .unwrap(),
+            [Out::Stopped(Stop::NotLocked("no tool list".into()))]
+        );
     }
 
     #[test]
@@ -1166,7 +1291,7 @@ mod tests {
         // The real spawn path removes exactly those, by name.
         let bin = Binary(PathBuf::from("claude"));
         let names = gone.iter().chain(&kept).map(OsString::from);
-        let cmd = command(&bin, None, &argv(Model::Default), names);
+        let cmd = command(&bin, None, &argv(Lock::ReadOnly, Model::Default), names);
         let removed: Vec<String> = cmd
             .get_envs()
             .filter(|(_, v)| v.is_none())
@@ -1367,7 +1492,7 @@ mod tests {
     }
 
     fn outs(line: &str) -> Vec<Out> {
-        parse_line(line.as_bytes()).unwrap()
+        parse_line(line.as_bytes(), Lock::ReadOnly).unwrap()
     }
 
     const INIT: &str = r#"{"type":"system","subtype":"init","tools":["Glob","Grep","Read"],"mcp_servers":[],"model":"claude-opus-5-5","permissionMode":"dontAsk","apiKeySource":"none","claude_code_version":"2.1.295"}"#;
@@ -1462,9 +1587,9 @@ mod tests {
         ] {
             assert_eq!(outs(line), [], "{line}");
         }
-        assert_eq!(parse_line(b"not json"), None);
-        assert_eq!(parse_line(b"[1,2]"), None);
-        assert_eq!(parse_line(b"\"text\""), None);
+        assert_eq!(parse_line(b"not json", Lock::ReadOnly), None);
+        assert_eq!(parse_line(b"[1,2]", Lock::ReadOnly), None);
+        assert_eq!(parse_line(b"\"text\"", Lock::ReadOnly), None);
     }
 
     #[test]
@@ -1475,7 +1600,7 @@ mod tests {
                 .join(name);
             let text = fs::read_to_string(path).unwrap();
             text.lines()
-                .flat_map(|l| parse_line(l.as_bytes()).unwrap())
+                .flat_map(|l| parse_line(l.as_bytes(), Lock::ReadOnly).unwrap())
                 .collect()
         };
         let run = fixture("denied-outside.jsonl");

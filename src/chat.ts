@@ -61,6 +61,20 @@ export function switchModel(chat: Chat, model: Model): Chat {
 
 const line = (text: string): Item => ({ kind: "new", text });
 
+/** "Ask about this session": a new chat, with no tools. The old one's words
+ * stay on screen, said with a line. */
+export function askedChat(chat: Chat): Chat {
+  const items = chat.items.length && chat.items.at(-1)?.kind !== "new" ? [...chat.items, line("New chat · no tools")] : chat.items;
+  return { ...chat, id: chat.id + 1, items, busy: false, ended: false };
+}
+
+/** Which sessions Ask works for (the backend decides each one). */
+export const ASK_AGENTS = "Ask about this session works for Claude Code and Codex sessions.";
+
+/** Beside the preview: the answer can't see everything, and the preview is
+ * the last check. */
+export const PARTIAL_LOG = "Partial log: no outputs or subagent work. Redaction can miss things, so read it first.";
+
 /** The user sent `text`: it shows at once, and the chat waits for the answer. */
 export function begin(chat: Chat, text: string): Chat {
   const next = chat.ended ? { ...chat, id: chat.id + 1, ended: false } : chat;
@@ -142,6 +156,8 @@ export function sendError(code: string): string {
       return "That request isn't waiting any more.";
     case "file-gone":
       return "Bouncer no longer holds that file. Drop it again.";
+    case "session-gone":
+      return "That preview is gone. Press Ask about this session again.";
     case "tool":
       return "Only commands can be explained.";
     default:

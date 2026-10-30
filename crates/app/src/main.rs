@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use bouncer_core::activity;
 use bouncer_core::approvals::{self, Desk, WAIT};
+use bouncer_core::ask;
 use bouncer_core::autostart;
 use bouncer_core::away::{self, Away};
 use bouncer_core::hooks::{self, Agent};
@@ -146,6 +147,8 @@ fn main() {
             chat::chat_new,
             explain,
             explain_stop,
+            session_ask,
+            chat::session_ask_drop,
             drop::drop_close,
             drop::drop_preview,
             drop::drop_ask,
@@ -313,6 +316,7 @@ fn tick(app: AppHandle, desk: Arc<Desk>) {
             std::thread::sleep(TICK);
             desk.reload_rules();
             desk.expire_sessions();
+            app.state::<chat::Chats>().expire_session();
             if app.state::<drop::Drops>().expire() {
                 show(&app, desk.view());
             }
@@ -728,6 +732,30 @@ fn explain(
 /// The waiting request `id` in `view`, if it is one.
 fn waiting_request<'a>(view: &'a Value, id: &str) -> Option<&'a Value> {
     view["queue"].as_array()?.iter().find(|r| r["id"] == id)
+}
+
+/// "Ask about this session": reads the session in the list (its agent from
+/// Bouncer's own entry, its file by ID), holds the exact text and gives the
+/// page that text to show, a random ID to send back, and where it goes.
+/// Nothing leaves until `chat_send`.
+#[tauri::command(async)]
+fn session_ask(
+    island: State<'_, Island>,
+    chats: State<'_, chat::Chats>,
+    session: String,
+) -> Result<Value, String> {
+    let agent = island.desk.session_agent(&session).ok_or(ask::NOT_FOUND)?;
+    let home = ask::home(agent).ok_or(ask::NOT_FOUND)?;
+    let text = ask::session_prompt(agent, &session, &home)?;
+    let id = approvals::request_id().ok_or(ask::NOT_FOUND)?;
+    let view = json!({
+        "id": id,
+        "text": text,
+        "size": text.len(),
+        "destination": ask::destination(agent),
+    });
+    chats.hold_session(id, text);
+    Ok(view)
 }
 
 /// Stop on the card's explanation.

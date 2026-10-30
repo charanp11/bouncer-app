@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use bouncer_core::chat::{self, Binary, Chat, LOCKED, Limits, Model, Out, Stop};
+use bouncer_core::chat::{self, Binary, Chat, LOCKED, Limits, Lock, Model, Out, Stop};
 use serde_json::Value;
 
 struct TempDir(PathBuf);
@@ -67,6 +67,17 @@ fn setup(name: &str) -> (TempDir, Binary) {
 
 fn start(dir: &TempDir, bin: &Binary, model: Model, limits: Limits) -> Chat {
     Chat::start(bin, &dir.0.join("chat"), model, limits).unwrap()
+}
+
+fn no_tools(dir: &TempDir, bin: &Binary, limits: Limits) -> Chat {
+    Chat::start_locked(
+        bin,
+        &dir.0.join("chat"),
+        Lock::NoTools,
+        Model::Haiku,
+        limits,
+    )
+    .unwrap()
 }
 
 /// Everything one message shows, up to its `Done` or the chat's `Stopped`.
@@ -319,6 +330,37 @@ fn a_chat_never_starts_in_a_folder_with_files() {
 /// By hand: `BOUNCER_REAL_CLAUDE=<path to claude(.exe)>`
 /// `BOUNCER_REAL_CHAT_DIR=<an empty folder>` `cargo test -p bouncer-core
 /// --test chat -- --ignored`. Uses Haiku on the plan.
+/// A session's log runs with an empty tool list on the real command line:
+/// the empty value survives the spawn, the run says it has no tools, and
+/// follow-ups stay in that run.
+#[test]
+fn a_no_tools_chat_really_has_none() {
+    let (dir, bin) = setup("no-tools");
+    let mut chat = no_tools(&dir, &bin, Limits::default());
+    let outs = answer(&mut chat, "what is it doing?");
+    assert!(matches!(&outs[0], Out::Ready { .. }), "{outs:?}");
+    assert_eq!(outs.last(), Some(&Out::Done { error: None }));
+    let said = text(&outs);
+    assert!(said.contains(r#""--tools","""#), "{said}");
+    assert!(!said.contains("Read,Grep,Glob"), "{said}");
+    assert!(said.contains(chat::NO_TOOLS_LINE), "{said}");
+    assert!(!said.contains("--resume"), "{said}");
+    let outs = answer(&mut chat, "and then?");
+    assert_eq!(outs.last(), Some(&Out::Done { error: None }));
+}
+
+/// The same fake with tools listed: the no-tools run stops before answering.
+#[test]
+fn a_no_tools_run_that_lists_a_tool_is_stopped() {
+    let (dir, bin) = setup("no-tools-stop");
+    let mut chat = no_tools(&dir, &bin, Limits::default());
+    let outs = answer(&mut chat, "tools");
+    assert!(
+        matches!(&outs[..], [Out::Stopped(Stop::NotLocked(what))] if what.contains("tool")),
+        "{outs:?}"
+    );
+}
+
 #[test]
 #[ignore]
 fn real_claude_round_trip() {

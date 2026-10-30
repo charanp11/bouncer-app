@@ -1006,6 +1006,12 @@ impl Desk {
     }
 
     /// Drops sessions that went quiet without ending; the island hears about it.
+    /// The agent of a session in the list, from Bouncer's own entry.
+    pub fn session_agent(&self, id: &str) -> Option<&'static str> {
+        let state = self.state.lock().unwrap();
+        state.sessions.iter().find(|s| s.id == id).map(|s| s.agent)
+    }
+
     pub fn expire_sessions(&self) {
         if self.lock().expire(SystemTime::now()) {
             self.publish();
@@ -1128,6 +1134,7 @@ impl Desk {
                 json!({
                     "id": visible(&s.id),
                     "agent": s.agent,
+                    "ask": crate::ask::readable(s.agent),
                     "project": visible(&s.project),
                     "step": visible(&s.step),
                     "status": s.status,
