@@ -3266,7 +3266,7 @@ Roadmap after v0.7.0 (decision 7). One feature per release:
 | v0.8 | Answer Claude Code's questions in the island | c2 |
 | v0.9 | File drop | d (Phase 7) |
 | then | Other agents, one per release | h |
-| then | Ask about this session | f (6d) |
+| now | Ask about this session | f (6d), current: "Roadmap f" |
 | then | Mac release | g |
 | then | Music | e (Phase 8) |
 | optional | Linux | i |
@@ -5219,6 +5219,161 @@ instance stopped by PID; real `%LOCALAPPDATA%\cursor-agent`,
 `%APPDATA%\Cursor`, `~\.cursor`, `~\.local\share\cursor-agent`: absent;
 real `~\.claude\settings.json` last written 2026-10-28 (checked from a
 WMI-created process). Model requests in all of h3: 5.
+
+## Roadmap f — Ask about this session (current)
+
+Ask the read-only chat a question about one session in the island's list
+("what is it doing?", "did it touch anything outside the repo?"). Charan
+said yes, 2026-10-29. Audit 2026-10-29, checked again 2026-10-30, Claude
+Code 2.1.312.
+
+### Audit
+
+**Plan correction: no `--resume --fork-session`.** Phase 6's check (6d)
+had Claude Code load the session itself by ID. That can't meet Charan's
+conditions: Claude Code would send the whole session as it is, tool
+outputs (file contents, `.env`, command output) included, unredacted, and
+Bouncer could neither redact it nor show what goes. So Bouncer reads the
+session itself, read-only, builds a short redacted digest, shows it, and
+sends it as data in the prompt, the way file drop's "Ask about it" does
+(`drop::ask_prompt`). "Fork read-only" becomes "read a snapshot": the real
+session is never resumed, forked or written; a session still running is
+read up to its last complete line. `File::open` shares read, write and
+delete on Windows, so the read can't get in the agent's way.
+
+**Which agents.** What was checked:
+
+| Agent | Session file | Verdict |
+| --- | --- | --- |
+| Claude Code | `<config>/projects/<slug>/<session_id>.jsonl` (20 scratch transcripts read for shape) | Yes |
+| Codex CLI | `CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session_id>.jsonl` (23 scratch rollouts; the ID in every file name matches its `session_meta`) | Yes, from fake-model rollouts only (no Codex subscription); a real rollout with other records gives fewer lines, never more, by the allowlist |
+| Copilot CLI | No path in any hook input (fixtures) | **Not checked:** no scratch Copilot is left, and its on-disk format needs a new scratch install |
+| Cursor CLI | `transcript_path` is `null` | No |
+
+Settings gets one line: "Ask about this session works for Claude Code and
+Codex sessions." A Copilot or Cursor session has no Ask button (a hint
+says why), not a button that fails.
+
+**Finding the file.** The relay drops `transcript_path` (TESTS R12) and it
+stays dropped: a path from hook input could point anywhere. The backend
+takes a session ID only if it is in its own session list, takes the agent
+from that entry (never from the page), requires a UUID, and looks inside
+that agent's own folder only: Claude Code's `projects/*/<id>.jsonl` (one
+level, so a session's `subagents/` files aren't read), Codex's
+`sessions/YYYY/MM/DD/rollout-*-<id>.jsonl`. `rules::trust::check` (no
+link, ours); a regular file; otherwise "Can't find this session's
+history". A session from a Claude Code with another `CLAUDE_CONFIG_DIR`
+isn't found (said so).
+
+**What goes in the digest** (an allowlist of records; anything unknown is
+skipped, so a new format sends less, not more):
+
+- *Claude Code:* `user` records with string content, unless `isMeta`,
+  `isSidechain` or `isCompactSummary`; `assistant` records' `text` blocks
+  (no `thinking`) and `tool_use` blocks. Skipped: `tool_result`,
+  `attachment`, `api-request*` (it holds tool results too),
+  `file-history-*`, titles, modes, costs.
+- *Codex:* `event_msg` / `item_completed` items only: `UserMessage`,
+  `AgentMessage`, `CommandExecution` (its `command`, never
+  `aggregated_output`). Not `response_item`: half of its "user" messages
+  are Codex's own `<environment_context>` and `<turn_aborted>` wrappers
+  (21 of 41 in scratch), and `session_meta` holds its base instructions.
+- Each tool call is one line: the tool's name and one named field,
+  `command`, `file_path` or `pattern`, cut to 300 characters, hidden
+  characters as `\u{…}`. **Never `content`, `old_string`, `new_string`,
+  `plan` or `questions`:** those are file contents and agent text. Other
+  tools: the name alone.
+- **Tool outputs never**: "(output left out)". Keeps rule 7 and drops the
+  riskiest part.
+- Every line through `redact::redact`, then cut: newest first, at most
+  40 KB (about 10k tokens of the plan's use per Ask), older turns replaced
+  by "(N earlier turns left out)". The file is read from its end, at most
+  8 MB; lines over 1 MB skipped.
+
+**Redaction is patterns, not a promise.** `redact` was built for the
+local log, where a miss stays on the machine; here a miss leaves it. Gap
+found by reading it: `API_KEY = abc123` (spaces around `=`) goes through.
+Fix with this work (stricter for the log too). It still can't see a
+password in prose ("my password is hunter2"): that's what the preview is
+for, and the preview says so.
+
+**A partial log.** The digest has no outputs, no subagents and maybe not
+the oldest turns, so an answer to "did it touch anything outside the
+repo?" can be wrong by omission. The fixed wording tells the model what is
+left out and to say when the log can't settle a question, and the panel
+says "Partial log: no outputs or subagent work."
+
+**What the model gets.** The same locked chat (`chat.rs`, native
+`claude.exe`, the confirmed path, the user's own login, environment
+scrubbed) with one change to the lock, stricter, never looser: a second
+constant command line, `LOCKED` with `--tools ""` in place of
+`Read,Grep,Glob` and its own fixed system line ("you answer questions
+about a session log; you have no tools; you can't approve, deny or do
+anything"). **Checked with a real run** (Haiku, test profile, empty chat
+folder, 2.1.312) with an injected order to run `whoami`, read `win.ini`
+and fetch a URL: `init.tools` `[]`, no MCP, `dontAsk`, `apiKeySource`
+`none`, one turn, no tool call, refused, folder still empty. `init()`
+today accepts any subset of Read / Grep / Glob, so this run needs its own
+check: **any tool at all stops it** (`NotLocked`). The prompt starts with
+fixed wording (so a question can't start a `/` command), then the digest
+in `chat::fenced` (data, not instructions), then the question. Nothing the
+model says reaches a card, a rule or a decision: the answer is chat text
+only (`textContent`, the Markdown builder).
+
+**One chat, its own run.** Ask starts a new chat (a line says so): a
+running chat has tools, so the digest can't join it. Follow-ups stay in
+that no-tools run, no new digest. Another model or New chat ends it. The
+backend ends any run with tools before it takes a digest.
+
+**What is shown is what goes.** Ask makes the backend build the digest
+once and hold it under a random ID; the page shows that text and sends
+back only the ID, single use, as `drop_ask` does. The page can't change
+it, and nothing is re-read at Send. A second Ask or × drops it, as does
+the 10-minute hold drop uses.
+
+**Another vendor.** A Codex session was sent to OpenAI; Ask sends its
+digest to Anthropic through Claude Code. The preview's line names where
+it goes on every Ask, in those words for a Codex session.
+
+**When it runs.** Only on Ask: a button in the session's detail view (a
+row already opens it), which opens the chat with a "Session" chip and the
+preview (reusing `attachPart`), plus the size. Send sends it with the
+question, once; × removes it. Nothing is read before the button is
+pressed. The prototype gets this state first (`chatfile` is the pattern).
+
+**Nothing stored.** The digest lives in memory until sent or dropped;
+chats stay memory-only; the activity log is unchanged.
+
+**Island while it answers.** The chat's existing stream: worker batches
+2/s (500 ms), the log on its own layer; measured like Explain (60 s, app +
+WebView2), target ≤ the chat's 15%.
+
+### Threats
+
+| Threat | Fix |
+| --- | --- |
+| Prompt injection from the session (web pages, files, tool output) | No tools (`--tools ""`, proved by a real run), any tool at `init` stops it, no prompts, no MCP; digest fenced as data; tool outputs left out; the answer is text only, never a decision |
+| Secrets in the session | Tool outputs and file bodies never sent; every line through `redact`; the preview shows exactly what goes before Send and says redaction can miss things |
+| The page swaps what is sent | The digest stays in the backend; the page sends a single-use ID |
+| Sent without a click | Read only on Ask, sent only on Send |
+| Sent somewhere else, billed elsewhere | Only the locked chat (confirmed native `claude.exe`, the user's login, scrubbed env, `apiKeySource` must be `none`) |
+| A Codex session crossing vendors unnoticed | The preview names Anthropic on every Ask |
+| An answer read as an audit | Fixed wording and "Partial log" line |
+| A hook-supplied path reads another file | `transcript_path` never used; a known session's UUID in its agent's own folder; no links, owner checked |
+| Writing to or resuming the real session | Opened read-only; never `--resume`; `--no-session-persistence` |
+| A huge session | 8 MB tail, 1 MB line limit, 40 KB digest |
+| Hostile text in the preview or answer | `textContent` only |
+| Stored copies | Memory only, until sent or dropped |
+
+### Done when
+
+- [ ] Ask on a Claude Code session: preview, Send, a streamed answer (fake `claude`, then one real hand check)
+- [ ] Codex digest from scratch Codex 0.163.0 rollouts
+- [ ] Copilot / Cursor sessions have no Ask; Settings says which agents work
+- [ ] Tests: tool outputs and file bodies never in the digest; `isMeta` / sidechain / Codex wrappers left out; secrets redacted incl. `NAME = value`; 40 KB cap; unknown session, non-UUID, link and owner refusals; the no-tools argv is a constant that differs from `LOCKED` only in `--tools` and the system line, never `--resume`; any tool at `init` stops the no-tools run; a digest never joins a run with tools; single-use ID; nothing read before Ask; the answer can't reach a decision
+- [ ] CPU while an answer streams measured
+- [ ] TESTS and BRIEF updated; CI green on Windows and macOS; reviewer agent
+- [ ] Charan's OK on the safety design, his merge, release, hand checks
 
 ## Phase 8 — Music (~1 week)
 
