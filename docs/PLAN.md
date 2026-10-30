@@ -5486,6 +5486,13 @@ step would first have run on Ubuntu at the tag and needed crates.io after
 the build (450 crates, 3m42s cold), so the source check moved to the tag's
 checks; this section and BRIEF were missing.
 
+**v0.13.1 published (Charan, 2026-10-30).** Manual checks (Charan, his own
+desktop, the installed build): the update 0.13.0 → 0.13.1 came through the
+updater, still installed by plugin 2.13.3 (TESTS UP8); Settings shows
+0.13.1 (U11); Claude Code hooks Installed (I8); a real session showed in
+the island. Next: the notes-only v0.13.2, the first update installed by
+plugin 2.14.0.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
