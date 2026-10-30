@@ -5427,8 +5427,17 @@ of the log (now kept, with keyboard focus).
 - [x] Copilot / Cursor sessions have no Ask; Settings says which agents work
 - [x] Tests: tool outputs and file bodies never in the digest; `isMeta` / sidechain / Codex wrappers left out; secrets redacted incl. `NAME = value`; 40 KB cap; unknown session, non-UUID, link and owner refusals; the no-tools argv is a constant that differs from `LOCKED` only in `--tools` and the system line, never `--resume`; any tool at `init` stops the no-tools run; a digest never joins a run with tools; single-use ID; nothing read before Ask; the answer can't reach a decision
 - [x] CPU while an answer streams measured: 7.2% of a core (50 s, app + WebView2, fake `claude`), under the chat's 15%
-- [ ] TESTS and BRIEF updated; CI green on Windows and macOS; reviewer agent
-- [ ] Charan's OK on the safety design, his merge, release, hand checks
+- [x] TESTS and BRIEF updated; CI green on Windows and macOS; reviewer agent
+- [x] Charan's OK on the safety design, his merge (#69, 2026-10-30)
+- [ ] Release v0.13.0 published, hand checks
+
+### Copilot and Cursor stay out (Charan, 2026-10-30)
+
+Ask stays on Claude Code and Codex for now. A possible follow-up, not on
+the roadmap: Copilot needs a new scratch install to audit its session
+files; Cursor gives no transcript (`transcript_path` is `null`), so it
+needs another source of the log, audited first. Either one comes back with
+the same digest, redaction and preview rules.
 
 ## Phase 8 — Music (~1 week)
 

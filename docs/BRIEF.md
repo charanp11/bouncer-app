@@ -57,7 +57,7 @@ Bouncer never blocks the agent and never allows anything by default.
 | Questions and plans in the island | Yes | No | No (watch-only "question in the terminal") | No |
 | Guard every mode | Yes (opt-in) | No | Yes (opt-in), Deny / "Let Copilot decide" only | Yes (opt-in), Deny / "Let Cursor decide" only |
 | Explain this command | Yes | Yes | Yes, on the guard's card | Yes, on the guard's card |
-| Ask about this session | Yes | Yes (leaves OpenAI for Anthropic, and the preview says so) | No: its session files aren't audited | No: it gives no transcript |
+| Ask about this session | Yes | Yes (leaves OpenAI for Anthropic, and the preview says so) | No, for now: its session files aren't audited (possible follow-up) | No, for now: it gives no transcript (possible follow-up) |
 
 Why the differences:
 
@@ -274,6 +274,9 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
+- **v0.13.0** (2026-10-30): Ask about this session: a question about a
+  Claude Code or Codex session, answered from a redacted log you see first,
+  in a chat with no tools.
 - **v0.12.0** (2026-10-29, published 2026-10-29): Cursor CLI support: watch-only plus Deny
   on risky shell commands (Guard every mode), no Allow from Bouncer, your
   own Cursor hooks kept; tested with Cursor CLI 2026.10.22. Privacy fix:
@@ -389,7 +392,10 @@ In order, one per release, each audited first:
    can block a tool call (yes: approvals; no: watch-and-flag, labelled).
    Codex, Copilot and Cursor are in; Antigravity was audited and left out
    (its hooks fail closed).
-2. **f: Ask about this session**: built, not yet released.
+2. **f: Ask about this session**: in v0.13.0, for Claude Code and Codex.
+   Copilot and Cursor stay out for now (Charan, 2026-10-30), a possible
+   follow-up: Copilot needs its session files audited, Cursor another
+   source of the log.
 3. **g: Mac release** (needs a real Mac).
 4. **e: Music**, within the motion and CPU budget.
 5. **i: Linux** (optional).
