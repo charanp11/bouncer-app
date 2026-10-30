@@ -4781,7 +4781,7 @@ Hooks installed through the scratch `bouncer install-hooks --copilot`
   discarded and repeated. Real `~/.copilot` and Claude Code's
   `settings.json` compared afterwards: unchanged.
 
-## Roadmap h3 — Cursor CLI (current)
+## Roadmap h3 — Cursor CLI (done)
 
 Third of roadmap h (2026-10-29). Audit of the two agents left, Cursor CLI
 (`cursor-agent`) and Antigravity CLI (`agy`), from public docs only;
@@ -5120,12 +5120,22 @@ relay's own deadlines keep it below that.
 - [x] reviewer agent (below)
 - [x] CI green (#66, all 7 checks incl. the installer test), Charan's
   merge (2026-10-29)
-- [ ] release v0.12.0 (#65 included), Charan's hand checks
+- [x] release v0.12.0 (#65 included), Charan's hand checks (2026-10-29)
 
 **#66 merged (Charan, 2026-10-29); v0.12.0** (notes `docs/releases/v0.12.0.md`,
 #65's privacy fix included, no release of its own): tag on main, release
 workflow, draft for Charan to publish. Hand checks only what he can do
 without signing into Cursor on his real profile.
+
+**v0.12.0 published (Charan, 2026-10-29).** Manual checks (Charan, his own
+desktop, the installed build; Claude Code 2.1.312): the update 0.11.1 →
+0.12.0 came through the updater (TESTS UP8); Settings shows 0.12.0 (U11);
+Claude Code hooks Installed, and no Cursor row while there was no
+`~/.cursor` folder (I8, CU8); reading `~/.claude/settings.json` got the
+risky card, which he denied (G4); with an empty `~/.cursor` folder made by
+hand, Settings showed "Cursor CLI hooks · Not installed" with "Tested with
+Cursor CLI 2026.10.22." (CU8). No Cursor sign-in on his real profile.
+Roadmap h3 is done.
 
 **Pre-approved (Charan, 2026-10-29):** if a later Cursor drops the UTF-8
 line from its hook wrapper (`$OutputEncoding = [System.Text.UTF8Encoding]
