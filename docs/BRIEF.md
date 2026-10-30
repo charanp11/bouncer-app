@@ -1,6 +1,6 @@
 # Bouncer: project brief
 
-Last updated: v0.12.0 (draft), 2026-10-29
+Last updated: v0.12.0, 2026-10-29
 
 This is the short, plain-English picture of Bouncer as it is now. The
 detailed logs are `docs/PLAN.md` (every phase, audit and hand check) and
@@ -264,7 +264,7 @@ In the order they appear:
 Newest first. Before v0.7.0, tags marked finished phases and were never
 published.
 
-- **v0.12.0** (2026-10-29, draft): Cursor CLI support: watch-only plus Deny
+- **v0.12.0** (2026-10-29, published 2026-10-29): Cursor CLI support: watch-only plus Deny
   on risky shell commands (Guard every mode), no Allow from Bouncer, your
   own Cursor hooks kept; tested with Cursor CLI 2026.10.22. Privacy fix:
   Cursor's input sent through Claude Code's hooks is ignored (it carried
