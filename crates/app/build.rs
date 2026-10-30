@@ -26,6 +26,8 @@ fn main() {
         "explain",
         "explain_stop",
         "drop_close",
+        "session_ask",
+        "session_ask_drop",
         "drop_preview",
         "drop_ask",
         "drop_stop",

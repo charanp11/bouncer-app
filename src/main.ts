@@ -1973,6 +1973,8 @@ function renderChat(view: View, done: boolean) {
   island.replaceChildren(head(state, "Ask Claude", `· ${chat.model}`, closeChat, [fresh]), body);
   // A conversation stays at its end; the first-run note starts at its top.
   log.scrollTop = !chat.items.length ? 0 : pinned ? log.scrollHeight : logScroll;
+  const read = island.querySelector("pre.log");
+  if (read) read.scrollTop = askScroll;
 }
 
 // ---- ask about this session (roadmap f) --------------------------------------
@@ -1983,6 +1985,8 @@ type SessionAsk = { id: string; text: string; size: number; destination: string;
 
 /** The session's log going with the next chat message. */
 let sessionAsk: SessionAsk | null = null;
+/** How far the log is read: a running session redraws the panel under it. */
+let askScroll = 0;
 /** Why Ask failed, for the session on screen. */
 let askFailed: { session: string; text: string } | null = null;
 
@@ -1999,6 +2003,7 @@ function askParts(s: Session): HTMLElement[] {
         chat = askedChat(chat);
         attached = null;
         sessionAsk = { ...a, name: folder(s.project) };
+        askScroll = 0;
         askFailed = null;
         detail = null;
         pinned = true;
@@ -2022,7 +2027,10 @@ function sessionPart(a: SessionAsk): HTMLElement {
     invoke("session_ask_drop");
     if (current) render(current);
   });
-  box.querySelector("pre")?.classList.add("log");
+  const pre = box.querySelector("pre")!;
+  pre.classList.add("log");
+  pre.dataset.key = "session-log";
+  pre.addEventListener("scroll", () => (askScroll = pre.scrollTop));
   box.prepend(el("div", "note", a.destination));
   box.append(el("div", "note", PARTIAL_LOG));
   return box;

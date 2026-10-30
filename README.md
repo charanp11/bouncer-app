@@ -21,6 +21,10 @@ reason, and never blocks the agent.
   approve a plan, the island shows it too: pick and send, or approve / keep
   planning. Only your click answers; the terminal asks at the same time, and
   whichever you answer first wins.
+- **Ask about a session.** Ask Claude what a Claude Code or Codex session is
+  doing. You see exactly what goes first: your prompts, the agent's replies
+  and one line per tool call, secrets redacted, never tool outputs or file
+  contents. It runs with no tools at all.
 - **Explain this command.** One click asks Claude what a shell command does
   and what could go wrong.
 - **Read-only chat.** Ask Claude a question from the island, through your

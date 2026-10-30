@@ -57,6 +57,7 @@ Bouncer never blocks the agent and never allows anything by default.
 | Questions and plans in the island | Yes | No | No (watch-only "question in the terminal") | No |
 | Guard every mode | Yes (opt-in) | No | Yes (opt-in), Deny / "Let Copilot decide" only | Yes (opt-in), Deny / "Let Cursor decide" only |
 | Explain this command | Yes | Yes | Yes, on the guard's card | Yes, on the guard's card |
+| Ask about this session | Yes | Yes (leaves OpenAI for Anthropic, and the preview says so) | No: its session files aren't audited | No: it gives no transcript |
 
 Why the differences:
 
@@ -138,6 +139,14 @@ Bouncer's own commands.
   commands, web, MCP servers or connectors.
 - A dropped file is only read: never run, opened or unpacked; nothing is
   sent before you confirm.
+- Ask about this session reads the session's file only when you press Ask,
+  and never writes to it or resumes it. It sends your prompts, the agent's
+  replies and one line per tool call, at most 40 KB, never tool outputs or
+  file contents. Secrets are redacted before the preview, and the preview
+  is exactly what goes, followed only by your question; nothing goes until
+  Send. It runs through your Claude Code with no tools at all, so whatever
+  a session's text says, the model can only write words: it can't approve,
+  deny or do anything. Nothing is stored.
 
 Out of scope: malware already running as you (it could edit the agents'
 settings itself).
@@ -228,6 +237,7 @@ In the order they appear:
     parser.
   - `activity.rs`, `redact.rs`, `away.rs`: the redacted log and the
     welcome-back summary.
+  - `ask.rs`: Ask about this session: finds the file, builds the log.
   - `hooks.rs`: install / remove agent hooks (rule 6), the real-profile test
     guard.
   - `chat.rs`: the locked read-only chat and Explain.
@@ -361,6 +371,11 @@ published.
 - Not code-signed: SmartScreen warns; Smart App Control blocks it.
 - No Mac release (the code is checked on macOS in CI); no Linux.
 - Explain and chat answers can be wrong; Explain costs CPU while it streams.
+- Ask about this session sees a partial log (no tool outputs, no subagent
+  work, maybe not the oldest part), so its answers can miss things; it says
+  so. Redaction works by patterns and can miss a password written in plain
+  words: read the preview. Codex's format was checked on local test-model
+  sessions only. Copilot's isn't checked; Cursor gives no transcript.
 - Open: Dependabot #57 (the updater plugin leaves its pinned 2.13.3) waits
   for a release with a full updater test (installed 0.10.1 → new version →
   the version after).
@@ -374,8 +389,7 @@ In order, one per release, each audited first:
    can block a tool call (yes: approvals; no: watch-and-flag, labelled).
    Codex, Copilot and Cursor are in; Antigravity was audited and left out
    (its hooks fail closed).
-2. **f: Ask about this session**: a read-only question about a running
-   session.
+2. **f: Ask about this session**: built, not yet released.
 3. **g: Mac release** (needs a real Mac).
 4. **e: Music**, within the motion and CPU budget.
 5. **i: Linux** (optional).

@@ -5348,6 +5348,37 @@ chats stay memory-only; the activity log is unchanged.
 2/s (500 ms), the log on its own layer; measured like Explain (60 s, app +
 WebView2), target ≤ the chat's 15%.
 
+### Charan's approval (2026-10-30)
+
+Approved: prompts, replies and one line per tool call, the 40 KB cap, the
+"Partial log" label. His conditions, all built: the preview says where it
+goes ("Sent to Claude through your Claude Code") and, for Codex, Copilot or
+Cursor sessions, that it leaves that agent's vendor; redaction runs before
+the preview; the preview shows exactly what gets sent, nothing added after
+(the whole prompt, fixed wording included; only the typed question
+follows). He didn't pick the agents: Claude Code + Codex, the audit's
+recommendation, Copilot not checked (it would need a new scratch install,
+his call).
+
+**Found while building:** real Codex files write agent text as `Text`
+blocks and `command` as an argv array; the first reader, written from
+inline fixtures, dropped both, and only a run over the scratch rollouts
+showed it. Fixed, tests now use those shapes. `redact` also passed
+`NAME= value` (space after the sign), fixed with the other spaced forms.
+
+### Test instance (2026-10-30)
+
+A scratch instance over CDP (page clicks only), the fake `claude`, a
+hostile scratch transcript, 21 checks. What the fake received equalled the
+preview plus the question (whitespace normalised); its argv had `--tools ""`
+on the first message and the follow-up, and `Read,Grep,Glob` again on a
+plain chat after ×. No secret, output or file body in the preview; `<img
+onerror>` stayed text; Cursor showed the line, not a button; Codex showed
+the vendor line. Two things only the real app showed: new commands must be
+in `build.rs` and `capabilities/main.json` (the app refused them), and
+every session event redraws the panel, which threw a reader back to the top
+of the log (now kept, with keyboard focus).
+
 ### Threats
 
 | Threat | Fix |
@@ -5367,11 +5398,11 @@ WebView2), target ≤ the chat's 15%.
 
 ### Done when
 
-- [ ] Ask on a Claude Code session: preview, Send, a streamed answer (fake `claude`, then one real hand check)
-- [ ] Codex digest from scratch Codex 0.163.0 rollouts
-- [ ] Copilot / Cursor sessions have no Ask; Settings says which agents work
-- [ ] Tests: tool outputs and file bodies never in the digest; `isMeta` / sidechain / Codex wrappers left out; secrets redacted incl. `NAME = value`; 40 KB cap; unknown session, non-UUID, link and owner refusals; the no-tools argv is a constant that differs from `LOCKED` only in `--tools` and the system line, never `--resume`; any tool at `init` stops the no-tools run; a digest never joins a run with tools; single-use ID; nothing read before Ask; the answer can't reach a decision
-- [ ] CPU while an answer streams measured
+- [x] Ask on a Claude Code session: preview, Send, a streamed answer (fake `claude` on a test instance; the real hand check comes with the release)
+- [x] Codex digest from scratch Codex 0.163.0 rollouts
+- [x] Copilot / Cursor sessions have no Ask; Settings says which agents work
+- [x] Tests: tool outputs and file bodies never in the digest; `isMeta` / sidechain / Codex wrappers left out; secrets redacted incl. `NAME = value`; 40 KB cap; unknown session, non-UUID, link and owner refusals; the no-tools argv is a constant that differs from `LOCKED` only in `--tools` and the system line, never `--resume`; any tool at `init` stops the no-tools run; a digest never joins a run with tools; single-use ID; nothing read before Ask; the answer can't reach a decision
+- [x] CPU while an answer streams measured: 7.2% of a core (50 s, app + WebView2, fake `claude`), under the chat's 15%
 - [ ] TESTS and BRIEF updated; CI green on Windows and macOS; reviewer agent
 - [ ] Charan's OK on the safety design, his merge, release, hand checks
 
