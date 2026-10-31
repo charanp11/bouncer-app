@@ -5659,7 +5659,7 @@ aren't weakened, and a failed Mac job... decided with Charan before step 1.
 
 | Threat | Fix |
 | --- | --- |
-| A Mac build breaks a Windows release | Mac jobs separate; decided how a failure counts before step 1 |
+| A Mac build breaks a Windows release | Mac jobs separate; a failure means no draft (decided), and no half-filled `latest.json` |
 | A hook path that later vanishes | Refusal above; `Moved` status already shows it |
 | A Mac update signed with the wrong key or unchecked | Same updater key and step rules as Windows: only the pinned CLI, only that step |
 | Ad-hoc signature read as trust | README says plainly it's unsigned, with checksums and attestations |
