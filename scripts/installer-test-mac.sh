@@ -54,7 +54,7 @@ event() {
 use() {
   name=$1
   shift
-  "$@" "$bin/bouncer-app" > "app-$name.log" 2>&1 &
+  "$@" "${APPBIN:-$bin/bouncer-app}" > "app-$name.log" 2>&1 &
   pid=$!
   for _ in $(seq 1 120); do
     [ -S "$sock" ] && break
@@ -72,6 +72,17 @@ use() {
   kill -0 "$relay" 2> /dev/null || fail "$name: the request didn't wait for a card"
   kill -0 "$pid" 2> /dev/null || fail "$name: the app crashed"
   screencapture -x "island-$name.png"
+  echo "=== DIAG $name"
+  ps -axo pid,ppid,command | grep -iE 'bouncer|webcontent|webkit' | grep -v grep || true
+  cat > "$work/w.swift" <<'SWIFT'
+import CoreGraphics
+let l = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as! [[String: Any]]
+for w in l where (w["kCGWindowOwnerName"] as? String ?? "").lowercased().contains("bouncer") { print(w) }
+SWIFT
+  swift "$work/w.swift" || true
+  /usr/bin/log show --last 40s --style compact --predicate 'process CONTAINS[c] "bouncer" OR process CONTAINS "WebContent"' 2>&1 | tail -80 || true
+  codesign -dvvv "$bin/bouncer-app" 2>&1 | head -20 || true
+  echo "=== END DIAG"
 
   kill "$pid"
   wait "$pid" || true
@@ -83,6 +94,8 @@ use() {
 }
 
 use native env
+APPBIN="$PWD/target/universal-apple-darwin/release/bouncer-app" use rawrelease env
+sed -e 's/x/x/' /dev/null
 softwareupdate --install-rosetta --agree-to-license > /dev/null 2>&1 || true
 use x86_64 arch -x86_64
 
