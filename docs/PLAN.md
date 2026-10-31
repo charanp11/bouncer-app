@@ -5493,6 +5493,80 @@ updater, still installed by plugin 2.13.3 (TESTS UP8); Settings shows
 the island. Next: the notes-only v0.13.2, the first update installed by
 plugin 2.14.0.
 
+**v0.13.2 published (Charan, 2026-10-30).** Manual checks (Charan, his own
+desktop, the installed build; Claude Code version not reported): a quick
+start on 0.13.1, then the update 0.13.1 → 0.13.2, the first one installed by
+plugin 2.14.0 (TESTS UP8); Settings shows 0.13.2 (U11); Claude Code hooks
+Installed (I8); the risky card on reading `~/.claude/settings.json`, denied
+(G4); Ask answered about that session (AS14).
+
+**What built the published v0.13.2 files.** Run 41142016410, attempt 2. The
+installer, its updater signature and its checksum came from the `build` job
+on windows-2025-vs2026 **20261021.278.1**, the older image, and so did the
+installer test that passed before it. `latest.json`, `SHA256SUMS.txt` and
+the draft came from the `release` job on ubuntu-24.04 20261025.353.1.
+Attempt 1's installer test ran on 20261030.294.1, failed, and built nothing.
+
+### The installer test's pipe failure (2026-10-30): the runner image
+
+**Cause: the first read of the WebView2 runtime on image 20261030.294.1.**
+On that image the runtime's folder reads about seven times slower the first
+time than on 20261021.278.1. Nothing in Bouncer changes that: the read test
+has no Bouncer in it. Tauri builds the window before our `setup` runs and
+wry waits there for WebView2, so the pipe opens only once WebView2 is up.
+A slow runtime read leaves what the failed run showed: the app alive, no
+pipe. Why those files read slowly isn't known. The image's notes don't say,
+and the same-size `msedge.dll` in Edge's own folder reads at normal speed on
+the same machine, so it's those files and not the disk as a whole.
+
+The image can't be pinned on GitHub-hosted runners, so four throwaway runs
+(branch `diag-installer-pipe`, deleted; runs 41153098538, 41153816043,
+41154795559, 41155607454) ran jobs in parallel and took whichever image
+each job landed on. First launch to pipe, in seconds:
+
+| Case | Jobs | Time |
+| --- | --- | --- |
+| Old image, normal | 9 | 3.1 to 5.0 |
+| New image, normal | 4 | 13.8, 23.5, 57.0, 63.7 |
+| New image, dumps and snapshots on | 12 | 7.5 to 58.1, 5 over 30 s (dumps add delay) |
+| New image, runtime read first | 5 | 1.5 to 2.4 |
+| New image, data folder wiped, relaunch | 7 | 0.5 to 0.8 |
+
+First read of the runtime folder (871 MB, no Bouncer): old image 133 to 184
+MB/s (18 jobs), new image 16 to 30 MB/s (5 jobs); a second read about 5,000
+MB/s. Edge's own `msedge.dll` on the new image: 231 to 527 MB/s.
+
+What the machine was doing during a stall: `DIAG` marks in the app put all
+the time before `setup` (13.5 s and 58 s, against 3.0 s on the old image);
+from `setup` to the pipe takes about 50 ms. CPU 2 to 8%, disk 100 to 550%
+busy, queue up to 10. The app's main thread waits in the message loop and
+WebView2's browser thread waits too. No crash. Across every snapshot the
+Application, System, Defender, AppLocker and CodeIntegrity logs have no
+errors; the only warning is a routine DCOM 10016. WebView2's own log was
+asked for but never written, so it adds nothing.
+
+| | 20261021.278.1 | 20261030.294.1 |
+| --- | --- | --- |
+| WebView2 | 155.0.4283.62 | 156.0.4314.50 |
+| Edge | 155.0.4283.62 | 156.0.4314.56 |
+| OS build | 26100.33650 | 26100.33674 |
+| Defender product | 4.18.26090.9 | 4.18.26100.4 |
+| Defender engine | 1.1.26100.4 | 1.1.26100.4 |
+| Defender signatures | 1.463.47.0 | 1.463.33.0 |
+| Real-time protection | off | off |
+| Exclusions | `C:\;D:\` | `C:\;D:\` |
+
+Defender is ruled out as a scanner: real-time protection is off and both
+drives are excluded on both images. WebView2 156 isn't slow in itself: with
+the files read first it starts faster than 155 did, and Charan's desktop
+runs the same 156.0.4314.50, where 0.13.2 started quickly (warm, not a first
+run). Roughly half of the normal first launches on this image pass 30 s, so
+the release workflow will stop on it often as the image rolls out.
+
+Known behaviour this exposed: while WebView2 starts, the pipe isn't open, so
+hooks find nobody and Claude Code asks in its own terminal (fail safe). On a
+slow disk a first launch can make that window long.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
