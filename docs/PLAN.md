@@ -5705,6 +5705,25 @@ says; the friend's Mac proves one architecture, so the release notes say which.
   steps go. It stays until step 3 replaces it.
 - No first-open text in the README yet, for the same reason.
 
+**Found by the first CI run of the installed `.dmg`** (TESTS M7, M8). The test
+passed while the screenshot showed no card and a Dock icon; it only proved the
+relay waited. The window was the card's size at x -32065:
+- macOS moves a window later (tao dispatches it), so a second layout soon after
+  the first read the parked position, took it for a drag and anchored there.
+  Later launches in the same run placed it, so it's a race, and the smoke
+  test's debug timing hid it. A window still parked is no longer a drag. The
+  same delay could still shift the anchor a little after a move while the
+  card is resizing: watch for it in the drag check (Mac checks).
+- The bundle had no `LSUIElement`, so it starts as a normal app before
+  `ActivationPolicy::Accessory`. `crates/app/Info.plist` sets it.
+- The test now needs a window of a card's height on a screen, which the page
+  sets, so it can't pass on a waiting relay.
+
+**Flake, same day:** `a_symlinked_project_is_the_same_project` failed once on
+macOS. `setup()` named its folder by the clock alone, macOS ticks in
+microseconds, and a test ending deletes its folder, so two tests could share
+one. Reasoned from the code, not reproduced. It failed safe (no allow).
+
 **Threats:**
 
 | Threat | Fix |
