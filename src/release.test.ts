@@ -258,9 +258,11 @@ test("the Mac build: universal, ad-hoc signed, and an update archive the plugin 
   const bundle = read("scripts/bundle.mjs");
   for (const s of ['"aarch64-apple-darwin"', '"x86_64-apple-darwin"', '"lipo"', "COPYFILE_DISABLE", '"--target", JOINED']) assert.ok(bundle.includes(s), s);
   const check = read("scripts/check-mac-bundle.sh");
-  for (const s of ["lipo -archs", "codesign --verify --deep --strict", "Signature=adhoc", "hdiutil verify", '[ "$tops" = Bouncer.app ]']) assert.ok(check.includes(s), s);
+  for (const s of ["lipo -archs", "codesign --verify --deep --strict", "Signature=adhoc", "Print :LSUIElement", "hdiutil verify", '[ "$tops" = Bouncer.app ]']) assert.ok(check.includes(s), s);
+  assert.match(read("crates/app/Info.plist"), /<key>LSUIElement<\/key>\s*<true\/>/);
   for (const f of ["release.yml", "installer.yml"]) assert.match(read(`.github/workflows/${f}`), /check-mac-bundle\.sh/, f);
   assert.match(read(".github/workflows/installer.yml"), /installer-test-mac\.sh/);
+  assert.match(read("scripts/installer-test-mac.sh"), /\$4 >= 200 .*\n.*no card on screen/, "a card on screen, not just a waiting relay");
 });
 
 test("cold start: its own workflow, nothing warmed, and no release or required check waits for it", () => {

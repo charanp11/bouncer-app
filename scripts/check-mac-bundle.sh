@@ -26,6 +26,10 @@ codesign --verify --deep --strict "$app" || fail "the app's signature doesn't ve
 signature=$(codesign --display --verbose=2 "$app" 2>&1)
 grep -q '^Signature=adhoc' <<< "$signature" || fail "the app isn't ad-hoc signed"
 
+# Without it macOS shows a Dock icon before the app can ask for none.
+ui=$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Info.plist")
+[ "$ui" = true ] || fail "LSUIElement is [$ui], so the app gets a Dock icon"
+
 hdiutil verify "$bundle/dmg/Bouncer_${version}_universal.dmg" || fail "the .dmg doesn't verify"
 
 # The updater skips each entry's first folder, so anything else at the top
