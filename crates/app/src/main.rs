@@ -522,10 +522,11 @@ fn send(app: &AppHandle, mut view: Value) {
     }
 }
 
-/// Whether `x` is still the parking spot of `tauri.conf.json` (-32000
-/// logical, so further out at a higher scale); no real screen reaches it.
+/// Whether a Mac window at `x` is still on the parking spot of
+/// `tauri.conf.json` (-32000 logical, so further out at a higher scale); no
+/// real screen reaches it. Never on Windows, which moves a window at once.
 fn parked(x: i32) -> bool {
-    x <= -30000
+    cfg!(target_os = "macos") && x <= -30000
 }
 
 /// Sizes the window to what the page asked for and places it: hanging from
@@ -1405,9 +1406,10 @@ fn tray(",
     fn a_window_still_parked_was_not_dragged() {
         let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let x = conf["app"]["windows"][0]["x"].as_i64().unwrap() as i32;
+        let mac = cfg!(target_os = "macos");
         for scale in [1, 2, 3] {
-            assert!(parked(x * scale));
-            assert!(parked((x + 160 - 225) * scale));
+            assert_eq!(parked(x * scale), mac);
+            assert_eq!(parked((x + 160 - 225) * scale), mac);
         }
         assert!(!parked(0));
         assert!(!parked(-7680));
