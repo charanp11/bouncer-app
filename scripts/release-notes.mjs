@@ -42,7 +42,7 @@ const mac =
         "",
       ];
 const notes = [
-  `Bouncer ${version} for Windows (64-bit): a per-user install, no admin needed.`,
+  `**On Windows** (64-bit): a per-user install, no admin needed.`,
   "",
   `**Not signed yet.** Windows SmartScreen will say "Windows protected your PC": choose **More info → Run anyway**. Check the file first:`,
   "",
