@@ -519,6 +519,12 @@ fn send(app: &AppHandle, mut view: Value) {
     }
 }
 
+/// Whether `x` is still the parking spot of `tauri.conf.json` (-32000
+/// logical, so further out at a higher scale); no real screen reaches it.
+fn parked(x: i32) -> bool {
+    x <= -30000
+}
+
 /// Sizes the window to what the page asked for and places it: hanging from
 /// the user's spot (or the top centre at first), kept inside the work area.
 /// While hidden it is the wake strip at the top edge of the screen the
@@ -535,10 +541,13 @@ fn lay_out(window: &WebviewWindow, island: &Island) {
     // spot. Checked even when this layout hides the island (closed with ×
     // right after a drag), or the strip would go back to the old spot.
     // Before Bouncer first places it, the window is parked off-screen
-    // (visible, so WebView2 takes drops: PLAN, "Phase 7"): not a drag.
+    // (visible, so WebView2 takes drops: PLAN, "Phase 7"): not a drag. macOS
+    // moves a window later, so it can still read as parked after a first
+    // placement; taken as a drag, that left the card off-screen for good.
     if window.is_visible().unwrap_or(false)
         && let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size())
         && placed.is_some_and(|p| p != pos)
+        && !parked(pos.x)
     {
         *anchor = Some(PhysicalPosition::new(pos.x + size.width as i32 / 2, pos.y));
     }
@@ -1387,6 +1396,18 @@ fn tray(",
                 locks.dedup();
                 locks.len() != all
             })
+    }
+
+    #[test]
+    fn a_window_still_parked_was_not_dragged() {
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let x = conf["app"]["windows"][0]["x"].as_i64().unwrap() as i32;
+        for scale in [1, 2, 3] {
+            assert!(parked(x * scale));
+            assert!(parked((x + 160 - 225) * scale));
+        }
+        assert!(!parked(0));
+        assert!(!parked(-7680));
     }
 
     #[test]
