@@ -5711,7 +5711,8 @@ relay waited. The window was the card's size at x -32065:
 - macOS moves a window later (tao dispatches it), so a second layout soon after
   the first read the parked position, took it for a drag and anchored there.
   Later launches in the same run placed it, so it's a race, and the smoke
-  test's debug timing hid it. A window still parked is no longer a drag. The
+  test's debug timing hid it. On macOS only (Charan, 2026-10-31), a window
+  still parked is no longer a drag; on Windows `parked` is always false. The
   same delay could still shift the anchor a little after a move while the
   card is resizing: watch for it in the drag check (Mac checks).
 - The bundle had no `LSUIElement`, so it starts as a normal app before
