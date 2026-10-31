@@ -6,8 +6,8 @@
 #
 # Mount, copy to /Applications, hooks with the installed CLI in a scratch
 # folder, then for each architecture the installed app takes a request through
-# the installed hook and prints nothing once it quits; uninstall-hooks puts
-# settings.json back byte for byte. Clicks stay out: a runner has no
+# the installed hook, its card reaches the screen and the hook prints nothing
+# once the app quits; uninstall-hooks puts settings.json back byte for byte. Clicks stay out: a runner has no
 # Accessibility permission (the hand list covers them).
 set -euo pipefail
 
@@ -49,6 +49,16 @@ event() {
   jq -c --arg cwd "$PWD" '.cwd = $cwd | .session_id = "installer-test"' "$fixtures/$1"
 }
 
+cat > "$work/windows.swift" << 'SWIFT'
+import CoreGraphics
+let pid = Int(CommandLine.arguments[1])!
+let all = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+for window in all where window["kCGWindowOwnerPID"] as? Int == pid && window["kCGWindowLayer"] as? Int != 0 {
+  let b = window["kCGWindowBounds"] as! [String: Any]
+  print(["X", "Y", "Width", "Height"].map { "\(b[$0] as? Double ?? -1)" }.joined(separator: " "))
+}
+SWIFT
+
 # 3. A request through the installed hook, on each architecture. $1 names the
 # run, the rest is what starts a program on that architecture.
 use() {
@@ -72,6 +82,11 @@ use() {
   kill -0 "$relay" 2> /dev/null || fail "$name: the request didn't wait for a card"
   kill -0 "$pid" 2> /dev/null || fail "$name: the app crashed"
   screencapture -x "island-$name.png"
+  # A waiting relay alone proves nothing on screen. The page sets the window's
+  # height, so a card's height on a screen means the page drew the card.
+  windows=$(swift "$work/windows.swift" "$pid")
+  echo "$windows" | awk '$1 >= 0 && $2 >= 0 && $4 >= 200 { found = 1 } END { exit !found }' \
+    || fail "$name: no card on screen; windows (x y width height): $windows"
 
   kill "$pid"
   wait "$pid" || true
@@ -79,7 +94,7 @@ use() {
   [ ! -s "$work/answer-$name.txt" ] || fail "$name: the relay answered: $(cat "$work/answer-$name.txt")"
   ! grep -q panicked "app-$name.log" || fail "$name: the app panicked"
   rm -f "$sock"
-  pass "A card ($name)" "a request waited on the installed app; nothing printed after it quit"
+  pass "A card ($name)" "the card on screen ($windows); nothing printed after the app quit"
 }
 
 use native env
