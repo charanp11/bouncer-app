@@ -5586,17 +5586,20 @@ mode doesn't flag** a risky request in auto or bypass mode. That is the same
 gap as Bouncer not running, and fail safe. It matters only for the length of
 a first launch on a slow disk.
 
-Possible: set the window to `"create": false`, bind the pipe at the top of
-`setup`, then build the window from there. `show` already copes with no
+Possible: set the window to `"create": false`, keep the bind where it is in
+`setup`, and build the window at the end of `setup` (the bind needs `Island`
+managed first, and `tick` needs `Chats`). `show` already copes with no
 window (`get_webview_window` returns `None`) and `subscribe` replays the
 desk's view, so events taken early reach the page once it's up. Connections
 are served by their own threads, and the desk doesn't need the main thread.
 Bonus: a second launch quits before starting WebView2.
 
-The trap is a request that waits for a card nobody can see: Claude Code would
-sit up to 100 s, against an instant terminal prompt today, and forever-broken
-WebView2 would make every request wait out that 100 s. That breaks "never
-block Claude Code". So a request that needs a card before the page has
+The trap is a request that waits for a card nobody can see. Claude Code's own
+prompt is up alongside a card, so it isn't held. An agent whose hook runs
+before its own prompt is: Copilot would sit up to 100 s (Codex looks the same,
+not confirmed), against an answer at once today, and a broken WebView2 would
+make every such request wait out that 100 s. That breaks "never block the
+agent". So a request that needs a card before the page has
 subscribed must get **nothing at once**, with the terminal prompt as today.
 Rules and the guard need no page, so they'd work from the start.
 
