@@ -5567,6 +5567,51 @@ Known behaviour this exposed: while WebView2 starts, the pipe isn't open, so
 hooks find nobody and Claude Code asks in its own terminal (fail safe). On a
 slow disk a first launch can make that window long.
 
+**The test fix (Charan, 2026-10-30).** `installer-test.ps1` reads the WebView2
+runtime folder before the first launch; its 30 s limit stays, so a stall in
+Bouncer's own startup still fails it. The cold number moved to
+`cold-start.yml`: its own workflow on tags, on PRs that touch startup and by
+hand, with nothing warmed. It writes the seconds to the pipe in the run
+summary, warns above 30 s and fails above 120 s. It's not a required check
+and `release.yml` doesn't reference it, so neither a merge nor a release
+waits for it. A release's installer test no longer proves a cold start:
+read the Cold start run for that.
+
+**Audit: could the pipe open before WebView2 is ready? (2026-10-30, no code.)**
+
+Today, while WebView2 starts, the relay finds no pipe and exits at once, so:
+Claude Code asks in its terminal, nothing waits, and the event is lost.
+Session rows and the log miss it, rules don't auto-allow, and **Guard every
+mode doesn't flag** a risky request in auto or bypass mode. That is the same
+gap as Bouncer not running, and fail safe. It matters only for the length of
+a first launch on a slow disk.
+
+Possible: set the window to `"create": false`, keep the bind where it is in
+`setup`, and build the window at the end of `setup` (the bind needs `Island`
+managed first, and `tick` needs `Chats`). `show` already copes with no
+window (`get_webview_window` returns `None`) and `subscribe` replays the
+desk's view, so events taken early reach the page once it's up. Connections
+are served by their own threads, and the desk doesn't need the main thread.
+Bonus: a second launch quits before starting WebView2.
+
+The trap is a request that waits for a card nobody can see. Claude Code's own
+prompt is up alongside a card, so it isn't held. An agent whose hook runs
+before its own prompt is: Copilot would sit up to 100 s (Codex looks the same,
+not confirmed), against an answer at once today, and a broken WebView2 would
+make every such request wait out that 100 s. That breaks "never block the
+agent". So a request that needs a card before the page has
+subscribed must get **nothing at once**, with the terminal prompt as today.
+Rules and the guard need no page, so they'd work from the start.
+
+Cost: about 30 lines plus tests (the desk's "page is up" flag, the window
+moved into `setup`), and a full hand check. Risk: the window's creation order
+is sensitive (the drop target only worked once the window was created
+visible, roadmap d), and macOS shares the path. It changes what Bouncer
+allows during startup, since rules begin earlier, so it's a safety design
+for Charan. Recommendation: worth doing only in the "nothing at once" form,
+and not urgent: no real-machine stall has been measured yet. `cold-start.yml`
+will show if it's needed, and on a real slow disk a hand check would too.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.

@@ -1,0 +1,50 @@
+name: Cold start
+
+# Bouncer's first launch with nothing warmed. The installer test reads the
+# WebView2 runtime first, so this is the only place a slow cold start shows.
+# Its own workflow and not a required check, so it never holds up a merge or
+# a release: over 30 s warns in the run summary, over 120 s fails here only.
+on:
+  push:
+    tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - crates/app/src/main.rs
+      - crates/app/tauri.conf.json
+      - crates/app/Cargo.toml
+      - scripts/cold-start.ps1
+      - .github/workflows/cold-start.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cold-start-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cold-start:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: npm ci
+      - name: Build a test version
+        shell: bash
+        run: |
+          node scripts/version.mjs set 0.0.1
+          node scripts/bundle.mjs
+          node scripts/version.mjs check 0.0.1 target/release/bundle/nsis
+          mv target/release/bundle/nsis/Bouncer_0.0.1_x64-setup.exe "$RUNNER_TEMP/setup.exe"
+      - name: First launch
+        shell: powershell
+        run: ./scripts/cold-start.ps1 -Setup "$env:RUNNER_TEMP\setup.exe"

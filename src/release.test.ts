@@ -202,8 +202,45 @@ test("v0.8.1's notes: the first release with these features, 0.8.0 never release
   assert.match(read("scripts/release-notes.mjs"), /docs\/releases\/\$\{tag\}\.md/);
 });
 
+test("installer test: the WebView2 runtime is read before the first launch, and the 30 s limit stays", () => {
+  const script = read("scripts/installer-test.ps1");
+  const body = script.slice(script.indexOf("# 3. A card"));
+  assert.ok(body.indexOf("ReadAllBytes") !== -1 && body.indexOf("ReadAllBytes") < body.indexOf("$app = Start-App"));
+  assert.match(script, /\$pipe = Wait-Until \{[^\n]*\} 30\b/);
+});
+
+test("cold start: its own workflow, nothing warmed, and no release or required check waits for it", () => {
+  const wf = read(".github/workflows/cold-start.yml");
+  assert.match(wf, /scripts\/cold-start\.ps1/);
+  assert.doesNotMatch(wf, /workflow_call|installer-test|: write/);
+  assert.doesNotMatch(read("scripts/cold-start.ps1"), /ReadAllBytes/);
+  assert.doesNotMatch(read(".github/workflows/release.yml"), /cold-start/);
+});
+
+test("cold start: under 30 s is ok, over 30 s warns, only over 120 s fails", { skip: process.platform !== "win32" }, () => {
+  const judge = (seconds: number) =>
+    spawnSync(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("scripts/cold-start.ps1", root)), "-Seconds", `${seconds}`],
+      { encoding: "utf8", env: { ...process.env, GITHUB_STEP_SUMMARY: "" } },
+    );
+  const ok = judge(29);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /, ok \(image/);
+  assert.doesNotMatch(ok.stdout, /::warning::/);
+  const slow = judge(31);
+  assert.equal(slow.status, 0, slow.stderr);
+  assert.match(slow.stdout, /::warning::.*WARN: over 30 s/);
+  const edge = judge(120);
+  assert.equal(edge.status, 0, edge.stderr);
+  assert.match(edge.stdout, /WARN: over 30 s/);
+  const fail = judge(121);
+  assert.equal(fail.status, 1, fail.stderr);
+  assert.match(fail.stdout, /::warning::.*FAIL: no pipe within 120 s/);
+});
+
 test("every action in the workflows is ours or pinned to a commit", () => {
-  for (const f of ["release.yml", "installer.yml", "ci.yml", "macos-smoke.yml", "advisories.yml"]) {
+  for (const f of ["release.yml", "installer.yml", "cold-start.yml", "ci.yml", "macos-smoke.yml", "advisories.yml"]) {
     for (const line of read(`.github/workflows/${f}`).split("\n")) {
       const m = /^\s*(?:- )?uses: (\S+)/.exec(line);
       if (!m) continue;
