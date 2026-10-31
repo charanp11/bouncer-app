@@ -707,9 +707,11 @@ pub fn relay_to_install() -> Result<PathBuf, String> {
 
 /// A path that disappears: a mounted volume (an open `.dmg`, or a drive that
 /// can be unplugged), or the random folder Gatekeeper runs a quarantined app
-/// from until it's moved.
+/// from until it's moved. By lower case: macOS file names ignore case.
 fn throwaway(path: &Path) -> bool {
-    path.starts_with("/Volumes")
+    path.to_string_lossy()
+        .to_ascii_lowercase()
+        .starts_with("/volumes/")
         || path
             .components()
             .any(|part| part.as_os_str() == "AppTranslocation")
@@ -817,6 +819,7 @@ mod tests {
         for gone in [
             "/Volumes/Bouncer/Bouncer.app/Contents/MacOS/bouncer-hook",
             "/Volumes/Bouncer 1/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/volumes/Bouncer/Bouncer.app/Contents/MacOS/bouncer-hook",
             "/private/var/folders/ab/cd/T/AppTranslocation/0A1B/d/Bouncer.app/Contents/MacOS/bouncer-hook",
         ] {
             assert!(super::throwaway(Path::new(gone)), "{gone}");
