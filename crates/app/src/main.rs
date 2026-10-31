@@ -347,7 +347,7 @@ fn open_island(app: &AppHandle) {
     take_keyboard(app);
 }
 
-/// Ctrl+Alt+B (Settings can turn it off).
+/// Ctrl+Alt+B, Control+Option+B on a Mac (Settings can turn it off).
 fn shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyB)
 }
@@ -1084,7 +1084,7 @@ fn hooks_preview(
     };
     let path = hooks::user_file(agent)?;
     let relay = if install {
-        Some(hooks::relay_beside_me()?)
+        Some(hooks::relay_to_install()?)
     } else {
         None
     };
@@ -1400,6 +1400,15 @@ fn tray(",
                 locks.dedup();
                 locks.len() != all
             })
+    }
+
+    #[test]
+    fn every_install_goes_through_the_throwaway_path_refusal() {
+        let app = include_str!("main.rs");
+        let cli = include_str!("../../core/src/bin/bouncer.rs");
+        let call = ["hooks::", "relay_to_install()?"].concat();
+        assert!(app.contains(&call));
+        assert!(cli.contains(&call));
     }
 
     #[test]

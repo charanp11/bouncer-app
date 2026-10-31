@@ -113,7 +113,7 @@ fn run(args: Vec<String>, uninstalling: bool) -> Result<(), String> {
     let relay = match (installing, relay) {
         (false, _) => None,
         (true, Some(p)) => Some(p),
-        (true, None) => Some(hooks::relay_beside_me()?),
+        (true, None) => Some(hooks::relay_to_install()?),
     };
     one(agent, settings, installing, relay, false)
 }
