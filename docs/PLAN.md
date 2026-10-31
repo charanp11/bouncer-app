@@ -5667,8 +5667,43 @@ aren't weakened.
   platforms and `latest.json` is never half-filled. This applies from the
   first release with Mac in it; a Mac problem can hold up a Windows fix.
 
+- **Escape hatch (added the same day):** a Mac job failing on a tag still
+  means no draft. If a fix is urgent, Claude proposes a Windows-only release
+  and waits for his OK; it never happens on its own.
+- **First-open steps:** release notes and README give the exact steps for
+  current macOS (System Settings → Privacy & Security → Open Anyway), tested
+  on the friend's Mac, with the macOS version they were tested on. Until then
+  they're untested text, so they can't ship.
+- **Friend's Mac, one visit:** Charan signs into Claude Code with his own
+  account and signs out after. The second macOS user only with the friend's
+  OK, deleted at the end. He gets one complete checklist in advance (rule 6b):
+  what to install, every check, cleanup, including Bouncer's hook entries and
+  app data on that Mac.
+
 Decided here, not asked: universal (Apple Silicon and Intel), as Phase 9
 says; the friend's Mac proves one architecture, so the release notes say which.
+
+**Step 1 (the release job, no tag):**
+- `bundle.mjs --universal` builds the relay and CLI for both targets, joins
+  them with `lipo` (Tauri needs both slices and the joined file), builds with
+  `--target universal-apple-darwin`, and makes
+  `Bouncer_X_universal.app.tar.gz`. `createUpdaterArtifacts` stays off, as on
+  Windows, so the key never reaches a build; the archive is ours. The plugin
+  drops each entry's first folder, so it must hold one `Bouncer.app` and no
+  `._` entries (`COPYFILE_DISABLE`).
+- `signingIdentity: "-"` sits in `tauri.release.json`, not `tauri.conf.json`,
+  because only that build has the sidecars.
+- `check-mac-bundle.sh` runs in the installer test and again on the real
+  build, before the key's step.
+- Both darwin keys point at the one archive and signature.
+- **The hatch:** `gh workflow run release.yml --ref vX.Y.Z -f windows_only=true`
+  on the tag that made no draft. It has to skip the Mac rows of CI and the
+  installer test too, or a Mac-only failure there would still stop it. A run
+  by hand refuses a branch. Macs on such a release find no key: the update
+  check ends quietly and they stay put; the notes say so.
+- The notes carry a "NOT TESTED YET: don't publish" line where the first-open
+  steps go. It stays until step 3 replaces it.
+- No first-open text in the README yet, for the same reason.
 
 **Threats:**
 

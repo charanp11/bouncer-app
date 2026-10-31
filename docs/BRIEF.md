@@ -199,6 +199,11 @@ In the order they appear:
   `SHA256SUMS.txt`, adds a build attestation, writes `latest.json` and makes
   a **draft** release. Charan reviews and presses Publish. Old `v0.5.x` /
   `v0.6.x` tags were internal and never trigger it.
+- **Mac in a release (built, first release not out yet).** The same tag also
+  builds a universal `.dmg` and update archive, with an ad-hoc signature
+  (no Apple account, $0). If the Mac build fails there is no draft at all.
+  The one way round is a Windows-only run started by hand on that tag, and
+  only with Charan's OK: macOS copies then stay on their version.
 - **Cold start.** The installer test reads the WebView2 runtime first, so a
   slow runner can't stop a release. A separate Cold start run on every tag
   times a first launch with nothing warmed: over 30 s warns, over 120 s
@@ -381,7 +386,8 @@ published.
   real Cursor CLI and a live model on a free account in a test profile.
   Antigravity CLI isn't supported: its hooks block the tool when they fail.
 - Not code-signed: SmartScreen warns; Smart App Control blocks it.
-- No Mac release (the code is checked on macOS in CI); no Linux.
+- No Mac release yet (the build and its install test run in CI; the first
+  release waits on a real Mac); no Linux.
 - Explain and chat answers can be wrong; Explain costs CPU while it streams.
 - Ask about this session sees a partial log (no tool outputs, no subagent
   work, maybe not the oldest part), so its answers can miss things; it says
