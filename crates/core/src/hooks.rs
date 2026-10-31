@@ -691,6 +691,32 @@ pub fn relay_beside_me() -> Result<PathBuf, String> {
         .with_file_name(format!("bouncer-hook{}", std::env::consts::EXE_SUFFIX)))
 }
 
+/// Why Install refuses a copy of Bouncer that won't stay where it is.
+pub const MOVE_FIRST: &str = "Move Bouncer to Applications, open it from there, then install the \
+     hooks: this copy's folder goes away, and the hooks would point at nothing. Nothing was written.";
+
+/// The relay to write into an agent's settings: the one beside this program,
+/// refused on a Mac if its path won't last (PLAN, "Roadmap g").
+pub fn relay_to_install() -> Result<PathBuf, String> {
+    let relay = relay_beside_me()?;
+    if cfg!(target_os = "macos") && throwaway(&relay) {
+        return Err(MOVE_FIRST.into());
+    }
+    Ok(relay)
+}
+
+/// A path that disappears: a mounted volume (an open `.dmg`, or a drive that
+/// can be unplugged), or the random folder Gatekeeper runs a quarantined app
+/// from until it's moved. By lower case: macOS file names ignore case.
+fn throwaway(path: &Path) -> bool {
+    path.to_string_lossy()
+        .to_ascii_lowercase()
+        .starts_with("/volumes/")
+        || path
+            .components()
+            .any(|part| part.as_os_str() == "AppTranslocation")
+}
+
 fn file_name(path: &Path) -> Result<&str, String> {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -788,6 +814,26 @@ fn stamp(time: SystemTime) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_path_that_goes_away_is_refused_a_lasting_one_is_not() {
+        for gone in [
+            "/Volumes/Bouncer/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/Volumes/Bouncer 1/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/volumes/Bouncer/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/private/var/folders/ab/cd/T/AppTranslocation/0A1B/d/Bouncer.app/Contents/MacOS/bouncer-hook",
+        ] {
+            assert!(super::throwaway(Path::new(gone)), "{gone}");
+        }
+        for lasting in [
+            "/Applications/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/Users/dev/Applications/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/Users/dev/Volumes/Bouncer.app/Contents/MacOS/bouncer-hook",
+            "/VolumesOther/Bouncer.app/Contents/MacOS/bouncer-hook",
+        ] {
+            assert!(!super::throwaway(Path::new(lasting)), "{lasting}");
+        }
+    }
+
     use super::*;
 
     const RELAY: &str = r"C:\Program Files\Bouncer\bouncer-hook.exe";

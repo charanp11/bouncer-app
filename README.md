@@ -125,6 +125,23 @@ Settings → Apps → Installed apps → Bouncer → Uninstall.
   settings and history (`%APPDATA%\Bouncer`) stay for next time. Ticked, that
   folder and Bouncer's WebView2 data folder are deleted. Nothing else is.
 
+### On a Mac
+
+There's no uninstaller, so take the hooks out first: in Bouncer's Settings,
+press **Remove…** on each hooks row, read the changes, then **Write changes**.
+Then quit Bouncer and move it to the Trash.
+
+If you've already deleted it, the hooks are still in `~/.claude/settings.json`,
+`~/.codex/hooks.json`, `~/.copilot/hooks/bouncer.json` and
+`~/.cursor/hooks.json`. Claude Code and Codex should show a hook error on each
+event and carry on, asking in their own prompt; kept Copilot or Cursor hooks do
+no harm. Reinstall Bouncer and remove them, or take out the entries that name
+`bouncer-hook` by hand.
+
+Your rules, settings and history stay in
+`~/Library/Application Support/Bouncer`. Delete that folder too if you don't
+want them.
+
 ## Where it works
 
 | Where you run Claude Code | Bouncer |

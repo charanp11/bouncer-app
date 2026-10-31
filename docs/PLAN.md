@@ -5634,7 +5634,7 @@ target; the smoke test runs the debug app with a real relay and socket.
 | No signature on the bundle | no `bundle.macOS` in `tauri.conf.json` | Ad-hoc identity (`-`), so the sidecars are sealed; a linker-only signature can read as "damaged" on Apple Silicon | |
 | **Hooks written from a throwaway path** | `hooks::relay` uses the running program's folder. Started from the `.dmg`, or from Downloads (Gatekeeper's translocation), that path disappears | Refuse Install there and say "move Bouncer to Applications first" | **Yes:** changes what's written to an agent's settings |
 | No uninstaller | Windows' NSIS step runs `uninstall-hooks`; Trash runs nothing, leaving hooks that point at nothing. Copilot and Cursor stay safe (`; exit 0`); Claude Code and Codex would show a hook error | README steps with the `bouncer uninstall-hooks` path; a Settings "Remove hooks" row if the Trash case proves noisy | Removal only with the diff and a yes |
-| "Start with Windows" | `autostart.rs` is a stub on macOS, the row still shows | Hide the row for this release; a LaunchAgent is a later item | |
+| "Start with Windows" | `autostart.rs` is a stub on macOS | Nothing to do: `enabled` gives `None` there, so the row is already hidden (the audit was wrong; TESTS W2). A LaunchAgent is a later item | |
 | Wording | "Ctrl+Alt+B" in Settings (it's Control+Option+B); other Windows names | Per-OS text; keep the same keys | |
 | Unproven since Phase 9 was written | Ask's no-tools run; file drop with WKWebView; Explain and chat in a real login; question cards; CPU and memory on WKWebView; `set_focusable` toggling | Hand list (step 3) | |
 
@@ -5719,6 +5719,21 @@ relay waited. The window was the card's size at x -32065:
   `ActivationPolicy::Accessory`. `crates/app/Info.plist` sets it.
 - The test now needs a window of a card's height on a screen, which the page
   sets, so it can't pass on a waiting relay.
+
+**Step 2 (the code gaps):**
+- `hooks::relay_to_install` is the one way Settings and `install-hooks` get
+  the relay, so both refuse, and the row shows the reason as its note. Macs
+  only; removal is never refused.
+- **Wider than decided, for Charan at the merge:** "from a `.dmg`" became
+  anything under `/Volumes`, so an app on an external drive is refused too.
+  Std alone can't tell a read-only image from a drive, and hooks on a drive
+  also point at nothing once it's unplugged. It only refuses, nothing is
+  written, and `--relay` stays as the way round.
+- The installer test runs the refusal from the real open `.dmg`. A real
+  translocated path needs quarantine and a Mac: unit test here, hand list there.
+- Uninstall: the README's steps use Settings' existing Remove…; no new
+  Settings row, per the audit, unless the Trash case proves noisy.
+- Wording: only the shortcut's name needed changing.
 
 **Flake, same day:** `a_symlinked_project_is_the_same_project` failed once on
 macOS. `setup()` named its folder by the clock alone, macOS ticks in
@@ -5826,6 +5841,8 @@ Mac checks for Phase 9 (a person on a real Mac):
 - [ ] Island sits under the menu bar, can be dragged, comes back if dropped off screen, crosses monitors
 - [ ] Real Claude Code session: hooks installed with `bouncer install-hooks`, a Bash request allowed and one denied from the island, an unanswered one falls back to the terminal
 - [ ] Unsigned `.dmg` opens after "Open Anyway"; uninstall removes only our hook entries
+- [ ] Bouncer in the Trash with hooks left in: Claude Code and Codex show a hook error and carry on asking (the README says so; only audited)
+- [ ] A real translocated run (quarantined, opened from Downloads): Install hooks is refused
 
 ---
 
