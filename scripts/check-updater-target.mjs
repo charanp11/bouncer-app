@@ -8,21 +8,25 @@
 // With a second argument it also checks the plugin builds that key, from an
 // updater.rs or, with "pinned", the source Cargo.lock pins. The tag's checks do
 // that (release.test.ts), so the release job needn't reach crates.io after the
-// build.
+// build. --windows-only is the release Charan asked for by hand when the Mac
+// build can't be fixed in time (PLAN, "Roadmap g"); nothing else skips the Mac keys.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const KEY = "windows-x86_64";
-// How the plugin makes that key: {os}-{arch}, for Windows on x86-64.
-const LOOKUP = ['Some("windows")', 'Some("x86_64")', 'targets.push(format!("{os}-{arch}"));'];
+const MAC_KEYS = ["darwin-aarch64", "darwin-x86_64"];
+const KEYS = ["windows-x86_64", ...MAC_KEYS];
+// How the plugin makes those keys: {os}-{arch}.
+const LOOKUP = ['Some("windows")', 'Some("darwin")', 'Some("x86_64")', 'Some("aarch64")', 'targets.push(format!("{os}-{arch}"));'];
 
 const fail = (why) => {
   console.error(why);
   process.exit(1);
 };
-const [file, source] = process.argv.slice(2);
-if (!file) fail("usage: check-updater-target.mjs latest.json [updater.rs | pinned]");
+const args = process.argv.slice(2);
+const windowsOnly = args.includes("--windows-only");
+const [file, source] = args.filter((a) => a !== "--windows-only");
+if (!file) fail("usage: check-updater-target.mjs latest.json [updater.rs | pinned] [--windows-only]");
 
 const pinned = () => {
   const meta = execFileSync("cargo", ["metadata", "--locked", "--format-version", "1"], {
@@ -40,7 +44,8 @@ if (source) {
   }
 }
 
-const platforms = Object.keys(JSON.parse(readFileSync(file, "utf8")).platforms ?? {});
-if (platforms.length !== 1 || platforms[0] !== KEY) {
-  fail(`latest.json has [${platforms}], the plugin looks up ${KEY}`);
+const platforms = Object.keys(JSON.parse(readFileSync(file, "utf8")).platforms ?? {}).sort();
+const want = KEYS.filter((k) => !(windowsOnly && MAC_KEYS.includes(k))).sort();
+if (platforms.join() !== want.join()) {
+  fail(`latest.json has [${platforms}], the plugin looks up ${want}`);
 }

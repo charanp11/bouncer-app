@@ -6,7 +6,8 @@
 //   node scripts/version.mjs set 0.7.0         Cargo.toml (workspace), Cargo.lock,
 //                                              package.json, tauri.conf.json
 //   node scripts/version.mjs check 0.7.0 [dir] fails unless the crates, package.json,
-//                                              tauri.conf.json and the installer in dir agree
+//                                              tauri.conf.json and the installer in dir
+//                                              (the .dmg on a Mac) agree
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -65,9 +66,11 @@ if (mode === "tag") {
   const conf = json("crates/app/tauri.conf.json").version;
   if (conf !== arg) fail(`tauri.conf.json is ${conf}, not ${arg}`);
   if (dir) {
-    const installers = readdirSync(dir).filter((f) => f.endsWith("-setup.exe"));
-    if (installers.length !== 1 || installers[0] !== `Bouncer_${arg}_x64-setup.exe`) {
-      fail(`installer in ${dir} is ${installers.join(", ") || "missing"}, not Bouncer_${arg}_x64-setup.exe`);
+    const mac = process.platform === "darwin";
+    const want = mac ? `Bouncer_${arg}_universal.dmg` : `Bouncer_${arg}_x64-setup.exe`;
+    const installers = readdirSync(dir).filter((f) => f.endsWith(mac ? ".dmg" : "-setup.exe"));
+    if (installers.length !== 1 || installers[0] !== want) {
+      fail(`installer in ${dir} is ${installers.join(", ") || "missing"}, not ${want}`);
     }
   }
   console.log(`version ${arg}: crates, package.json, tauri.conf.json${dir ? " and the installer" : ""} agree`);

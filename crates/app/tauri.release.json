@@ -1,6 +1,9 @@
 {
   "identifier": "io.github.charanp11.bouncer",
   "bundle": {
-    "externalBin": ["binaries/bouncer-hook", "binaries/bouncer"]
+    "externalBin": ["binaries/bouncer-hook", "binaries/bouncer"],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

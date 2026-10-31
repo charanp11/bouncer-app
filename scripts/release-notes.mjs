@@ -1,6 +1,6 @@
 // The draft release's notes, from the release workflow (PLAN, roadmap c-7).
 //
-//   node scripts/release-notes.mjs v0.7.0 out/SHA256SUMS.txt owner/repo > notes.md
+//   node scripts/release-notes.mjs v0.7.0 out/SHA256SUMS.txt owner/repo [--windows-only] > notes.md
 //
 // How to check the download, then: the first release (no earlier vX.Y.Z tag
 // from 0.7.0 on; the old v0.5.x / v0.6.x tags don't count) gets "First public
@@ -9,7 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-const [tag, sums, repo] = process.argv.slice(2);
+const [tag, sums, repo, only] = process.argv.slice(2);
 const version = /^v(\d+\.\d+\.\d+)$/.exec(tag ?? "")?.[1];
 if (!version || !sums || !repo) {
   console.error("usage: release-notes.mjs vX.Y.Z SHA256SUMS.txt owner/repo");
@@ -28,6 +28,19 @@ const release = (t) => {
 const previous = git("tag", "--merged", `${tag}^`, "--sort=-version:refname", "--list", "v*.*.*").split("\n").find(release);
 
 const exe = `Bouncer_${version}_x64-setup.exe`;
+const dmg = `Bouncer_${version}_universal.dmg`;
+const mac =
+  only === "--windows-only"
+    ? ["**Windows only.** This release has no Mac build; Macs stay on the version they have.", ""]
+    : [
+        "**On a Mac** (Apple Silicon or Intel): not signed by Apple, an ad-hoc signature only.",
+        "",
+        `\`shasum -a 256 ${dmg}\` must show the same SHA-256, and \`gh attestation verify ${dmg} --repo ${repo}\` works there too.`,
+        "",
+        // Roadmap g: this line goes when the steps have been tested on a real Mac.
+        "**NOT TESTED YET: don't publish with this line. The Mac first-open steps go here.**",
+        "",
+      ];
 const notes = [
   `Bouncer ${version} for Windows (64-bit): a per-user install, no admin needed.`,
   "",
@@ -39,6 +52,7 @@ const notes = [
   "",
   `In PowerShell: \`Get-FileHash .\\${exe}\` must show the same SHA-256. With the GitHub CLI: \`gh attestation verify ${exe} --repo ${repo}\` proves it was built by this workflow from this tag.`,
   "",
+  ...mac,
   "Install, update and uninstall steps, and what Bouncer can't do: see the README.",
   "",
 ];
