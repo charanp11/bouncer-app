@@ -262,7 +262,9 @@ test("the Mac build: universal, ad-hoc signed, and an update archive the plugin 
   assert.match(read("crates/app/Info.plist"), /<key>LSUIElement<\/key>\s*<true\/>/);
   for (const f of ["release.yml", "installer.yml"]) assert.match(read(`.github/workflows/${f}`), /check-mac-bundle\.sh/, f);
   assert.match(read(".github/workflows/installer.yml"), /installer-test-mac\.sh/);
-  assert.match(read("scripts/installer-test-mac.sh"), /\$4 >= 200 .*\n.*no card on screen/, "a card on screen, not just a waiting relay");
+  const test = read("scripts/installer-test-mac.sh");
+  assert.match(test, /\$4 >= 200 .*\n.*no card on screen/, "a card on screen, not just a waiting relay");
+  assert.match(test, /hooks were installed from the open \.dmg/, "the open .dmg refuses, on the real mount");
 });
 
 test("cold start: its own workflow, nothing warmed, and no release or required check waits for it", () => {

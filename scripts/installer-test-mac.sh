@@ -4,8 +4,8 @@
 #
 #   installer-test-mac.sh <Bouncer_X_universal.dmg> <fixtures dir>
 #
-# Mount, copy to /Applications, hooks with the installed CLI in a scratch
-# folder, then for each architecture the installed app takes a request through
+# Mount, the open .dmg's refusal to install hooks, copy to /Applications,
+# hooks with the installed CLI in a scratch folder, then for each architecture the installed app takes a request through
 # the installed hook, its card reaches the screen and the hook prints nothing
 # once the app quits; uninstall-hooks puts settings.json back byte for byte. Clicks stay out: a runner has no
 # Accessibility permission (the hand list covers them).
@@ -17,7 +17,7 @@ app=/Applications/Bouncer.app
 bin="$app/Contents/MacOS"
 sock="$HOME/Library/Application Support/Bouncer/bouncer.sock"
 work=$(mktemp -d)
-mount="$work/mount"
+mount=/Volumes/Bouncer
 export CLAUDE_CONFIG_DIR="$work/claude"
 settings="$CLAUDE_CONFIG_DIR/settings.json"
 
@@ -27,18 +27,25 @@ pass() {
 }
 fail() { echo "::error::$1"; exit 1; }
 
-# 1. Mount and copy, as a person would.
+mkdir -p "$CLAUDE_CONFIG_DIR"
+printf '{\n  "model": "opus"\n}\n' > "$settings"
+cp "$settings" "$work/original.json"
+
+# 1. Mount and copy, as a person would. Hooks from the open .dmg are refused.
 hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
 [ -L "$mount/Applications" ] || fail "the .dmg has no Applications link"
+if said=$(echo y | "$mount/Bouncer.app/Contents/MacOS/bouncer" install-hooks 2>&1); then
+  fail "hooks were installed from the open .dmg: $said"
+fi
+grep -q 'Move Bouncer to Applications' <<< "$said" || fail "the refusal said: $said"
+cmp "$settings" "$work/original.json" || fail "the refusal changed settings.json"
+pass "Hooks from the .dmg" "refused, settings.json untouched"
 ditto "$mount/Bouncer.app" "$app"
 hdiutil detach "$mount" > /dev/null
 codesign --verify --deep --strict "$app" || fail "the installed app's signature doesn't verify"
 pass "Install" "copied from the .dmg, signature intact"
 
 # 2. Hooks with the installed CLI, in a scratch folder.
-mkdir -p "$CLAUDE_CONFIG_DIR"
-printf '{\n  "model": "opus"\n}\n' > "$settings"
-cp "$settings" "$work/original.json"
 echo y | "$bin/bouncer" install-hooks > /dev/null
 hook=$(jq -r '.hooks.PermissionRequest[].hooks[].command | select(endswith("bouncer-hook"))' "$settings")
 [ "$hook" = "$bin/bouncer-hook" ] || fail "the hook command is [$hook]"
@@ -101,6 +108,9 @@ use() {
 use native env
 softwareupdate --install-rosetta --agree-to-license > /dev/null 2>&1 || true
 use x86_64 arch -x86_64
+
+# What the README's uninstall steps name.
+pass "Data folders" "$(ls -d "$HOME"/Library/*/*ouncer* 2> /dev/null | tr '\n' ' ')"
 
 # 4. Hooks out again: the settings file as it was.
 echo y | "$bin/bouncer" uninstall-hooks > /dev/null
