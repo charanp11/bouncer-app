@@ -5608,9 +5608,66 @@ moved into `setup`), and a full hand check. Risk: the window's creation order
 is sensitive (the drop target only worked once the window was created
 visible, roadmap d), and macOS shares the path. It changes what Bouncer
 allows during startup, since rules begin earlier, so it's a safety design
-for Charan. Recommendation: worth doing only in the "nothing at once" form,
-and not urgent: no real-machine stall has been measured yet. `cold-start.yml`
-will show if it's needed, and on a real slow disk a hand check would too.
+for Charan.
+
+**Decision (Charan, 2026-10-31): not now.** Do it only in the "nothing at
+once" form, if `cold-start.yml`'s numbers or a user report show it's needed.
+
+## Roadmap g — Mac release (current)
+
+Audit, 2026-10-31. The Phase 9 checklist below is from 2026-10-03; this adds
+what was built since. No code yet. Apple's first-run and signing behaviour
+below comes from what's known of it, not a test here: step 3 proves it.
+
+**Already right on macOS:** hook commands (`sh` quoting, Copilot's `bash`
+field, `; exit 0`, Codex's `command`; `hooks.rs` picks per OS and tests both);
+the socket, private folders and files (CI and the smoke test); `claude` found
+outside a GUI app's short PATH, Mach-O accepted; `bundle.mjs` builds the host
+target; the smoke test runs the debug app with a real relay and socket.
+
+**Gaps found:**
+
+| Gap | Where | Fix | Safety? |
+| --- | --- | --- | --- |
+| No Mac build in a release | `release.yml`, `version.mjs check` (NSIS only) | A `build-mac` job: `.app`, `.dmg`, checksums; universal, so the relay and CLI need both targets joined | |
+| Updater can't reach a Mac | `latest-json.mjs` writes only `windows-x86_64`; `check-updater-target.mjs` requires it as the sole key | Add `darwin-aarch64` and `darwin-x86_64` (the `.app.tar.gz` and its signature); check all three against the pinned plugin | |
+| No signature on the bundle | no `bundle.macOS` in `tauri.conf.json` | Ad-hoc identity (`-`), so the sidecars are sealed; a linker-only signature can read as "damaged" on Apple Silicon | |
+| **Hooks written from a throwaway path** | `hooks::relay` uses the running program's folder. Started from the `.dmg`, or from Downloads (Gatekeeper's translocation), that path disappears | Refuse Install there and say "move Bouncer to Applications first" | **Yes:** changes what's written to an agent's settings |
+| No uninstaller | Windows' NSIS step runs `uninstall-hooks`; Trash runs nothing, leaving hooks that point at nothing. Copilot and Cursor stay safe (`; exit 0`); Claude Code and Codex would show a hook error | README steps with the `bouncer uninstall-hooks` path; a Settings "Remove hooks" row if the Trash case proves noisy | Removal only with the diff and a yes |
+| "Start with Windows" | `autostart.rs` is a stub on macOS, the row still shows | Hide the row for this release; a LaunchAgent is a later item | |
+| Wording | "Ctrl+Alt+B" in Settings (it's Control+Option+B); other Windows names | Per-OS text; keep the same keys | |
+| Unproven since Phase 9 was written | Ask's no-tools run; file drop with WKWebView; Explain and chat in a real login; question cards; CPU and memory on WKWebView; `set_focusable` toggling | Hand list (step 3) | |
+
+**What CI can prove, no Mac needed (step 1):** the universal build; `codesign
+--verify` and `hdiutil verify`; a Mac version of the installer test (mount,
+copy to `/Applications`, launch, hooks into a scratch folder, a card through
+the installed hook, Bouncer's own translocation refusal against a fake path);
+`latest.json`'s keys; a screenshot of the released app. Clicks on a runner are
+unlikely to work (macOS's Accessibility permission).
+
+**What only a real Mac can prove (step 3):** the first-run prompt, the update
+installing over itself, the look, keyboard focus, menu-bar placement, sounds,
+real sessions for each agent, VoiceOver, a second user refused.
+
+**Steps:** 1 the release job and checks in CI, no tag; 2 the code gaps above
+(own PR, with TESTS and BRIEF); 3 a tag, a draft, and the hand list on a real
+Mac; 4 the update to the next version on that Mac. Windows must stay as it is
+at every step: `release.yml`'s Windows job, keys and `latest.json` entry
+aren't weakened, and a failed Mac job... decided with Charan before step 1.
+
+**Threats:**
+
+| Threat | Fix |
+| --- | --- |
+| A Mac build breaks a Windows release | Mac jobs separate; decided how a failure counts before step 1 |
+| A hook path that later vanishes | Refusal above; `Moved` status already shows it |
+| A Mac update signed with the wrong key or unchecked | Same updater key and step rules as Windows: only the pinned CLI, only that step |
+| Ad-hoc signature read as trust | README says plainly it's unsigned, with checksums and attestations |
+
+**Done when:** a tag produces a Mac `.dmg` beside the Windows installer;
+`latest.json` serves both; Windows checks all still pass; the Phase 9 Mac
+list and this audit's hand list pass on a real Mac (TESTS M3); the update
+works there; README has Mac install, verify and uninstall steps.
 
 ## Phase 8 — Music (~1 week)
 
