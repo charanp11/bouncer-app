@@ -51,6 +51,7 @@ event() {
 
 cat > "$work/windows.swift" << 'SWIFT'
 import CoreGraphics
+import Foundation
 let pid = Int(CommandLine.arguments[1])!
 let all = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
 for window in all where window["kCGWindowOwnerPID"] as? Int == pid && window["kCGWindowLayer"] as? Int != 0 {
