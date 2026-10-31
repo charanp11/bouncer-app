@@ -122,7 +122,8 @@ fn clear_webview_args(release: bool) {
 
 fn main() {
     clear_webview_args(!cfg!(debug_assertions));
-    tauri::Builder::default()
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             subscribe,
             decide,
@@ -188,8 +189,6 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
             let desk = Arc::new(Desk::new(WAIT, rules::path(), move |view| {
                 show(&handle, view)
@@ -249,13 +248,17 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while running Bouncer")
-        .run(|app, event| {
-            // Quitting ends the chat: its whole process tree is killed.
-            if let tauri::RunEvent::Exit = event {
-                app.state::<chat::Chats>().end_all();
-            }
-        });
+        .expect("error while running Bouncer");
+    // Before the run: from `setup` it would land after the default policy,
+    // which puts back the Dock icon Info.plist turned off.
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    app.run(|app, event| {
+        // Quitting ends the chat: its whole process tree is killed.
+        if let tauri::RunEvent::Exit = event {
+            app.state::<chat::Chats>().end_all();
+        }
+    });
 }
 
 #[derive(Debug, PartialEq, Eq)]
