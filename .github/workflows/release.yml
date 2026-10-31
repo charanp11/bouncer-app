@@ -5,9 +5,19 @@ name: Release
 # never trigger it (they're not pushed again, and the version step refuses
 # anything older than 0.7.0). The version comes from the tag into Cargo,
 # package.json, tauri.conf.json and the installer, and every one is checked.
+# A Mac job failing means no draft at all (Charan, 2026-10-31). The one way
+# round it, only on his OK, is a run by hand on the tag that made no draft:
+#   gh workflow run release.yml --ref vX.Y.Z -f windows_only=true
+# It skips the Mac checks and build, and latest.json has no Mac keys.
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      windows_only:
+        description: "Windows only, no Mac build. Only with Charan's OK; run it on the tag."
+        type: boolean
+        default: false
 
 # Nothing by default; each job asks for what it needs. Only `release` writes.
 permissions: {}
@@ -31,19 +41,26 @@ jobs:
       - id: tag
         env:
           TAG: ${{ github.ref_name }}
-        run: echo "version=$(node scripts/version.mjs tag "$TAG")" >> "$GITHUB_OUTPUT"
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          test "$REF_TYPE" = tag
+          echo "version=$(node scripts/version.mjs tag "$TAG")" >> "$GITHUB_OUTPUT"
 
   checks:
     needs: version
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    with:
+      windows_only: ${{ inputs.windows_only == true }}
 
   installer-test:
     needs: version
     permissions:
       contents: read
     uses: ./.github/workflows/installer.yml
+    with:
+      windows_only: ${{ inputs.windows_only == true }}
 
   build:
     needs: [version, checks, installer-test]
@@ -110,8 +127,57 @@ jobs:
             target/release/bundle/nsis/SHA256SUMS.txt
           if-no-files-found: error
 
+  build-mac:
+    if: inputs.windows_only != true
+    needs: [version, checks, installer-test]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUNDLE: target/universal-apple-darwin/release/bundle
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # A clean build, as on Windows.
+      - run: rustup toolchain install stable --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin && rustup default stable
+      - run: npm ci
+      # No secrets here, as on Windows: an ad-hoc signature needs none.
+      - name: Build the Mac app
+        run: |
+          node scripts/version.mjs set "$VERSION"
+          node scripts/bundle.mjs --universal
+          node scripts/version.mjs check "$VERSION" "$BUNDLE/dmg"
+          bash scripts/check-mac-bundle.sh "$BUNDLE" "$VERSION"
+      - name: Sign the Mac update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node node_modules/@tauri-apps/cli/tauri.js signer sign "$BUNDLE/macos/Bouncer_${VERSION}_universal.app.tar.gz"
+      - name: Mac checksums
+        run: |
+          test -s "$BUNDLE/macos/Bouncer_${VERSION}_universal.app.tar.gz.sig"
+          mkdir mac
+          cp "$BUNDLE/dmg/Bouncer_${VERSION}_universal.dmg" "$BUNDLE/macos/Bouncer_${VERSION}_universal.app.tar.gz"* mac/
+          cd mac
+          shasum -a 256 "Bouncer_${VERSION}_universal.dmg" "Bouncer_${VERSION}_universal.app.tar.gz" > SHA256SUMS-mac.txt
+          cat SHA256SUMS-mac.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-mac
+          path: mac/
+          if-no-files-found: error
+
   release:
-    needs: [version, build]
+    needs: [version, build, build-mac]
+    # build-mac is skipped only by windows_only; on a tag, its failure stops
+    # this job, so there is no draft and no half-filled latest.json.
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-mac.result == 'success' || (inputs.windows_only == true && needs.build-mac.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The only job that writes: the draft release and its attestation.
@@ -122,6 +188,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ github.ref_name }}
+      ONLY: ${{ inputs.windows_only == true && '--windows-only' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,29 +198,49 @@ jobs:
         with:
           name: release
           path: out
+      - if: inputs.windows_only != true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-mac
+          path: out
       - name: Checksums still match
         working-directory: out
-        run: sha256sum --check SHA256SUMS.txt
+        run: |
+          if [ -f SHA256SUMS-mac.txt ]; then
+            cat SHA256SUMS-mac.txt >> SHA256SUMS.txt
+            rm SHA256SUMS-mac.txt
+          fi
+          sha256sum --check SHA256SUMS.txt
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: out/Bouncer_${{ env.VERSION }}_x64-setup.exe
+      - if: inputs.windows_only != true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            out/Bouncer_${{ env.VERSION }}_universal.dmg
+            out/Bouncer_${{ env.VERSION }}_universal.app.tar.gz
       # The first release lists what Bouncer does; later ones, the commits
       # since the previous release tag (scripts/release-notes.mjs).
       - name: Release notes
         run: |
-          node scripts/release-notes.mjs "$TAG" out/SHA256SUMS.txt "$GITHUB_REPOSITORY" > notes.md
+          node scripts/release-notes.mjs "$TAG" out/SHA256SUMS.txt "$GITHUB_REPOSITORY" $ONLY > notes.md
           cat notes.md
       # What installed copies read once it's published (never as a draft).
       - name: Updater file
         run: |
-          node scripts/latest-json.mjs "$VERSION" "$GITHUB_REPOSITORY" "out/Bouncer_${VERSION}_x64-setup.exe.sig" > out/latest.json
+          mac="out/Bouncer_${VERSION}_universal.app.tar.gz.sig"
+          if [ -n "$ONLY" ]; then mac=""; fi
+          node scripts/latest-json.mjs "$VERSION" "$GITHUB_REPOSITORY" "out/Bouncer_${VERSION}_x64-setup.exe.sig" $mac > out/latest.json
           cat out/latest.json
-          node scripts/check-updater-target.mjs out/latest.json
+          node scripts/check-updater-target.mjs out/latest.json $ONLY
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$TAG" --draft --verify-tag
-          --title "Bouncer $VERSION"
-          --notes-file notes.md
-          "out/Bouncer_${VERSION}_x64-setup.exe" out/SHA256SUMS.txt out/latest.json
+        run: |
+          mac=("out/Bouncer_${VERSION}_universal.dmg" "out/Bouncer_${VERSION}_universal.app.tar.gz")
+          if [ -n "$ONLY" ]; then mac=(); fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "Bouncer $VERSION" \
+            --notes-file notes.md \
+            "out/Bouncer_${VERSION}_x64-setup.exe" "${mac[@]}" out/SHA256SUMS.txt out/latest.json
