@@ -25,3 +25,9 @@ test("settings: every hint wraps and is never cut, as the prototype", () => {
   // The hint goes in whole, as text.
   assert.match(main, /if \(hint\) row\.append\(el\("div", "hint", hint\)\);/);
 });
+
+test("the shortcut goes by each system's names for the same keys", () => {
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  assert.match(main, /const SHORTCUT = navigator\.platform\.startsWith\("Mac"\) \? "Control\+Option\+B" : "Ctrl\+Alt\+B";/);
+  assert.equal(main.match(/Ctrl\+Alt\+B/g)?.length, 1, "only that line names the keys");
+});

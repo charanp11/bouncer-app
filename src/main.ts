@@ -2337,10 +2337,13 @@ function attachBox(name: string, label: string, removeLabel: string, preview: st
   return box;
 }
 
-/** Settings' shortcut switch. Ctrl+Alt+B only opens the island (the
- * keyboard on Deny if a card is up); it never approves. */
+/** The same keys, by the names each system gives them. */
+const SHORTCUT = navigator.platform.startsWith("Mac") ? "Control+Option+B" : "Ctrl+Alt+B";
+
+/** Settings' shortcut switch. It only opens the island (the keyboard on Deny
+ * if a card is up); it never approves. */
 function shortcutRow(on: boolean, taken: boolean): HTMLElement {
-  const sw = toggle("Shortcut Ctrl+Alt+B", on, () => {
+  const sw = toggle(`Shortcut ${SHORTCUT}`, on, () => {
     sw.disabled = true;
     invoke("set_shortcut", { on: !on })
       .catch(() => {})
@@ -2351,8 +2354,8 @@ function shortcutRow(on: boolean, taken: boolean): HTMLElement {
       });
   });
   sw.dataset.key = "shortcut";
-  const hint = on && taken ? "Another app has Ctrl+Alt+B, so it does nothing here." : "Opens Bouncer from anywhere. It never approves.";
-  return setRow("Shortcut Ctrl+Alt+B", [el("span", "", on ? "On" : "Off"), sw], hint);
+  const hint = on && taken ? `Another app has ${SHORTCUT}, so it does nothing here.` : "Opens Bouncer from anywhere. It never approves.";
+  return setRow(`Shortcut ${SHORTCUT}`, [el("span", "", on ? "On" : "Off"), sw], hint);
 }
 
 /** Settings' "Check for updates": on by default; off means no check at all
