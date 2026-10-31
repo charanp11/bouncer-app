@@ -180,7 +180,15 @@ try {
     Check ($hook -eq (Join-Path $dir "bouncer-hook.exe")) "Hooks via bouncer.exe" "command $hook"
     $hooked = (Get-FileHash $settings).Hash
 
-    # 3. A card through the installed hook.
+    # 3. A card through the installed hook. A runner can take over a minute on
+    # its first read of the WebView2 runtime, and the pipe opens only after
+    # WebView2 is up: read it now so the limit below measures Bouncer
+    # (PLAN, "The installer test's pipe failure"; cold-start.yml keeps the cold number).
+    $warm = Measure-Command {
+        Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application" -Recurse -File |
+            ForEach-Object { [void][System.IO.File]::ReadAllBytes($_.FullName) }
+    }
+    Pass "WebView2 runtime read" ("{0:n1} s" -f $warm.TotalSeconds)
     $app = Start-App
     $relay = Start-Process cmd -ArgumentList "/c `"`"$hook`" < `"$Fixtures\claude-code-2.1.143-PermissionRequest-Bash.json`"`"" -PassThru -WindowStyle Hidden
     Start-Sleep 10
