@@ -199,6 +199,10 @@ In the order they appear:
   `SHA256SUMS.txt`, adds a build attestation, writes `latest.json` and makes
   a **draft** release. Charan reviews and presses Publish. Old `v0.5.x` /
   `v0.6.x` tags were internal and never trigger it.
+- **Cold start.** The installer test reads the WebView2 runtime first, so a
+  slow runner can't stop a release. A separate Cold start run on every tag
+  times a first launch with nothing warmed: over 30 s warns, over 120 s
+  fails, and no release waits for it. Look there for the cold number.
 - **The updater.** Once a day (first a minute after start) Bouncer reads the
   latest release's `latest.json`. If it's newer, the island shows "Bouncer
   X.Y.Z is ready" with **Update**; it installs only on your click, never
@@ -262,9 +266,9 @@ In the order they appear:
 - `design/prototype/bouncer-island.html`: the visual source of truth.
 - `scripts/`: `check-tests.mjs` (the regression gate), release helpers
   (`version.mjs`, `release-notes.mjs`, `latest-json.mjs`, `bundle.mjs`),
-  `installer-test.ps1`.
+  `installer-test.ps1`, `cold-start.ps1`.
 - `.github/workflows/`: `ci.yml` (Windows + macOS checks, cargo deny,
-  npm audit, gitleaks), `installer.yml` (install / upgrade / uninstall on a
+  npm audit, gitleaks), `cold-start.yml` (a first launch, never blocks), `installer.yml` (install / upgrade / uninstall on a
   clean runner), `macos-smoke.yml`, `release.yml`, `advisories.yml`.
 - `docs/`: this brief, `PLAN.md`, `TESTS.md`, `COMPARE.md` (vs Coucou),
   `releases/` (each release's notes).
