@@ -22,7 +22,9 @@ for name in bouncer-app bouncer-hook bouncer; do
 done
 
 codesign --verify --deep --strict "$app" || fail "the app's signature doesn't verify"
-codesign --display --verbose=2 "$app" 2>&1 | grep -q '^Signature=adhoc' || fail "the app isn't ad-hoc signed"
+# Held in a variable: grep -q stopping early would fail a pipe under pipefail.
+signature=$(codesign --display --verbose=2 "$app" 2>&1)
+grep -q '^Signature=adhoc' <<< "$signature" || fail "the app isn't ad-hoc signed"
 
 hdiutil verify "$bundle/dmg/Bouncer_${version}_universal.dmg" || fail "the .dmg doesn't verify"
 
