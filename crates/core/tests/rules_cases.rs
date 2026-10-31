@@ -3,6 +3,7 @@
 //! panics and never auto-allows a shell metacharacter.
 
 use std::path::{MAIN_SEPARATOR as MAIN_SEP, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bouncer_core::check::{self, *};
@@ -29,11 +30,15 @@ struct Setup {
 }
 
 fn setup() -> Setup {
+    // A clock alone isn't unique: macOS ticks in microseconds, and a test
+    // sharing this folder deletes it when it ends.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let base = std::env::temp_dir().join(format!("bouncer-cases-{nanos}"));
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let base = std::env::temp_dir().join(format!("bouncer-cases-{nanos}-{n}"));
     let project = base.join("proj");
     let home = base.join("home");
     let bouncer = base.join("Bouncer");
