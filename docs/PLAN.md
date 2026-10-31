@@ -5653,7 +5653,22 @@ real sessions for each agent, VoiceOver, a second user refused.
 (own PR, with TESTS and BRIEF); 3 a tag, a draft, and the hand list on a real
 Mac; 4 the update to the next version on that Mac. Windows must stay as it is
 at every step: `release.yml`'s Windows job, keys and `latest.json` entry
-aren't weakened, and a failed Mac job... decided with Charan before step 1.
+aren't weakened.
+
+**Decisions (Charan, 2026-10-31):**
+- **Real Mac:** a friend's Mac, for step 3 onwards. It needs Claude Code logged
+  in and a second macOS user for one check. Steps must work for someone who
+  has never seen Bouncer (rule 6b).
+- **Signing:** unsigned, $0: an ad-hoc signature and Open Anyway, said plainly
+  in the README with checksums and attestations. No Apple Developer account.
+- **Hook path:** Install hooks is refused from a `.dmg` or a translocated
+  path, nothing is written, and the row says to move Bouncer to Applications.
+- **Mac build fails on a tag:** no draft at all. A release always has both
+  platforms and `latest.json` is never half-filled. This applies from the
+  first release with Mac in it; a Mac problem can hold up a Windows fix.
+
+Decided here, not asked: universal (Apple Silicon and Intel), as Phase 9
+says; the friend's Mac proves one architecture, so the release notes say which.
 
 **Threats:**
 
