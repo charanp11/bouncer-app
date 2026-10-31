@@ -5841,6 +5841,8 @@ Mac checks for Phase 9 (a person on a real Mac):
 - [ ] Island sits under the menu bar, can be dragged, comes back if dropped off screen, crosses monitors
 - [ ] Real Claude Code session: hooks installed with `bouncer install-hooks`, a Bash request allowed and one denied from the island, an unanswered one falls back to the terminal
 - [ ] Unsigned `.dmg` opens after "Open Anyway"; uninstall removes only our hook entries
+- [ ] Bouncer in the Trash with hooks left in: Claude Code and Codex show a hook error and carry on asking (the README says so; only audited)
+- [ ] A real translocated run (quarantined, opened from Downloads): Install hooks is refused
 
 ---
 

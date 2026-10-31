@@ -131,9 +131,11 @@ There's no uninstaller, so take the hooks out first: in Bouncer's Settings,
 press **Remove…** on each hooks row, read the changes, then **Write changes**.
 Then quit Bouncer and move it to the Trash.
 
-If you've already deleted it, the hooks are still there: Claude Code and Codex
-show a hook error on each event and carry on, asking in their own prompt.
-Reinstall Bouncer and remove them, or take out the entries that name
+If you've already deleted it, the hooks are still in `~/.claude/settings.json`,
+`~/.codex/hooks.json`, `~/.copilot/hooks/bouncer.json` and
+`~/.cursor/hooks.json`. Claude Code and Codex should show a hook error on each
+event and carry on, asking in their own prompt; kept Copilot or Cursor hooks do
+no harm. Reinstall Bouncer and remove them, or take out the entries that name
 `bouncer-hook` by hand.
 
 Your rules, settings and history stay in
