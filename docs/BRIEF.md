@@ -206,8 +206,8 @@ In the order they appear:
   The one way round is a Windows-only run started by hand on that tag, and
   only with Charan's OK: macOS copies then stay on their version.
 - **Hooks on a Mac** are refused from a path that goes away (an open `.dmg`,
-  an external drive, Gatekeeper's temporary folder): Bouncer says to move it
-  to Applications and writes nothing. There's no uninstaller: remove the
+  an external drive, Gatekeeper's temporary folder): Bouncer says "Move
+  Bouncer to Applications, then try again." and writes nothing. There's no uninstaller: remove the
   hooks in Settings, then move the app to the Trash.
 - **Cold start.** The installer test reads the WebView2 runtime first, so a
   slow runner can't stop a release. A separate Cold start run on every tag
