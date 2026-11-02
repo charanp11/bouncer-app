@@ -5678,7 +5678,21 @@ aren't weakened.
   account and signs out after. The second macOS user only with the friend's
   OK, deleted at the end. He gets one complete checklist in advance (rule 6b):
   what to install, every check, cleanup, including Bouncer's hook entries and
-  app data on that Mac.
+  app data on that Mac. It's `docs/mac-checklist.md`.
+- **The visit (Charan, 2026-11-02):** everything happens in a temporary macOS
+  user, `bouncertest`, deleted at the end. No GitHub sign-in on the friend's
+  Mac: the test build is a public pre-release, downloaded in Safari (a USB
+  copy wouldn't be quarantined, so no Open Anyway prompt). Part H, the update,
+  runs the same day and only if every step of A to G passed; if anything
+  fails, publish nothing.
+- **Pre-releases and the updater:** GitHub's REST docs define "latest" as the
+  most recent non-prerelease, non-draft release; they don't say how
+  `/releases/latest/download/` treats pre-releases, and that URL is the only
+  guard (the plugin has no such notion). So the checklist checks it live right
+  after the pre-release, with the way back to a draft beside it.
+- **The patch needs a PR:** the "NOT TESTED YET" line comes from
+  `release-notes.mjs`, so it must be replaced in a merged PR before the patch
+  tag, or the patch's draft carries it again.
 
 Decided here, not asked: universal (Apple Silicon and Intel), as Phase 9
 says; the friend's Mac proves one architecture, so the release notes say which.
