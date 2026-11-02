@@ -37,7 +37,7 @@ hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
 if said=$(echo y | "$mount/Bouncer.app/Contents/MacOS/bouncer" install-hooks 2>&1); then
   fail "hooks were installed from the open .dmg: $said"
 fi
-grep -q 'Move Bouncer to Applications' <<< "$said" || fail "the refusal said: $said"
+grep -qF 'Move Bouncer to Applications, then try again.' <<< "$said" || fail "the refusal said: $said"
 cmp "$settings" "$work/original.json" || fail "the refusal changed settings.json"
 pass "Hooks from the .dmg" "refused, settings.json untouched"
 ditto "$mount/Bouncer.app" "$app"
