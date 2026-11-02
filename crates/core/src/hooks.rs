@@ -692,8 +692,8 @@ pub fn relay_beside_me() -> Result<PathBuf, String> {
 }
 
 /// Why Install refuses a copy of Bouncer that won't stay where it is.
-pub const MOVE_FIRST: &str = "Move Bouncer to Applications, open it from there, then install the \
-     hooks: this copy's folder goes away, and the hooks would point at nothing. Nothing was written.";
+pub const MOVE_FIRST: &str = "Move Bouncer to Applications, then try again. This copy's folder \
+     goes away, so the hooks would point at nothing. Nothing was written.";
 
 /// The relay to write into an agent's settings: the one beside this program,
 /// refused on a Mac if its path won't last (PLAN, "Roadmap g").
@@ -816,6 +816,7 @@ fn stamp(time: SystemTime) -> String {
 mod tests {
     #[test]
     fn a_path_that_goes_away_is_refused_a_lasting_one_is_not() {
+        assert!(super::MOVE_FIRST.starts_with("Move Bouncer to Applications, then try again."));
         for gone in [
             "/Volumes/Bouncer/Bouncer.app/Contents/MacOS/bouncer-hook",
             "/Volumes/Bouncer 1/Bouncer.app/Contents/MacOS/bouncer-hook",
