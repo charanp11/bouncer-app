@@ -140,7 +140,9 @@ no harm. Reinstall Bouncer and remove them, or take out the entries that name
 
 Your rules, settings and history stay in
 `~/Library/Application Support/Bouncer`. Delete that folder too if you don't
-want them.
+want them. Bouncer's window data is in
+`~/Library/WebKit/io.github.charanp11.bouncer` and
+`~/Library/Caches/io.github.charanp11.bouncer`, which you can delete as well.
 
 ## Where it works
 

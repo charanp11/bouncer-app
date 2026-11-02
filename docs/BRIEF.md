@@ -281,7 +281,8 @@ In the order they appear:
   npm audit, gitleaks), `cold-start.yml` (a first launch, never blocks), `installer.yml` (install / upgrade / uninstall on a
   clean runner), `macos-smoke.yml`, `release.yml`, `advisories.yml`.
 - `docs/`: this brief, `PLAN.md`, `TESTS.md`, `COMPARE.md` (vs Coucou),
-  `releases/` (each release's notes).
+  `releases/` (each release's notes), `mac-checklist.md` (the friend's-Mac
+  visit).
 
 ## 8. Version history
 
