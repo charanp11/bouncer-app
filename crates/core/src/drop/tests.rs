@@ -859,6 +859,7 @@ fn real_files_are_read_or_refused_with_a_reason() {
     assert_eq!(check(&dir.join("missing.txt")), Err(UNREADABLE));
     assert_eq!(check(Path::new(r"\\server\share\x.exe")), Err(NETWORK));
     assert_eq!(check(Path::new(r"\\.\pipe\x")), Err(NETWORK));
+    assert_eq!(check(Path::new("//server/share/x.exe")), Err(NETWORK));
     // A link, if this machine lets us make one.
     #[cfg(unix)]
     let made = std::os::unix::fs::symlink(&file, dir.join("link.ps1")).is_ok();

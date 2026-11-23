@@ -217,15 +217,16 @@ pub fn check(path: &Path) -> Result<Report, &'static str> {
 /// A network path, a device path, or a mapped network drive.
 fn remote(path: &Path) -> bool {
     let text = path.as_os_str().to_string_lossy();
-    if text.starts_with(r"\\") || text.starts_with("//") {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        win::network_drive(&text)
-    }
-    #[cfg(not(windows))]
-    false
+    // Asked only when the path isn't already a network path, as before.
+    let network_drive = || {
+        #[cfg(windows)]
+        {
+            win::network_drive(&text)
+        }
+        #[cfg(not(windows))]
+        false
+    };
+    text.starts_with(r"\\") || text.starts_with("//") || network_drive()
 }
 
 /// Refuses folders, links (and every other reparse point), online-only
