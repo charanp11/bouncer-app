@@ -5768,6 +5768,25 @@ one. Reasoned from the code, not reproduced. It failed safe (no allow).
 list and this audit's hand list pass on a real Mac (TESTS M3); the update
 works there; README has Mac install, verify and uninstall steps.
 
+### Weekly advisories and a new clippy lint (2026-11-23)
+
+The weekly advisories run failed on two advisories, both reached only through
+Tauri's crates:
+- RUSTSEC-2026-0594: cookie 0.18.2's private-cookie nonces can repeat after a
+  fork. Bouncer doesn't use private cookies and never forks.
+- RUSTSEC-2026-0592: url 2.5.8's `Url::origin()` overflows the stack on deeply
+  nested `blob:` URLs. Bouncer never calls `origin()`, and only our own page
+  navigates.
+
+Neither was reachable as Bouncer is used. Both are fixed with `cargo update -p
+cookie -p url` (cookie 0.18.3, url 2.5.9, form_urlencoded 1.2.3): a lockfile
+bump, no new crate.
+
+Separately, Rust 1.100's clippy flags `needless_bool` in `drop::remote`. It
+failed every PR's `check` job from 2026-11-13, Dependabot's included.
+`remote` is rewritten with the same behaviour: the network-drive lookup is
+still only made when the path isn't already a `\\` or `//` path.
+
 ## Phase 8 — Music (~1 week)
 
 Roadmap e: within the motion and CPU budget.
