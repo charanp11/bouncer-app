@@ -33,14 +33,16 @@ const EXE: &str = "claude";
 fn fake() -> Binary {
     static FAKE: OnceLock<Binary> = OnceLock::new();
     FAKE.get_or_init(|| {
-        let examples = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("examples");
-        let built = examples.join(format!("fake_claude{}", std::env::consts::EXE_SUFFIX));
+        // `examples/` beside the nearest folder above this test that has
+        // one: `target/debug/examples` with Cargo's old layout and its
+        // newer one, where tests sit deeper under `target/debug/build`.
+        let name = format!("fake_claude{}", std::env::consts::EXE_SUFFIX);
+        let exe = std::env::current_exe().unwrap();
+        let built = exe
+            .ancestors()
+            .map(|dir| dir.join("examples").join(&name))
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| exe.join("../../examples").join(&name));
         let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
         // Only this run's own folder (left by an earlier run with the same pid).
         let dir = tmp.join(format!("fake-claude-{}", std::process::id()));
