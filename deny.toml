@@ -8,6 +8,9 @@ targets = [
 
 [advisories]
 yanked = "deny"
+# cargo-deny-action 2.1.2 checks only our own crates by default; every
+# crate we ship stays checked, as before.
+unmaintained = "all"
 
 [licenses]
 # MPL-2.0 is file-level copyleft (servo's cssparser/selectors via tauri-utils);
