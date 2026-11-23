@@ -8,7 +8,7 @@ targets = [
 
 [advisories]
 yanked = "deny"
-# cargo-deny-action 2.1.2 checks only our own crates by default; every
+# cargo-deny-action 2.1.3 (cargo-deny 0.22) checks only our own crates by default; every
 # crate we ship stays checked, as before.
 unmaintained = "all"
 
